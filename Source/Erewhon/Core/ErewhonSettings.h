@@ -1,0 +1,113 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/DeveloperSettings.h"
+#include "ErewhonSettings.generated.h"
+
+/**
+ * Toutes les constantes de jeu vivent ici (équivalent de la classe Config de 3DSimEco).
+ * Éditables dans Project Settings > Game > Erewhon, persistées dans Config/DefaultGame.ini.
+ * Les distances sont en mètres : la conversion en unités Unreal (cm) se fait via les accesseurs.
+ */
+UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Erewhon"))
+class EREWHON_API UErewhonSettings : public UDeveloperSettings
+{
+	GENERATED_BODY()
+
+public:
+	static const UErewhonSettings& Get() { return *GetDefault<UErewhonSettings>(); }
+
+	virtual FName GetCategoryName() const override { return TEXT("Game"); }
+
+	// ── Monde ────────────────────────────────────────────────────────────────
+
+	/** Côté d'un secteur carré (m). */
+	UPROPERTY(Config, EditAnywhere, Category = "World", meta = (ClampMin = 10))
+	float SectorSizeMeters = 100.f;
+
+	/** Nombre de secteurs chargés autour du joueur (2 → 5×5 secteurs). */
+	UPROPERTY(Config, EditAnywhere, Category = "World", meta = (ClampMin = 0, ClampMax = 6))
+	int32 SectorRenderDistance = 2;
+
+	/** Nom de la sauvegarde du monde côté serveur. */
+	UPROPERTY(Config, EditAnywhere, Category = "World")
+	FString WorldSaveSlot = TEXT("World_default");
+
+	/** Intervalle entre deux sauvegardes automatiques (s). */
+	UPROPERTY(Config, EditAnywhere, Category = "World", meta = (ClampMin = 10))
+	float AutosaveIntervalSeconds = 120.f;
+
+	// ── Ciel ─────────────────────────────────────────────────────────────────
+
+	/** Durée d'une rotation complète du Soleil (s). */
+	UPROPERTY(Config, EditAnywhere, Category = "Sky", meta = (ClampMin = 10))
+	float SunPeriodSeconds = 1200.f;
+
+	/** Durée d'une rotation complète d'Usha (s). */
+	UPROPERTY(Config, EditAnywhere, Category = "Sky", meta = (ClampMin = 10))
+	float UshaPeriodSeconds = 3000.f;
+
+	/** Période d'oscillation de la couverture nuageuse (s). */
+	UPROPERTY(Config, EditAnywhere, Category = "Sky", meta = (ClampMin = 10))
+	float CloudCoveragePeriodSeconds = 1200.f;
+
+	// ── Récolte ──────────────────────────────────────────────────────────────
+
+	/** Délai de repousse d'une plante récoltée (s). */
+	UPROPERTY(Config, EditAnywhere, Category = "Harvest", meta = (ClampMin = 1))
+	float RegrowSeconds = 300.f;
+
+	/** Distance maximale de ciblage d'une plante (m). */
+	UPROPERTY(Config, EditAnywhere, Category = "Harvest", meta = (ClampMin = 1))
+	float HarvestReachMeters = 5.f;
+
+	/** Ouverture du cône de ciblage de la cerpe (degrés, angle total). */
+	UPROPERTY(Config, EditAnywhere, Category = "Harvest", meta = (ClampMin = 1, ClampMax = 180))
+	float SickleConeDegrees = 75.f;
+
+	// ── Économie ─────────────────────────────────────────────────────────────
+
+	UPROPERTY(Config, EditAnywhere, Category = "Economy")
+	int32 StartingCoins = 100;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Economy")
+	int32 SectorBuyPrice = 100;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Economy")
+	int32 SectorSellPrice = 50;
+
+	/** Les outils et vêtements sont repris à cette fraction du prix neuf. */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0, ClampMax = 1))
+	float ResaleRatio = 0.5f;
+
+	/** Rayon (en secteurs, autour du spawn) des secteurs proposés à l'achat. */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 1))
+	int32 StoreSectorRadius = 4;
+
+	/** Distance maximale pour dialoguer avec le marchand (m). */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 1))
+	float MerchantReachMeters = 5.f;
+
+	// ── Inventaire ───────────────────────────────────────────────────────────
+
+	UPROPERTY(Config, EditAnywhere, Category = "Inventory", meta = (ClampMin = 1))
+	int32 BaseInventorySlots = 9;
+
+	/** Slots d'équipement de base — le premier est « Mains ». */
+	UPROPERTY(Config, EditAnywhere, Category = "Inventory", meta = (ClampMin = 1))
+	int32 BaseEquipmentSlots = 1;
+
+	// ── Joueur ───────────────────────────────────────────────────────────────
+
+	UPROPERTY(Config, EditAnywhere, Category = "Player")
+	float WalkSpeedMetersPerSecond = 4.f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Player")
+	float RunSpeedMetersPerSecond = 7.f;
+
+	// ── Accesseurs en unités Unreal (cm) ─────────────────────────────────────
+
+	float SectorSize() const { return SectorSizeMeters * 100.f; }
+	float HarvestReach() const { return HarvestReachMeters * 100.f; }
+	float MerchantReach() const { return MerchantReachMeters * 100.f; }
+};

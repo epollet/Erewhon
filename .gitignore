@@ -33,3 +33,7 @@ Plugins/**/Intermediate/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Secrets
+.env
+.env.*

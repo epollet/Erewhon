@@ -1,0 +1,82 @@
+{
+  "_doc": "Catalogue des objets. Couleurs en sRGB 0-255. L'ordre des plantes fixe l'ordre de génération : ajouter une plante à la fin pour ne pas déplacer les autres. 'mesh' et 'icon' recevront les chemins des assets générés (ex. /Game/Generated/Items/SM_Cerpe.SM_Cerpe).",
+  "items": [
+    {
+      "id": "grass", "name": "Herbe", "category": "plant",
+      "description": "Brin d'herbe des prairies.",
+      "sell_price": 1, "max_stack": 10, "color": [70, 170, 55],
+      "plant": { "shape": "grass", "height_min": 0.4, "height_max": 1.2, "cull_distance": 60, "seed_salt": 0,
+                 "count": { "prairie": 6000, "spawn": 3000 } }
+    },
+    {
+      "id": "flower_white", "name": "Fleur blanche", "category": "plant",
+      "description": "Fleur délicate aux pétales nacrés.",
+      "sell_price": 3, "max_stack": 10, "color": [242, 242, 235],
+      "plant": { "shape": "flower", "height_min": 0.22, "height_max": 0.44, "accent_color": [250, 217, 31], "seed_salt": 10,
+                 "count": { "prairie": 120, "spawn": 60 } }
+    },
+    {
+      "id": "flower_blue", "name": "Fleur bleue", "category": "plant",
+      "description": "Petite fleur bleue des prairies.",
+      "sell_price": 3, "max_stack": 10, "color": [72, 133, 235],
+      "plant": { "shape": "flower", "height_min": 0.22, "height_max": 0.44, "accent_color": [250, 230, 46], "seed_salt": 11,
+                 "count": { "prairie": 80, "spawn": 40 } }
+    },
+    {
+      "id": "flower_purple", "name": "Fleur violette", "category": "plant",
+      "description": "Fleur rare aux teintes violacées.",
+      "sell_price": 3, "max_stack": 10, "color": [158, 56, 199],
+      "plant": { "shape": "flower", "height_min": 0.22, "height_max": 0.44, "accent_color": [250, 217, 31], "seed_salt": 12,
+                 "count": { "prairie": 40, "spawn": 20 } }
+    },
+    {
+      "id": "herb", "name": "Herbe aromatique", "category": "plant",
+      "description": "Herbe odorante aux vertus médicinales.",
+      "sell_price": 1, "max_stack": 30, "color": [60, 155, 40],
+      "plant": { "shape": "herb", "height_min": 0.22, "height_max": 0.38, "accent_color": [40, 120, 30], "seed_salt": 91,
+                 "count": { "prairie": 25, "spawn": 15 } }
+    },
+
+    {
+      "id": "cerpe", "name": "Cerpe", "category": "tool",
+      "description": "Faucille pour récolter plus efficacement : vise les plantes dans un cône devant soi.",
+      "buy_price": 50, "max_stack": 1, "color": [180, 140, 60], "harvest_tool": true
+    },
+
+    {
+      "id": "tshirt_orange", "name": "T-shirt orange", "category": "clothing", "clothing_slot": "torso",
+      "description": "T-shirt léger, couleur mandarine.",
+      "buy_price": 30, "color": [230, 120, 40]
+    },
+    {
+      "id": "tshirt_blue", "name": "T-shirt bleu", "category": "clothing", "clothing_slot": "torso",
+      "description": "T-shirt léger, couleur océan.",
+      "buy_price": 30, "color": [50, 100, 200]
+    },
+    {
+      "id": "veste_dark", "name": "Veste bleu sombre", "category": "clothing", "clothing_slot": "torso",
+      "description": "Veste résistante avec deux poches intérieures.\n+2 slots d'inventaire.",
+      "buy_price": 100, "pocket_slots": 2, "color": [30, 60, 130]
+    },
+    {
+      "id": "manteau_brun", "name": "Manteau marron", "category": "clothing", "clothing_slot": "torso",
+      "description": "Manteau chaud avec de nombreuses poches.\n+4 slots d'inventaire, +1 slot d'équipement.",
+      "buy_price": 200, "pocket_slots": 4, "extra_equip_slots": 1, "color": [100, 60, 30]
+    },
+    {
+      "id": "jean", "name": "Jean", "category": "clothing", "clothing_slot": "legs",
+      "description": "Jean robuste avec deux poches latérales.\n+2 slots d'inventaire.",
+      "buy_price": 60, "pocket_slots": 2, "color": [50, 80, 150]
+    },
+    {
+      "id": "short_red", "name": "Short rouge", "category": "clothing", "clothing_slot": "legs",
+      "description": "Short léger, idéal par beau temps.",
+      "buy_price": 25, "short_legs": true, "color": [200, 40, 40]
+    },
+    {
+      "id": "short_blue", "name": "Short bleu", "category": "clothing", "clothing_slot": "legs",
+      "description": "Short léger, couleur cobalt.",
+      "buy_price": 25, "short_legs": true, "color": [40, 80, 200]
+    }
+  ]
+}
