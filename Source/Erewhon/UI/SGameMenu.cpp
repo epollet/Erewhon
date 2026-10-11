@@ -271,6 +271,8 @@ TSharedRef<SWidget> SGameMenu::BuildOptions()
 			Volume(&UErewhonUserSettings::EffectsVolume), StepVolume(&UErewhonUserSettings::EffectsVolume)));
 		Add(OptionRow(LOCTEXT("Ambient", "Ambiance"), LOCTEXT("AmbientHelp", "Le vent dans la prairie."),
 			Volume(&UErewhonUserSettings::AmbientVolume), StepVolume(&UErewhonUserSettings::AmbientVolume)));
+		Add(OptionRow(LOCTEXT("Music", "Musique"), LOCTEXT("MusicHelp", "Les airs de 3DSimEco, de temps en temps."),
+			Volume(&UErewhonUserSettings::MusicVolume), StepVolume(&UErewhonUserSettings::MusicVolume)));
 	}
 	else
 	{

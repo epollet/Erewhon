@@ -25,6 +25,9 @@ struct FErewhonInputActions
 	UPROPERTY() TObjectPtr<UInputAction> CloseMenu;
 	UPROPERTY() TObjectPtr<UInputAction> Use;
 	UPROPERTY() TObjectPtr<UInputAction> Crouch;
+	UPROPERTY() TObjectPtr<UInputAction> Bag;     // F : poser / ouvrir le sac à dos
+	UPROPERTY() TObjectPtr<UInputAction> Stash;   // G : tout ranger dans le sac
+	UPROPERTY() TObjectPtr<UInputAction> View;    // V : vue à la 1re / 3e personne
 };
 
 struct FErewhonToast
@@ -51,6 +54,8 @@ public:
 	/** Vrai aussi pendant l'image où un menu est en train de s'ouvrir. */
 	bool IsMenuOpen() const { return OpenMenu.IsValid() || PendingMenu.IsValid(); }
 	void ToggleInventory();
+	/** Inventaire, avec à côté le sac à dos (porté, ou posé et visé : Bag). */
+	void OpenInventory(class ABackpack* Bag);
 	void OpenStore(EShopKind Kind);
 	void CloseMenu();
 
@@ -85,6 +90,19 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerSellItem(FName ItemId, int32 Count);
 
+	UFUNCTION(Server, Reliable)
+	void ServerDropBackpack();
+
+	UFUNCTION(Server, Reliable)
+	void ServerPickUpBackpack(class ABackpack* Backpack);
+
+	/** Déplace un objet entre l'inventaire et le sac ; To = INDEX_NONE : là où il y a de la place. */
+	UFUNCTION(Server, Reliable)
+	void ServerMoveItem(bool bFromBag, int32 From, bool bToBag, int32 To);
+
+	UFUNCTION(Server, Reliable)
+	void ServerStashAll();
+
 	UFUNCTION(Client, Reliable)
 	void ClientToast(const FText& Text);
 
@@ -115,5 +133,6 @@ private:
 	TSharedPtr<SWidget> PendingMenu;
 	bool bStoreOpen = false;
 	EShopKind StoreKind = EShopKind::GeneralStore;
+	TWeakObjectPtr<class ABackpack> OpenedBag;
 	TArray<FErewhonToast> Toasts;
 };

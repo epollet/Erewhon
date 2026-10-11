@@ -88,6 +88,34 @@ def import_sounds():
     log("sons importés")
 
 
+def import_music():
+    """Musiques d'ambiance (SourceArt/Music/*.mp3, reprises de 3DSimEco) → /Game/Generated/Music/S_music_<nom>.
+
+    Unreal n'importe pas le MP3 : ffmpeg les convertit d'abord en WAV dans Saved/Temp.
+    """
+    import shutil
+    import subprocess
+    music = os.path.join(PROJECT, "SourceArt", "Music")
+    ffmpeg = shutil.which("ffmpeg")
+    if not os.path.isdir(music) or not ffmpeg:
+        log("musiques ignorées (dossier ou ffmpeg introuvable)")
+        return
+    temp = os.path.join(PROJECT, "Saved", "Temp", "Music")
+    os.makedirs(temp, exist_ok=True)
+    for file in sorted(f for f in os.listdir(music) if f.lower().endswith(".mp3")):
+        base = os.path.splitext(file)[0]
+        wav = os.path.join(temp, base + ".wav")
+        subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", os.path.join(music, file), "-ar", "44100", "-ac", "2", wav], check=True)
+        name = "S_music_" + base
+        import_file(wav, GEN + "/Music", name)
+        sound = assets.load_asset(GEN + "/Music/" + name)
+        if sound:
+            sound.set_editor_property("looping", False)
+            sound.set_editor_property("sound_group", unreal.SoundGroup.SOUNDGROUP_MUSIC)
+            assets.save_loaded_asset(sound)
+        log("musique " + name)
+
+
 # ── Meshes ───────────────────────────────────────────────────────────────────
 
 def import_mesh(path, folder, name):
@@ -529,4 +557,5 @@ if assets.does_asset_exist(GEN + "/Materials/M_PathBlend"):
     assets.delete_asset(GEN + "/Materials/M_PathBlend")   # remplacé par M_GroundBlend
 rebind_generated_materials(create_generated_mesh_master(), {"bird": create_bird_flap()})
 import_sounds()
+import_music()
 log("terminé")

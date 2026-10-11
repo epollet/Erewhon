@@ -34,6 +34,13 @@ public:
 	FText TryBuySector(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 	FText TrySellSector(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 	FText TryBuyRoadLink(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 Side);
+
+	// Sac à dos
+	FText TryDropBackpack(AErewhonPlayerController* Controller);
+	FText TryPickUpBackpack(AErewhonPlayerController* Controller, class ABackpack* Backpack);
+	/** Déplace un objet entre l'inventaire et le sac (To = INDEX_NONE : là où il trouve de la place). */
+	FText TryMoveItem(AErewhonPlayerController* Controller, bool bFromBag, int32 From, bool bToBag, int32 To);
+	FText TryStashAll(AErewhonPlayerController* Controller);
 	FText TryBuyItem(AErewhonPlayerController* Controller, FName ItemId);
 	FText TrySellItem(AErewhonPlayerController* Controller, FName ItemId, int32 Count);
 

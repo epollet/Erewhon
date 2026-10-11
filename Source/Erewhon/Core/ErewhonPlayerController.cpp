@@ -13,6 +13,8 @@
 #include "Misc/Paths.h"
 #include "UI/SInventoryPanel.h"
 #include "UI/SStorePanel.h"
+#include "Player/ErewhonCharacter.h"
+#include "World/Backpack.h"
 #include "UI/SGameMenu.h"
 #include "Core/ErewhonUserSettings.h"
 #include "World/Door.h"
@@ -71,6 +73,9 @@ const FErewhonInputActions& AErewhonPlayerController::GetInputActions()
 	Actions.CloseMenu = MakeAction(this, TEXT("IA_CloseMenu"), EInputActionValueType::Boolean);
 	Actions.Use = MakeAction(this, TEXT("IA_Use"), EInputActionValueType::Boolean);
 	Actions.Crouch = MakeAction(this, TEXT("IA_Crouch"), EInputActionValueType::Boolean);
+	Actions.Bag = MakeAction(this, TEXT("IA_Bag"), EInputActionValueType::Boolean);
+	Actions.Stash = MakeAction(this, TEXT("IA_Stash"), EInputActionValueType::Boolean);
+	Actions.View = MakeAction(this, TEXT("IA_View"), EInputActionValueType::Boolean);
 
 	// ZQSD (AZERTY) et WASD (QWERTY) coexistent sans conflit : Z/W avancent, Q/A vont à gauche.
 	for (const FKey& Key : { EKeys::Z, EKeys::W, EKeys::Up })
@@ -105,6 +110,9 @@ const FErewhonInputActions& AErewhonPlayerController::GetInputActions()
 	Context->MapKey(Actions.CloseMenu, EKeys::Escape);
 	Context->MapKey(Actions.Use, EKeys::E);
 	Context->MapKey(Actions.Crouch, EKeys::LeftControl);
+	Context->MapKey(Actions.Bag, EKeys::F);
+	Context->MapKey(Actions.Stash, EKeys::G);
+	Context->MapKey(Actions.View, EKeys::V);
 	return Actions;
 }
 
@@ -237,6 +245,17 @@ void AErewhonPlayerController::NextAutoShot()
 			else if (ShotMenu == TEXT("sectors")) { OpenStore(EShopKind::SectorManager); }
 			else if (ShotMenu == TEXT("tailor")) { OpenStore(EShopKind::Tailor); }
 			else if (ShotMenu == TEXT("inventory")) { ToggleInventory(); }
+			else if (ShotMenu == TEXT("behind") || ShotMenu == TEXT("front"))
+			{
+				if (AErewhonCharacter* Me = GetPawn<AErewhonCharacter>())
+				{
+					Me->CycleView();
+					if (ShotMenu == TEXT("front"))
+					{
+						Me->CycleView();
+					}
+				}
+			}
 			else
 			{
 				const TSharedRef<SGameMenu> GameMenu = SNew(SGameMenu).Controller(this);
@@ -319,7 +338,13 @@ void AErewhonPlayerController::ToggleInventory()
 		CloseMenu();
 		return;
 	}
-	ShowMenu(SNew(SInventoryPanel).Controller(this), false);
+	OpenInventory(nullptr);
+}
+
+void AErewhonPlayerController::OpenInventory(ABackpack* Bag)
+{
+	OpenedBag = Bag;
+	ShowMenu(SNew(SInventoryPanel).Controller(this).Bag(Bag), false);
 }
 
 void AErewhonPlayerController::HandleEscape()
@@ -342,8 +367,14 @@ void AErewhonPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
-	// On ne repart pas avec la boutique ouverte.
+	// On ne repart pas avec la boutique ouverte, ni avec un sac posé derrière soi.
 	const APawn* MyPawn = GetPawn();
+	if (OpenedBag.IsValid() && OpenMenu.IsValid() && !bStoreOpen && MyPawn
+		&& FVector::Dist(MyPawn->GetActorLocation(), OpenedBag->GetActorLocation()) > 450.f)
+	{
+		OpenedBag.Reset();
+		CloseMenu();
+	}
 	if (bStoreOpen && OpenMenu.IsValid() && MyPawn
 		&& FVector::Dist2D(MyPawn->GetActorLocation(), ErewhonSpawn::MerchantLocation(StoreKind)) > UErewhonSettings::Get().MerchantReach() + 150.f)
 	{
@@ -410,6 +441,38 @@ void AErewhonPlayerController::ServerBuySector_Implementation(FIntPoint Sector)
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
 	{
 		ReportResult(Mode->TryBuySector(this, Sector));
+	}
+}
+
+void AErewhonPlayerController::ServerDropBackpack_Implementation()
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryDropBackpack(this));
+	}
+}
+
+void AErewhonPlayerController::ServerPickUpBackpack_Implementation(ABackpack* Backpack)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryPickUpBackpack(this, Backpack));
+	}
+}
+
+void AErewhonPlayerController::ServerMoveItem_Implementation(bool bFromBag, int32 From, bool bToBag, int32 To)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryMoveItem(this, bFromBag, From, bToBag, To));
+	}
+}
+
+void AErewhonPlayerController::ServerStashAll_Implementation()
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryStashAll(this));
 	}
 }
 

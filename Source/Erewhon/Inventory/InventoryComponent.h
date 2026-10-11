@@ -114,6 +114,10 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerUseSlot(int32 SlotIndex);
 
+	/** Accès direct du serveur (échanges avec le sac à dos), suivi de CommitChanges. */
+	TArray<FInventorySlot>& EditSlots() { return Slots; }
+	void CommitChanges() { Commit(); }
+
 	UFUNCTION(Client, Reliable)
 	void ClientInventoryMessage(const FText& Message);
 

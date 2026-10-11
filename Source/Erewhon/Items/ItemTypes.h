@@ -11,6 +11,7 @@ enum class EItemCategory : uint8
 	Tool,      // équipable dans un slot d'équipement (« Mains »)
 	Clothing,  // équipable dans un slot de vêtement, peut ajouter des poches
 	Resource,
+	Backpack,  // se porte sur le dos, contient d'autres objets
 };
 
 UENUM(BlueprintType)
@@ -168,7 +169,8 @@ struct FItemDef
 
 	/** Le commerce qui vend et rachète cet objet : les vêtements chez le tailleur, le reste au General Store. */
 	EShopKind ShopFor() const { return IsClothing() ? EShopKind::Tailor : EShopKind::GeneralStore; }
-	bool IsUnique() const { return Category == EItemCategory::Tool; }
+	bool IsUnique() const { return Category == EItemCategory::Tool || Category == EItemCategory::Backpack; }
+	bool IsBackpack() const { return Category == EItemCategory::Backpack; }
 
 	/** Prix payé par le marchand pour un exemplaire. */
 	int32 ResalePrice(float ResaleRatio) const

@@ -27,6 +27,19 @@ struct FSavedPlayer
 
 	UPROPERTY()
 	float Yaw = 0.f;
+
+	/** Sac à dos : possédé, porté ou posé (et où), son contenu. */
+	UPROPERTY()
+	bool bHasBackpack = false;
+
+	UPROPERTY()
+	bool bBackpackWorn = true;
+
+	UPROPERTY()
+	FTransform BackpackTransform;
+
+	UPROPERTY()
+	TArray<FInventorySlot> BackpackSlots;
 };
 
 USTRUCT()

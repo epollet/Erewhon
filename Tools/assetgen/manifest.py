@@ -50,6 +50,7 @@ ICONS: dict[str, str] = {
     "flower_purple": "a purple bellflower stem",
     "herb": "a sprig of aromatic thyme herb with small green leaves",
     "cerpe": "a small hand sickle with a curved steel blade and a wooden handle",
+    "backpack": "a sturdy rustic canvas backpack in olive green with brown leather straps, a buckled flap and two side loops",
     "tshirt_orange": "a folded orange cotton t-shirt",
     "tshirt_blue": "a folded blue cotton t-shirt",
     "veste_dark": "a dark navy blue work jacket with two pockets",

@@ -1,6 +1,9 @@
 #include "Player/ErewhonCharacter.h"
 
 #include "Camera/CameraComponent.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "Inventory/BackpackComponent.h"
+#include "World/Backpack.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/ErewhonGameState.h"
@@ -65,6 +68,18 @@ AErewhonCharacter::AErewhonCharacter()
 		Held->SetVisibility(false);
 		return Held;
 	};
+	CameraArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraArm"));
+	CameraArm->SetupAttachment(GetCapsuleComponent());
+	CameraArm->SetRelativeLocation(FVector(0.f, 0.f, 62.f));
+	CameraArm->TargetArmLength = 320.f;
+	CameraArm->SocketOffset = FVector(0.f, 0.f, 20.f);
+	CameraArm->bUsePawnControlRotation = true;
+	CameraArm->bDoCollisionTest = true;
+	ThirdCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("ThirdCamera"));
+	ThirdCamera->SetupAttachment(CameraArm, USpringArmComponent::SocketName);
+	ThirdCamera->SetFieldOfView(80.f);
+	ThirdCamera->SetAutoActivate(false);
+
 	HeldFirstPerson = MakeHeld(TEXT("HeldFirstPerson"), Camera);
 	HeldFirstPerson->SetRelativeLocationAndRotation(GHeldFirstPersonOffset, GHeldFirstPersonRotation);
 	HeldFirstPerson->SetOnlyOwnerSee(true);
@@ -79,7 +94,11 @@ void AErewhonCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	BuildBody();
+	BuildWornBackpack();
 	BindAppearance();
+	// Le PlayerState a pu être lié avant que le corps n'existe : on applique son état maintenant.
+	ApplyAppearance();
+	ApplyBackpack();
 }
 
 void AErewhonCharacter::BuildBody()
@@ -88,11 +107,91 @@ void AErewhonCharacter::BuildBody()
 	USceneComponent* Capsule = GetCapsuleComponent();
 	Legs = AddShape(this, Capsule, EShape::Cylinder, FVector(0, 0, -50), FVector(34, 28, 76), Palette::DefaultShorts, FRotator::ZeroRotator, false);
 	Torso = AddShape(this, Capsule, EShape::Cylinder, FVector(0, 0, 18), FVector(42, 30, 62), Palette::Skin, FRotator::ZeroRotator, false);
-	UStaticMeshComponent* Head = AddShape(this, Capsule, EShape::Sphere, FVector(0, 0, 66), FVector(30, 30, 32), Palette::Skin, FRotator::ZeroRotator, false);
-	for (UStaticMeshComponent* Part : { Legs.Get(), Torso.Get(), Head })
+	Head = AddShape(this, Capsule, EShape::Sphere, FVector(0, 0, 66), FVector(30, 30, 32), Palette::Skin, FRotator::ZeroRotator, false);
+	for (UStaticMeshComponent* Part : { Legs.Get(), Torso.Get(), Head.Get() })
 	{
 		Part->SetOwnerNoSee(true);
 	}
+}
+
+void AErewhonCharacter::BuildWornBackpack()
+{
+	// Dans le dos, poches vers l'arrière, le bas du sac à la taille.
+	WornBackpack = NewObject<USceneComponent>(this, TEXT("WornBackpack"));
+	WornBackpack->SetupAttachment(GetCapsuleComponent());
+	WornBackpack->SetRelativeLocationAndRotation(FVector(-27.f, 0.f, -12.f), FRotator(0.f, 180.f, 0.f));
+	WornBackpack->RegisterComponent();
+	AddInstanceComponent(WornBackpack);
+	for (UStaticMeshComponent* Holder : ErewhonBackpack::Build(this, WornBackpack, false))
+	{
+		WornTools.Add(Holder);
+	}
+	WornBackpack->SetVisibility(false, true);
+}
+
+void AErewhonCharacter::ApplyBackpack()
+{
+	const UBackpackComponent* Bag = BoundBackpack.Get();
+	const bool bWorn = Bag && Bag->IsWorn();
+	if (!WornBackpack)
+	{
+		return;
+	}
+	WornBackpack->SetVisibility(bWorn, true);
+	if (bWorn)
+	{
+		TArray<UStaticMeshComponent*> Holders;
+		for (UStaticMeshComponent* Holder : WornTools)
+		{
+			Holders.Add(Holder);
+		}
+		ErewhonBackpack::SetTools(Holders, Bag->GetSideTools());
+	}
+	ApplyView();
+}
+
+void AErewhonCharacter::CycleView()
+{
+	ViewMode = ViewMode == EViewMode::FirstPerson ? EViewMode::Behind
+		: ViewMode == EViewMode::Behind ? EViewMode::Front : EViewMode::FirstPerson;
+	ApplyView();
+}
+
+void AErewhonCharacter::ApplyView()
+{
+	const bool bFirst = ViewMode == EViewMode::FirstPerson;
+	Camera->SetActive(bFirst);
+	ThirdCamera->SetActive(!bFirst);
+	if (ViewMode == EViewMode::Front)
+	{
+		// Le bras pointe vers l'arrière du personnage : la caméra se place devant lui et le regarde.
+		CameraArm->bUsePawnControlRotation = false;
+		CameraArm->SetRelativeRotation(FRotator(-12.f, 180.f, 0.f));
+		CameraArm->TargetArmLength = 260.f;
+	}
+	else
+	{
+		CameraArm->bUsePawnControlRotation = true;
+		CameraArm->SetRelativeRotation(FRotator::ZeroRotator);
+		CameraArm->TargetArmLength = 320.f;
+	}
+
+	// À la première personne, on ne voit pas son propre corps ; sinon si.
+	TArray<USceneComponent*> SelfParts = { Torso.Get(), Legs.Get(), Head.Get(), HeldThirdPerson.Get() };
+	if (WornBackpack)
+	{
+		TArray<USceneComponent*> BagParts;
+		WornBackpack->GetChildrenComponents(true, BagParts);
+		SelfParts.Append(BagParts);
+	}
+	for (USceneComponent* Part : SelfParts)
+	{
+		if (UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Part))
+		{
+			Primitive->SetOwnerNoSee(bFirst);
+		}
+	}
+	HeldFirstPerson->SetHiddenInGame(!bFirst);
 }
 
 void AErewhonCharacter::PossessedBy(AController* NewController)
@@ -110,6 +209,16 @@ void AErewhonCharacter::OnRep_PlayerState()
 void AErewhonCharacter::BindAppearance()
 {
 	AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	if (UBackpackComponent* Bag = State ? State->GetBackpack() : nullptr; Bag && BoundBackpack != Bag)
+	{
+		if (UBackpackComponent* Previous = BoundBackpack.Get())
+		{
+			Previous->OnBackpackChanged.Remove(BackpackHandle);
+		}
+		BoundBackpack = Bag;
+		BackpackHandle = Bag->OnBackpackChanged.AddUObject(this, &AErewhonCharacter::ApplyBackpack);
+		ApplyBackpack();
+	}
 	UInventoryComponent* Inventory = State ? State->GetInventory() : nullptr;
 	if (!Inventory || BoundInventory == Inventory)
 	{
@@ -204,6 +313,9 @@ void AErewhonCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	Input->BindAction(Actions.Crouch, ETriggerEvent::Started, this, &AErewhonCharacter::StartCrouch);
 	Input->BindAction(Actions.Crouch, ETriggerEvent::Completed, this, &AErewhonCharacter::StopCrouch);
 	Input->BindAction(Actions.Inventory, ETriggerEvent::Started, this, &AErewhonCharacter::ToggleInventory);
+	Input->BindAction(Actions.Bag, ETriggerEvent::Started, this, &AErewhonCharacter::BagAction);
+	Input->BindAction(Actions.Stash, ETriggerEvent::Started, this, &AErewhonCharacter::StashAction);
+	Input->BindAction(Actions.View, ETriggerEvent::Started, this, &AErewhonCharacter::CycleView);
 	Input->BindAction(Actions.CloseMenu, ETriggerEvent::Started, PC, &AErewhonPlayerController::HandleEscape);
 }
 
@@ -278,6 +390,50 @@ void AErewhonCharacter::ToggleInventory()
 	if (AErewhonPlayerController* PC = GetController<AErewhonPlayerController>())
 	{
 		PC->ToggleInventory();
+	}
+}
+
+void AErewhonCharacter::BagAction()
+{
+	// F : en visant son sac posé, on l'ouvre ; sinon, on pose celui qu'on porte.
+	AErewhonPlayerController* PC = GetController<AErewhonPlayerController>();
+	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	if (!PC || !State || PC->IsMenuOpen())
+	{
+		return;
+	}
+	if (ABackpack* Aimed = Cast<ABackpack>(Target.Interactable.Get()))
+	{
+		if (Aimed->IsOwnedBy(State->GetPlayerKey()))
+		{
+			PC->OpenInventory(Aimed);
+		}
+		else
+		{
+			PC->ShowToast(LOCTEXT("NotYourBag", "Ce sac n'est pas à vous."));
+		}
+		return;
+	}
+	const UBackpackComponent* Bag = State->GetBackpack();
+	if (Bag->IsWorn())
+	{
+		PC->ServerDropBackpack();
+	}
+	else if (Bag->IsOwned())
+	{
+		PC->ShowToast(LOCTEXT("BagElsewhere", "Votre sac est posé ailleurs : allez le chercher."));
+	}
+}
+
+void AErewhonCharacter::StashAction()
+{
+	// G : en visant son sac posé, on y vide ses poches.
+	AErewhonPlayerController* PC = GetController<AErewhonPlayerController>();
+	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	const ABackpack* Aimed = Cast<ABackpack>(Target.Interactable.Get());
+	if (PC && State && !PC->IsMenuOpen() && Aimed && Aimed->IsOwnedBy(State->GetPlayerKey()))
+	{
+		PC->ServerStashAll();
 	}
 }
 
@@ -471,7 +627,7 @@ void AErewhonCharacter::UpdateTarget()
 
 	const UErewhonSettings& Settings = UErewhonSettings::Get();
 	const FVector Eye = Camera->GetComponentLocation();
-	const FVector Look = Camera->GetForwardVector();
+	const FVector Look = GetControlRotation().Vector();
 	float Reach = Settings.HarvestReach();
 
 	FHitResult Hit;

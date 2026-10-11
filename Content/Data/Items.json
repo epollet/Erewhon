@@ -74,6 +74,12 @@
     },
 
     {
+      "id": "backpack", "name": "Sac à dos", "category": "backpack",
+      "description": "Sac de toile robuste : 12 places de rangement et deux outils accrochés sur les côtés.\nSe porte sur le dos ; [F] pour le poser, puis l'ouvrir.",
+      "buy_price": 200, "max_stack": 1, "color": [112, 128, 72]
+    },
+
+    {
       "id": "tshirt_orange", "name": "T-shirt orange", "category": "clothing", "clothing_slot": "torso",
       "description": "T-shirt léger, couleur mandarine.",
       "buy_price": 30, "color": [230, 120, 40]

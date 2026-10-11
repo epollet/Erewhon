@@ -1,11 +1,13 @@
 #include "Core/ErewhonPlayerState.h"
 
+#include "Inventory/BackpackComponent.h"
 #include "Inventory/InventoryComponent.h"
 #include "Net/UnrealNetwork.h"
 
 AErewhonPlayerState::AErewhonPlayerState()
 {
 	Inventory = CreateDefaultSubobject<UInventoryComponent>(TEXT("Inventory"));
+	Backpack = CreateDefaultSubobject<UBackpackComponent>(TEXT("Backpack"));
 	// L'inventaire et les pièces changent souvent : fréquence plus haute que le défaut.
 	SetNetUpdateFrequency(10.f);
 }

@@ -18,6 +18,7 @@ void UErewhonUserSettings::SetToDefaults()
 	CloudQuality = 1;
 	EffectsVolume = 0.8f;
 	AmbientVolume = 0.6f;
+	MusicVolume = 0.5f;
 }
 
 void UErewhonUserSettings::NotifyWorldDetailChanged()

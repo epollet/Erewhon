@@ -47,6 +47,10 @@ public:
 	UPROPERTY(Config)
 	float AmbientVolume = 0.6f;
 
+	/** Volume de la musique d'ambiance (0 → 1). */
+	UPROPERTY(Config)
+	float MusicVolume = 0.5f;
+
 	/** Échantillonnage des nuages volumétriques : 0 faible, 1 moyen, 2 haut. */
 	UPROPERTY(Config)
 	int32 CloudQuality = 1;

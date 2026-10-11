@@ -16,6 +16,8 @@
 #include "World/SectorLayout.h"
 #include "World/Door.h"
 #include "World/Terrain.h"
+#include "Inventory/BackpackComponent.h"
+#include "World/Backpack.h"
 #include "World/SpawnLayout.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonGameMode"
@@ -175,6 +177,14 @@ void AErewhonGameMode::CapturePlayer(const AErewhonPlayerState* PlayerState)
 	Saved.Name = PlayerState->GetPlayerName();
 	Saved.Coins = PlayerState->GetCoins();
 	Saved.Slots = PlayerState->GetInventory()->GetSlots();
+	const UBackpackComponent* Bag = PlayerState->GetBackpack();
+	Saved.bHasBackpack = Bag->IsOwned();
+	Saved.bBackpackWorn = Bag->IsWorn() || !Bag->GetDropped();
+	Saved.BackpackSlots = Bag->GetSlots();
+	if (const ABackpack* Dropped = Bag->GetDropped())
+	{
+		Saved.BackpackTransform = Dropped->GetActorTransform();
+	}
 	if (const APawn* Pawn = PlayerState->GetPawn())
 	{
 		Saved.bHasLocation = true;
@@ -234,6 +244,7 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 	{
 		PlayerState->SetCoins(Saved->Coins);
 		Inventory->RestoreSlots(Saved->Slots);
+		PlayerState->GetBackpack()->Restore(Saved->bHasBackpack, Saved->bBackpackWorn, Saved->BackpackSlots, Saved->BackpackTransform);
 		if (APawn* Pawn = Controller->GetPawn(); Pawn && Saved->bHasLocation)
 		{
 			// Le relief a pu changer depuis la sauvegarde : on repose le joueur sur le sol.
@@ -250,6 +261,22 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 		Inventory->ResetToDefault();
 		UE_LOG(LogErewhonGame, Log, TEXT("Nouveau joueur %s (%s)"), *PlayerState->GetPlayerName(), *Key);
 	}
+#if !UE_BUILD_SHIPPING
+	// -ErewhonGiveBackpack : tests, un sac garni (une cerpe sur le côté, de l'herbe dedans) ;
+	// -ErewhonDropBackpack : posé aussitôt devant le joueur.
+	UBackpackComponent* TestBag = PlayerState->GetBackpack();
+	if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonGiveBackpack")) && !TestBag->IsOwned())
+	{
+		TestBag->Grant();
+		TestBag->StoreItem(TEXT("cerpe"), 1, true);
+		TestBag->StoreItem(TEXT("grass"), 7);
+		TestBag->StoreItem(TEXT("fern"), 3);
+	}
+	if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonDropBackpack")) && TestBag->IsWorn())
+	{
+		TestBag->Drop(Controller->GetPawn());
+	}
+#endif
 }
 
 // ── Récolte ──────────────────────────────────────────────────────────────────
@@ -297,7 +324,9 @@ FText AErewhonGameMode::TryHarvest(AErewhonPlayerController* Controller, const F
 		}
 	}
 
-	if (Inventory->StoreItem(Plant.ItemId, 1) != 1)
+	// Poches pleines : la récolte file dans le sac, s'il est sur le dos.
+	UBackpackComponent* Bag = PlayerState->GetBackpack();
+	if (Inventory->StoreItem(Plant.ItemId, 1) != 1 && (!Bag->IsWorn() || Bag->StoreItem(Plant.ItemId, 1) != 1))
 	{
 		return LOCTEXT("InventoryFull", "Inventaire plein.");
 	}
@@ -400,6 +429,21 @@ FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName I
 		return LOCTEXT("NotSold", "Le marchand ne vend pas cet objet.");
 	}
 	UInventoryComponent* Inventory = PlayerState->GetInventory();
+	if (Def->IsBackpack())
+	{
+		// Le sac se porte aussitôt sur le dos : il n'entre pas dans l'inventaire.
+		UBackpackComponent* Bag = PlayerState->GetBackpack();
+		if (Bag->IsOwned())
+		{
+			return FText::Format(LOCTEXT("AlreadyHave", "Vous possédez déjà : {0}."), Def->Name);
+		}
+		if (!PlayerState->SpendCoins(Def->BuyPrice))
+		{
+			return LOCTEXT("NotEnoughCoins", "Pas assez de pièces.");
+		}
+		Bag->Grant();
+		return FText::GetEmpty();
+	}
 	if (Def->IsUnique() && Inventory->Owns(ItemId))
 	{
 		return FText::Format(LOCTEXT("AlreadyHave", "Vous possédez déjà : {0}."), Def->Name);
@@ -429,14 +473,191 @@ FText AErewhonGameMode::TrySellItem(AErewhonPlayerController* Controller, FName 
 	{
 		return LOCTEXT("NotBought", "Le marchand n'achète pas cet objet.");
 	}
+	// Près d'un marchand, le contenu de son sac à dos compte aussi : les poches d'abord, puis le sac.
 	UInventoryComponent* Inventory = PlayerState->GetInventory();
-	const int32 Sold = FMath::Min(Count, Inventory->CountStored(ItemId));
-	if (Sold <= 0 || !Inventory->RemoveStored(ItemId, Sold))
+	UBackpackComponent* Bag = PlayerState->GetBackpack();
+	const int32 FromPockets = FMath::Min(Count, Inventory->CountStored(ItemId));
+	const int32 FromBag = FMath::Min(Count - FromPockets, Bag->CountStored(ItemId));
+	const int32 Sold = FromPockets + FromBag;
+	if (Sold <= 0 || (FromPockets > 0 && !Inventory->RemoveStored(ItemId, FromPockets)) || (FromBag > 0 && !Bag->RemoveStored(ItemId, FromBag)))
 	{
 		return FText::GetEmpty();
 	}
 	PlayerState->AddCoins(Price * Sold);
 	return FText::GetEmpty();
+}
+
+// ── Sac à dos ────────────────────────────────────────────────────────────────
+
+namespace
+{
+	/** Un slot peut-il recevoir cet objet ? Côté joueur : ses slots d'inventaire seulement. Côté sac : tout, sauf ses slots d'outils. */
+	bool CanHold(const FInventorySlot& Slot, bool bBag, const FItemDef& Def)
+	{
+		if (Slot.Kind == ESlotKind::Inventory)
+		{
+			return true;
+		}
+		return bBag && Slot.Kind == ESlotKind::Equipment && Def.IsEquipable();
+	}
+}
+
+FText AErewhonGameMode::TryDropBackpack(AErewhonPlayerController* Controller)
+{
+	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
+	if (!PlayerState || !PlayerState->GetBackpack()->Drop(Controller->GetPawn()))
+	{
+		return FText::GetEmpty();
+	}
+	return FText::GetEmpty();
+}
+
+FText AErewhonGameMode::TryPickUpBackpack(AErewhonPlayerController* Controller, ABackpack* Backpack)
+{
+	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
+	const APawn* Pawn = Controller->GetPawn();
+	if (!PlayerState || !Backpack || !Pawn)
+	{
+		return FText::GetEmpty();
+	}
+	if (!Backpack->IsOwnedBy(PlayerState->GetPlayerKey()))
+	{
+		return LOCTEXT("NotYourBag", "Ce sac n'est pas à vous.");
+	}
+	if (FVector::Dist(Pawn->GetActorLocation(), Backpack->GetActorLocation()) > 400.f)
+	{
+		return FText::GetEmpty();
+	}
+	PlayerState->GetBackpack()->PickUp();
+	return FText::GetEmpty();
+}
+
+FText AErewhonGameMode::TryMoveItem(AErewhonPlayerController* Controller, bool bFromBag, int32 From, bool bToBag, int32 To)
+{
+	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
+	const UItemDatabase* Items = UItemDatabase::Get(this);
+	if (!PlayerState || !Items)
+	{
+		return FText::GetEmpty();
+	}
+	UInventoryComponent* Inventory = PlayerState->GetInventory();
+	UBackpackComponent* Bag = PlayerState->GetBackpack();
+	if ((bFromBag || bToBag) && !Bag->IsAccessibleFrom(Controller->GetPawn()))
+	{
+		return LOCTEXT("BagTooFar", "Votre sac est trop loin.");
+	}
+	TArray<FInventorySlot>& Source = bFromBag ? Bag->EditSlots() : Inventory->EditSlots();
+	TArray<FInventorySlot>& Target = bToBag ? Bag->EditSlots() : Inventory->EditSlots();
+	if (!Source.IsValidIndex(From) || Source[From].IsEmpty() || (!bFromBag && Source[From].Kind != ESlotKind::Inventory))
+	{
+		return FText::GetEmpty();
+	}
+	const FItemDef* Def = Items->Find(Source[From].ItemId);
+	if (!Def)
+	{
+		return FText::GetEmpty();
+	}
+
+	if (To == INDEX_NONE)
+	{
+		// Clic : l'objet change de côté et se range où il peut.
+		const int32 Count = Source[From].Count;
+		const int32 Stored = bToBag ? Bag->StoreItem(Def->Id, Count, true) : Inventory->StoreItem(Def->Id, Count);
+		if (Stored <= 0)
+		{
+			return bToBag ? LOCTEXT("BagFull", "Le sac est plein.") : LOCTEXT("InventoryFull", "Inventaire plein.");
+		}
+		FInventorySlot& Origin = (bFromBag ? Bag->EditSlots() : Inventory->EditSlots())[From];
+		Origin.Count -= Stored;
+		if (Origin.Count <= 0)
+		{
+			Origin.Clear();
+		}
+	}
+	else
+	{
+		if (!Target.IsValidIndex(To) || (&Source == &Target && From == To) || !CanHold(Target[To], bToBag, *Def))
+		{
+			return FText::GetEmpty();
+		}
+		FInventorySlot& A = Source[From];
+		FInventorySlot& B = Target[To];
+		if (B.IsEmpty() || B.ItemId == A.ItemId)
+		{
+			// Dépôt, ou complément d'une pile.
+			const int32 Moved = FMath::Min(A.Count, Def->MaxStack - (B.IsEmpty() ? 0 : B.Count));
+			if (Moved <= 0)
+			{
+				return FText::GetEmpty();
+			}
+			B.ItemId = A.ItemId;
+			B.Count = (B.IsEmpty() ? 0 : B.Count) + Moved;
+			A.Count -= Moved;
+			if (A.Count <= 0)
+			{
+				A.Clear();
+			}
+		}
+		else
+		{
+			// Échange, si chacun des deux objets va bien dans l'autre slot.
+			const FItemDef* Other = Items->Find(B.ItemId);
+			if (!Other || !CanHold(A, bFromBag, *Other))
+			{
+				return LOCTEXT("CannotSwap", "Cet objet ne va pas là.");
+			}
+			Swap(A.ItemId, B.ItemId);
+			Swap(A.Count, B.Count);
+		}
+	}
+	Inventory->CommitChanges();
+	if (Bag->IsOwned())
+	{
+		Bag->Commit();
+	}
+	return FText::GetEmpty();
+}
+
+FText AErewhonGameMode::TryStashAll(AErewhonPlayerController* Controller)
+{
+	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
+	if (!PlayerState)
+	{
+		return FText::GetEmpty();
+	}
+	UInventoryComponent* Inventory = PlayerState->GetInventory();
+	UBackpackComponent* Bag = PlayerState->GetBackpack();
+	if (!Bag->IsAccessibleFrom(Controller->GetPawn()))
+	{
+		return LOCTEXT("BagTooFar", "Votre sac est trop loin.");
+	}
+	// Tout ce qui est rangé dans les poches (pas ce qu'on porte ni ce qu'on tient) part dans le sac.
+	int32 Moved = 0;
+	bool bLeftovers = false;
+	for (FInventorySlot& Slot : Inventory->EditSlots())
+	{
+		if (Slot.Kind != ESlotKind::Inventory || Slot.IsEmpty())
+		{
+			continue;
+		}
+		const int32 Stored = Bag->StoreItem(Slot.ItemId, Slot.Count, true);
+		Moved += Stored;
+		Slot.Count -= Stored;
+		if (Slot.Count <= 0)
+		{
+			Slot.Clear();
+		}
+		else
+		{
+			bLeftovers = true;
+		}
+	}
+	Inventory->CommitChanges();
+	if (Moved == 0)
+	{
+		return bLeftovers ? LOCTEXT("BagFull", "Le sac est plein.") : LOCTEXT("NothingToStash", "Rien à ranger.");
+	}
+	return bLeftovers ? LOCTEXT("BagFullPartly", "Le sac est plein : tout n'y est pas entré.") : FText::GetEmpty();
 }
 
 #undef LOCTEXT_NAMESPACE

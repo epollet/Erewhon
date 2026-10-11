@@ -4,6 +4,7 @@
 #include "Core/ErewhonPlayerController.h"
 #include "Core/ErewhonPlayerState.h"
 #include "Core/ErewhonSettings.h"
+#include "Inventory/BackpackComponent.h"
 #include "Inventory/InventoryComponent.h"
 #include "Items/ItemDatabase.h"
 #include "UI/ErewhonSlate.h"
@@ -61,6 +62,7 @@ void SStorePanel::Construct(const FArguments& InArgs)
 	{
 		State->OnCoinsChanged.AddSP(this, &SStorePanel::Rebuild);
 		State->GetInventory()->OnInventoryChanged.AddSP(this, &SStorePanel::Rebuild);
+		State->GetBackpack()->OnBackpackChanged.AddSP(this, &SStorePanel::Rebuild);
 	}
 	if (World)
 	{
@@ -393,7 +395,7 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 		{
 			continue;   // chaque commerce ne vend que sa marchandise
 		}
-		const bool bOwned = Def->IsUnique() && State->GetInventory()->Owns(Def->Id);
+		const bool bOwned = Def->IsBackpack() ? State->GetBackpack()->IsOwned() : Def->IsUnique() && State->GetInventory()->Owns(Def->Id);
 		const bool bAfford = State->GetCoins() >= Def->BuyPrice;
 		const FName Id = Def->Id;
 		TSharedRef<SWidget> ItemCard = CardBox(
@@ -431,9 +433,13 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 		return List;
 	}
 
-	// Une ligne par objet rangé (les objets équipés ne se vendent pas sans être rangés).
+	// Une ligne par objet rangé, dans les poches comme dans le sac à dos (les objets équipés
+	// ne se vendent pas sans être rangés).
 	TArray<FName> Seen;
-	for (const FInventorySlot& Slot : State->GetInventory()->GetSlots())
+	const UBackpackComponent* Bag = State->GetBackpack();
+	TArray<FInventorySlot> Stored = State->GetInventory()->GetSlots();
+	Stored.Append(Bag->GetSlots());
+	for (const FInventorySlot& Slot : Stored)
 	{
 		if (Slot.Kind == ESlotKind::Inventory && !Slot.IsEmpty() && !Seen.Contains(Slot.ItemId))
 		{
@@ -451,7 +457,7 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 		{
 			continue;
 		}
-		const int32 Count = State->GetInventory()->CountStored(Id);
+		const int32 Count = State->GetInventory()->CountStored(Id) + Bag->CountStored(Id);
 		Total += Price * Count;
 		TSharedRef<SWidget> Row = CardBox(
 			SNew(SHorizontalBox)

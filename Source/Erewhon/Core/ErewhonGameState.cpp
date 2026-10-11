@@ -6,6 +6,7 @@
 #include "Sky/CelestialSystem.h"
 #include "TimerManager.h"
 #include "World/SectorManager.h"
+#include "World/MusicPlayer.h"
 #include "World/SpawnCabin.h"
 #include "World/SpawnLayout.h"
 #include "World/Wildlife.h"
@@ -112,6 +113,7 @@ void AErewhonGameState::SpawnLocalWorldActors()
 	{
 		World->SpawnActor<ACelestialSystem>(Params);
 		World->SpawnActor<AWildlife>(Params);
+		World->SpawnActor<AMusicPlayer>(Params);
 	}
 }
 

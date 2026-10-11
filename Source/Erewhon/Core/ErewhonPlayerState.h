@@ -4,6 +4,7 @@
 #include "GameFramework/PlayerState.h"
 #include "ErewhonPlayerState.generated.h"
 
+class UBackpackComponent;
 class UInventoryComponent;
 
 DECLARE_MULTICAST_DELEGATE(FOnCoinsChanged);
@@ -20,6 +21,7 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UInventoryComponent* GetInventory() const { return Inventory; }
+	UBackpackComponent* GetBackpack() const { return Backpack; }
 
 	/** Clé stable du joueur entre les sessions — vide tant que le client ne s'est pas présenté. */
 	const FString& GetPlayerKey() const { return PlayerKey; }
@@ -41,6 +43,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UInventoryComponent> Inventory;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UBackpackComponent> Backpack;
 
 	UPROPERTY(Replicated)
 	FString PlayerKey;
