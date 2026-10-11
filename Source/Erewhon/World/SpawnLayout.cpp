@@ -5,16 +5,36 @@
 
 namespace ErewhonSpawn
 {
-	void BuildPaths(const FIntPoint& Sector, TArray<FBox2D>& OutPaths)
+	void BuildPaths(const FIntPoint& Sector, ESectorType Type, TArray<FBox2D>& OutPaths)
 	{
 		const float Size = UErewhonSettings::Get().SectorSize();
 		const FVector2D Origin(ErewhonSector::Origin(Sector));
 		const FVector2D Center(ErewhonSector::Center(Sector));
 		const float HalfPath = PathWidth * 0.5f;
 
-		// Bras nord-sud et est-ouest, d'un bord à l'autre du secteur.
-		OutPaths.Add(FBox2D(FVector2D(Origin.X, Center.Y - HalfPath), FVector2D(Origin.X + Size, Center.Y + HalfPath)));
-		OutPaths.Add(FBox2D(FVector2D(Center.X - HalfPath, Origin.Y), FVector2D(Center.X + HalfPath, Origin.Y + Size)));
+		// Au spawn, la croix ; sur une route, le seul bras qui prolonge la croix (le long de son axe).
+		const bool bSpawn = Type == ESectorType::Spawn;
+		if (bSpawn || (Type == ESectorType::Road && Sector.Y == 0))
+		{
+			OutPaths.Add(FBox2D(FVector2D(Origin.X, Center.Y - HalfPath), FVector2D(Origin.X + Size, Center.Y + HalfPath)));
+		}
+		if (bSpawn || (Type == ESectorType::Road && Sector.X == 0))
+		{
+			OutPaths.Add(FBox2D(FVector2D(Center.X - HalfPath, Origin.Y), FVector2D(Center.X + HalfPath, Origin.Y + Size)));
+		}
+	}
+
+	bool IsInsideCabin(const FVector& World)
+	{
+		const FVector Local = World - ErewhonSector::Center(FIntPoint::ZeroValue);
+		return FMath::Abs(Local.X) < CabinHalfLength && FMath::Abs(Local.Y) < CabinHalfWidth && Local.Z > CabinFloorTop - 20.f;
+	}
+
+	bool IsOnPorch(const FVector& World)
+	{
+		// Palier et marches : du mur sud jusqu'à 1,8 m devant, sur la largeur de l'escalier.
+		const FVector Local = World - ErewhonSector::Center(FIntPoint::ZeroValue);
+		return Local.X < -CabinHalfLength + CabinWallThickness && Local.X > -CabinHalfLength - 180.f && FMath::Abs(Local.Y) < 100.f;
 	}
 
 	FVector DoorHingeLocation()

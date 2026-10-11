@@ -40,6 +40,13 @@ public:
 	UPROPERTY(Config)
 	bool bShowFps = true;
 
+	/** Volumes (0 → 1) : bruitages (pas, porte, oiseaux) et ambiance (vent, herbe). */
+	UPROPERTY(Config)
+	float EffectsVolume = 0.8f;
+
+	UPROPERTY(Config)
+	float AmbientVolume = 0.6f;
+
 	/** Échantillonnage des nuages volumétriques : 0 faible, 1 moyen, 2 haut. */
 	UPROPERTY(Config)
 	int32 CloudQuality = 1;

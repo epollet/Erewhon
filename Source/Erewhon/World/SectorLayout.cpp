@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "Items/ItemDatabase.h"
 #include "World/SpawnLayout.h"
+#include "Core/ErewhonGameState.h"
 #include "World/Terrain.h"
 
 namespace
@@ -166,6 +167,77 @@ void USectorLayoutSubsystem::BuildBushes(FSectorLayout& Layout, int32 WorldSeed)
 	}
 }
 
+void USectorLayoutSubsystem::InvalidateAround(const FIntPoint& Sector)
+{
+	for (const FIntPoint& Offset : { FIntPoint(0, 0), FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+	{
+		Cache.Remove(Sector + Offset);
+		CacheOrder.Remove(Sector + Offset);
+	}
+}
+
+void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
+{
+	// Un secteur possédé qui borde une route est relié à elle : un chemin plus étroit part de
+	// la route et mène jusqu'à une petite clairière au centre du secteur.
+	const AErewhonGameState* State = AErewhonGameState::Get(GetWorld());
+	if (!State)
+	{
+		return;
+	}
+	const float Size = UErewhonSettings::Get().SectorSize();
+	const float Half = ErewhonSpawn::AccessPathWidth * 0.5f;
+	const FVector2D Center(ErewhonSector::Center(Layout.Coord));
+	const auto Corridor = [&](const FIntPoint& Toward)
+	{
+		// Du centre du secteur jusqu'à son bord, dans la direction du voisin.
+		const FVector2D Edge = Center + FVector2D(Toward) * (Size * 0.5f);
+		const FVector2D Min(FMath::Min(Center.X, Edge.X), FMath::Min(Center.Y, Edge.Y));
+		const FVector2D Max(FMath::Max(Center.X, Edge.X), FMath::Max(Center.Y, Edge.Y));
+		Layout.Paths.Add(FBox2D(Min - FVector2D(Toward.Y != 0 ? Half : 0.f, Toward.X != 0 ? Half : 0.f),
+			Max + FVector2D(Toward.Y != 0 ? Half : 0.f, Toward.X != 0 ? Half : 0.f)));
+	};
+	const FIntPoint Sides[] = { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) };
+
+	if (Layout.Type == ESectorType::Prairie && State->FindSectorOwnerKey(Layout.Coord))
+	{
+		for (const FIntPoint& Side : Sides)
+		{
+			if (ErewhonSector::IsRoad(Layout.Coord + Side))
+			{
+				Corridor(Side);
+				Layout.PlazaCenter = Center;
+				Layout.PlazaRadius = ErewhonSpawn::AccessClearingRadius;
+				break;   // un seul accès suffit, vers la première route trouvée
+			}
+		}
+	}
+	else if (Layout.Type == ESectorType::Road)
+	{
+		// Côté route : l'embranchement part du chemin principal vers chaque voisin relié.
+		for (const FIntPoint& Side : Sides)
+		{
+			const FIntPoint Neighbor = Layout.Coord + Side;
+			if (ErewhonSector::TypeAt(Neighbor, Layout.WorldSeed) != ESectorType::Prairie || !State->FindSectorOwnerKey(Neighbor))
+			{
+				continue;
+			}
+			// Le voisin se relie à sa première route : on ne trace que si c'est nous.
+			for (const FIntPoint& Back : Sides)
+			{
+				if (ErewhonSector::IsRoad(Neighbor + Back))
+				{
+					if (Neighbor + Back == Layout.Coord)
+					{
+						Corridor(Side);
+					}
+					break;
+				}
+			}
+		}
+	}
+}
+
 TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector, int32 WorldSeed) const
 {
 	TSharedRef<FSectorLayout> Layout = MakeShared<FSectorLayout>();
@@ -176,9 +248,9 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 	const float Size = UErewhonSettings::Get().SectorSize();
 	const FVector Origin = ErewhonSector::Origin(Sector);
 
+	ErewhonSpawn::BuildPaths(Sector, Layout->Type, Layout->Paths);
 	if (Layout->Type == ESectorType::Spawn)
 	{
-		ErewhonSpawn::BuildPaths(Sector, Layout->Paths);
 		Layout->PlazaCenter = FVector2D(ErewhonSector::Center(Sector));
 		Layout->PlazaRadius = UErewhonSettings::Get().PlazaRadiusMeters * 100.f;
 	}
@@ -234,6 +306,18 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 		}
 	}
 
+	// Les chemins d'accès viennent après les plantes : ils n'en décalent pas les index.
+	BuildAccessPaths(*Layout);
+	if (Layout->Paths.Num() > 0)
+	{
+		for (int32 Index = 0; Index < Layout->Plants.Num(); ++Index)
+		{
+			if (Layout->IsBare(FVector2D(Layout->Plants[Index].Location)))
+			{
+				Layout->CoveredPlants.Add(Index);
+			}
+		}
+	}
 	BuildBushes(*Layout, WorldSeed);
 
 	for (int32 Index = 0; Index < Layout->Plants.Num(); ++Index)
@@ -269,7 +353,7 @@ FPlantTarget USectorLayoutSubsystem::FindTarget(const FVector& Eye, const FVecto
 			Layout->GatherNear(Eye, Reach, Candidates);
 			for (const int32 Index : Candidates)
 			{
-				if (!Filter(Sector, Index))
+				if (Layout->CoveredPlants.Contains(Index) || !Filter(Sector, Index))
 				{
 					continue;
 				}

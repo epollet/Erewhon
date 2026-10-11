@@ -4,13 +4,18 @@
 #include "GameFramework/Actor.h"
 #include "Wildlife.generated.h"
 
-class UProceduralMeshComponent;
+class UAudioComponent;
 class UMaterialInterface;
+class UProceduralMeshComponent;
+class UStaticMesh;
+class UStaticMeshComponent;
 
 /**
- * Petite faune d'ambiance, purement visuelle et locale : papillons au-dessus de l'herbe
- * autour du joueur, vols d'oiseaux dans le ciel. Tous se reposent la nuit.
- * Corps et ailes sont construits par le code et animés à chaque image.
+ * Vie et ambiance sonore, purement locales :
+ * - papillons au-dessus de l'herbe autour du joueur ;
+ * - oiseaux (modèle généré, ailes animées par le matériau) en vols et en solitaires, qui chantent ;
+ * - vent (suit la force du vent du jeu) et bruissement de l'herbe quand on y marche.
+ * Les animaux se reposent la nuit.
  */
 UCLASS()
 class EREWHON_API AWildlife : public AActor
@@ -24,32 +29,43 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
-	/** Un animal : une racine qui se déplace, deux ailes qui battent. */
 	struct FCreature
 	{
 		TObjectPtr<USceneComponent> Body;
-		TObjectPtr<USceneComponent> WingLeft;
+		TObjectPtr<USceneComponent> WingLeft;    // papillons et oiseaux de repli
 		TObjectPtr<USceneComponent> WingRight;
-		FVector Home = FVector::ZeroVector;   // papillon : centre de sa ronde ; oiseau : place dans le vol
+		TObjectPtr<UStaticMeshComponent> Model;   // oiseau généré
+		TObjectPtr<class UMaterialInstanceDynamic> Flap;
+		float FlapAmount = 1.f;
+		FVector Home = FVector::ZeroVector;       // papillon : centre de sa ronde ; oiseau : place dans le vol
 		float Phase = 0.f;
 		float Speed = 1.f;
 		float Radius = 0.f;
+		float Altitude = 0.f;
+		int32 Flock = INDEX_NONE;                  // INDEX_NONE : oiseau solitaire
 	};
 
 	FCreature MakeCreature(const FLinearColor& Inner, const FLinearColor& Outer, float Span, bool bBird);
+	FCreature MakeBird();
 	UProceduralMeshComponent* MakeWing(USceneComponent* Parent, const FLinearColor& Inner, const FLinearColor& Outer, float Span, float Side, bool bBird);
-	void UpdateButterflies(const FVector& Focus, double Time, float DeltaSeconds);
-	void UpdateBirds(const FVector& Focus, double Time);
+	void UpdateButterflies(const FVector& Focus, double Time);
+	void UpdateBirds(const FVector& Focus, double Time, float DeltaSeconds);
+	void UpdateAmbience(const FVector& Focus, double Clock, float DeltaSeconds, bool bDay);
 	float GroundAt(const FVector2D& World) const;
 
-	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInterface> WingMaterial;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> WingMaterial;
+	UPROPERTY(Transient) TObjectPtr<UStaticMesh> BirdMesh;
+	UPROPERTY(Transient) TObjectPtr<UAudioComponent> WindAudio;
+	UPROPERTY(Transient) TObjectPtr<UAudioComponent> GrassAudio;
 
 	TArray<FCreature> Butterflies;
 	TArray<FCreature> Birds;
 
-	/** Centre autour duquel tournent les vols ; il suit le joueur par grands pas. */
 	FVector BirdAnchor = FVector::ZeroVector;
+	FTransform BirdFit = FTransform::Identity;
+	bool bBirdSpanAlongX = false;
 	bool bVisible = true;
+	float NextChirp = 3.f;
+	float GrassLevel = 0.f;
 	FRandomStream Rand;
 };

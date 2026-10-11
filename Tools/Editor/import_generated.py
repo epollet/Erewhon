@@ -67,6 +67,21 @@ def import_textures():
         log("icône " + name)
 
 
+# ── Sons ─────────────────────────────────────────────────────────────────────
+
+def import_sounds():
+    """WAV générés → /Game/Generated/Sounds/S_<nom> ; les ambiances (amb_*) bouclent."""
+    for path in source_files("sounds", (".wav",)):
+        base = os.path.splitext(os.path.basename(path))[0]
+        name = "S_" + base
+        import_file(path, GEN + "/Sounds", name)
+        sound = assets.load_asset(GEN + "/Sounds/" + name)
+        if sound:
+            sound.set_editor_property("looping", base.startswith("amb_"))
+            assets.save_loaded_asset(sound)
+    log("sons importés")
+
+
 # ── Meshes ───────────────────────────────────────────────────────────────────
 
 def import_mesh(path, folder, name):
@@ -308,6 +323,58 @@ def create_vertex_color():
     log("matériau M_VertexColor")
 
 
+def create_highlight():
+    """Halo de ciblage : lueur chaude translucide, plus vive sur les contours, qui pulse doucement."""
+    material = recreate("M_Highlight", "Materials", unreal.Material, unreal.MaterialFactoryNew())
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    material.set_editor_property("two_sided", True)
+    material.set_editor_property("used_with_instanced_static_meshes", True)
+
+    color = node(material, unreal.MaterialExpressionVectorParameter, -900, -100)
+    color.set_editor_property("parameter_name", "GlowColor")
+    color.set_editor_property("default_value", unreal.LinearColor(1.0, 0.8, 0.35, 1.0))
+    fresnel = node(material, unreal.MaterialExpressionFresnel, -900, 150)
+    fresnel.set_editor_property("exponent", 2.0)
+    rim = node(material, unreal.MaterialExpressionAdd, -650, 150)
+    connect(fresnel, "", rim, "A")
+    base = node(material, unreal.MaterialExpressionConstant, -800, 300)
+    base.set_editor_property("r", 0.22)
+    connect(base, "", rim, "B")
+
+    time = node(material, unreal.MaterialExpressionTime, -1100, 450)
+    speed = node(material, unreal.MaterialExpressionMultiply, -900, 450)
+    connect(time, "", speed, "A")
+    pulse_speed = node(material, unreal.MaterialExpressionConstant, -1100, 550)
+    pulse_speed.set_editor_property("r", 3.5)
+    connect(pulse_speed, "", speed, "B")
+    sine = node(material, unreal.MaterialExpressionSine, -750, 450)
+    connect(speed, "", sine, "")
+    pulse = node(material, unreal.MaterialExpressionMultiply, -600, 450)
+    connect(sine, "", pulse, "A")
+    amplitude = node(material, unreal.MaterialExpressionConstant, -750, 550)
+    amplitude.set_editor_property("r", 0.08)
+    connect(amplitude, "", pulse, "B")
+
+    opacity = node(material, unreal.MaterialExpressionAdd, -400, 300)
+    connect(rim, "", opacity, "A")
+    connect(pulse, "", opacity, "B")
+    clamped = node(material, unreal.MaterialExpressionSaturate, -250, 300)
+    connect(opacity, "", clamped, "")
+    mel.connect_material_property(clamped, "", unreal.MaterialProperty.MP_OPACITY)
+
+    glow = node(material, unreal.MaterialExpressionMultiply, -400, -50)
+    connect(color, "", glow, "A")
+    strength = node(material, unreal.MaterialExpressionConstant, -600, 0)
+    strength.set_editor_property("r", 1.6)
+    connect(strength, "", glow, "B")
+    mel.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+
+    mel.recompile_material(material)
+    assets.save_loaded_asset(material)
+    log("matériau M_Highlight")
+
+
 def create_generated_mesh_master():
     """Parent commun des modèles Meshy : utilisable en instances et avec Nanite."""
     material = recreate("M_GeneratedMesh", "Materials", unreal.Material, unreal.MaterialFactoryNew())
@@ -326,8 +393,79 @@ def create_generated_mesh_master():
     return material
 
 
-def rebind_generated_materials(master):
-    """Remplace les matériaux créés à l'import par des instances de M_GeneratedMesh."""
+def create_bird_flap():
+    """Comme M_GeneratedMesh, mais les ailes battent : le matériau soulève les sommets
+    proportionnellement à leur distance au corps, le long de l'axe des ailes.
+
+    Paramètres (une instance dynamique par oiseau, réglée par le jeu) :
+      FlapAmount = amplitude du battement (≈0 en vol plané), SpanIsX = ailes sur l'axe X local (1)
+      ou Y (0), Phase = décalage du battement.
+    """
+    material = recreate("M_BirdFlap", "Materials", unreal.Material, unreal.MaterialFactoryNew())
+    material.set_editor_property("two_sided", True)
+    texture = node(material, unreal.MaterialExpressionTextureSampleParameter2D, -600, -300)
+    texture.set_editor_property("parameter_name", "BaseColor")
+    mel.connect_material_property(texture, "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
+
+    names = {0: ("FlapAmount", 1.0), 1: ("SpanIsX", 0.0), 2: ("Phase", 0.0)}
+
+    def primitive_data(index, y):
+        name, default = names[index]
+        return scalar(material, name, default, -1400, y)
+
+    local = node(material, unreal.MaterialExpressionLocalPosition, -1600, 200)
+    x = node(material, unreal.MaterialExpressionComponentMask, -1400, 150)
+    x.set_editor_property("r", True)
+    y = node(material, unreal.MaterialExpressionComponentMask, -1400, 250)
+    y.set_editor_property("g", True)
+    connect(local, "", x, "")
+    connect(local, "", y, "")
+    span = node(material, unreal.MaterialExpressionLinearInterpolate, -1200, 200)
+    connect(y, "", span, "A")
+    connect(x, "", span, "B")
+    connect(primitive_data(1, 350), "", span, "Alpha")
+    distance = node(material, unreal.MaterialExpressionAbs, -1050, 200)
+    connect(span, "", distance, "")
+
+    time = node(material, unreal.MaterialExpressionTime, -1400, 500)
+    rate = node(material, unreal.MaterialExpressionMultiply, -1200, 500)
+    connect(time, "", rate, "A")
+    connect(scalar(material, "FlapRate", 11.0, -1400, 600), "", rate, "B")
+    phased = node(material, unreal.MaterialExpressionAdd, -1050, 500)
+    connect(rate, "", phased, "A")
+    connect(primitive_data(2, 700), "", phased, "B")
+    wave = node(material, unreal.MaterialExpressionSine, -900, 500)
+    connect(phased, "", wave, "")
+
+    lift = node(material, unreal.MaterialExpressionMultiply, -750, 300)
+    connect(distance, "", lift, "A")
+    connect(wave, "", lift, "B")
+    amplitude = node(material, unreal.MaterialExpressionMultiply, -600, 300)
+    connect(lift, "", amplitude, "A")
+    connect(primitive_data(0, 450), "", amplitude, "B")
+    scaled = node(material, unreal.MaterialExpressionMultiply, -450, 300)
+    connect(amplitude, "", scaled, "A")
+    connect(scalar(material, "FlapStrength", 0.55, -600, 450), "", scaled, "B")
+
+    zero = node(material, unreal.MaterialExpressionConstant2Vector, -450, 500)
+    offset = node(material, unreal.MaterialExpressionAppendVector, -300, 400)
+    connect(zero, "", offset, "A")
+    connect(scaled, "", offset, "B")
+    world = node(material, unreal.MaterialExpressionTransform, -150, 400)
+    world.set_editor_property("transform_source_type", unreal.MaterialVectorCoordTransformSource.TRANSFORMSOURCE_LOCAL)
+    world.set_editor_property("transform_type", unreal.MaterialVectorCoordTransform.TRANSFORM_WORLD)
+    connect(offset, "", world, "")
+    mel.connect_material_property(world, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
+
+    mel.recompile_material(material)
+    assets.save_loaded_asset(material)
+    log("matériau M_BirdFlap")
+    return material
+
+
+def rebind_generated_materials(master, specials=None):
+    """Remplace les matériaux créés à l'import par des instances de M_GeneratedMesh
+    (ou d'un parent dédié pour les noms listés dans specials)."""
     for path in assets.list_assets(GEN + "/Meshes", recursive=False, include_folder=False):
         mesh = assets.load_asset(path.split(".")[0])
         if not isinstance(mesh, unreal.StaticMesh):
@@ -345,7 +483,7 @@ def rebind_generated_materials(master):
             instance_name = "MI_%s_%d" % (name, index)
             instance = recreate(instance_name, "Meshes/" + name, unreal.MaterialInstanceConstant,
                                 unreal.MaterialInstanceConstantFactoryNew())
-            mel.set_material_instance_parent(instance, master)
+            mel.set_material_instance_parent(instance, (specials or {}).get(name, master))
             if base_color:
                 mel.set_material_instance_texture_parameter_value(instance, "BaseColor", base_color)
             assets.save_loaded_asset(instance)
@@ -360,7 +498,9 @@ create_painted_world()
 create_foliage()
 create_ground_blend()
 create_vertex_color()
+create_highlight()
 if assets.does_asset_exist(GEN + "/Materials/M_PathBlend"):
     assets.delete_asset(GEN + "/Materials/M_PathBlend")   # remplacé par M_GroundBlend
-rebind_generated_materials(create_generated_mesh_master())
+rebind_generated_materials(create_generated_mesh_master(), {"bird": create_bird_flap()})
+import_sounds()
 log("terminé")

@@ -7,11 +7,14 @@
 #include "Inventory/InventoryComponent.h"
 #include "Items/ItemDatabase.h"
 #include "UI/ErewhonSlate.h"
+#include "Styling/CoreStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SUniformGridPanel.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/SToolTip.h"
 #include "Widgets/Text/STextBlock.h"
 #include "World/SectorTypes.h"
@@ -22,46 +25,29 @@ using namespace ErewhonUI;
 
 namespace
 {
-	constexpr float GPanelWidth = 560.f;
-	constexpr float GListHeight = 420.f;
+	constexpr float GPanelWidth = 760.f;
+	constexpr float GContentHeight = 430.f;
+	constexpr float GTileSize = 40.f;
+	constexpr int32 GBuyColumns = 4;
 
-	TSharedRef<SWidget> ActionButton(const FText& Label, bool bEnabled, TFunction<void()> OnClick)
-	{
-		return SNew(SBox).MinDesiredWidth(96.f)
-			[
-				SNew(SButton)
-				.IsEnabled(bEnabled)
-				.HAlign(HAlign_Center)
-				.OnClicked_Lambda([OnClick]() { OnClick(); return FReply::Handled(); })
-				[
-					SNew(STextBlock).Text(Label).Font(Font(10, true))
-				]
-			];
-	}
-
-	/** Ligne de liste : vignette, libellé, détail, puis boutons. */
-	TSharedRef<SHorizontalBox> ListRow(TSharedRef<SWidget> Icon, const FText& Label, const FText& Detail, const FLinearColor& DetailColor)
-	{
-		return SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 10, 0)[Icon]
-			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
-			[
-				SNew(STextBlock).Text(Label).Font(Font(11)).ColorAndOpacity(TextColor)
-			]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10, 0)
-			[
-				SNew(STextBlock).Text(Detail).Font(Font(11, true)).ColorAndOpacity(DetailColor)
-			];
-	}
-
-	TSharedRef<SWidget> Scrolling(TSharedRef<SVerticalBox> List)
-	{
-		return SNew(SBox).HeightOverride(GListHeight)[SNew(SScrollBox) + SScrollBox::Slot()[List]];
-	}
-
-	FText Coins(int32 Amount)
+	FText CoinsText(int32 Amount)
 	{
 		return FText::Format(LOCTEXT("CoinsFmt", "{0} C"), FText::AsNumber(Amount));
+	}
+
+	/** État d'un secteur vu par le joueur. */
+	enum class ESectorState : uint8 { Merchant, Road, Free, Mine, Taken };
+
+	FLinearColor StateColor(ESectorState State)
+	{
+		switch (State)
+		{
+		case ESectorState::Merchant: return Clay;
+		case ESectorState::Road:     return RoadColor;
+		case ESectorState::Mine:     return Sky;
+		case ESectorState::Taken:    return Mix(Danger, Card, 0.35f);
+		default:                     return Mix(Leaf, Card, 0.25f);
+		}
 	}
 }
 
@@ -79,7 +65,7 @@ void SStorePanel::Construct(const FArguments& InArgs)
 	{
 		World->OnSectorOwnerChanged.AddSP(this, &SStorePanel::OnSectorOwnerChanged);
 	}
-	// Sans secteur, rien à récolter : on ouvre d'abord sur les secteurs.
+	// Sans secteur, rien à récolter : on ouvre d'abord sur la carte.
 	if (State && World && World->GetSectorsOwnedBy(State->GetPlayerKey()).IsEmpty())
 	{
 		Tab = ETab::Sectors;
@@ -88,9 +74,9 @@ void SStorePanel::Construct(const FArguments& InArgs)
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	ChildSlot
 	[
-		Window(LOCTEXT("Title", "Marchand"), SAssignNew(Body, SBox),
+		Window(LOCTEXT("Title", "Le marchand"), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
-			GPanelWidth)
+			GPanelWidth, LOCTEXT("Subtitle", "« Bonjour ! Qu'est-ce qui vous ferait plaisir ? »"))
 	];
 	Rebuild();
 }
@@ -107,25 +93,21 @@ FReply SStorePanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKe
 
 void SStorePanel::Rebuild()
 {
-	if (!Body.IsValid() || !Controller.IsValid() || !Controller->GetPlayerState<AErewhonPlayerState>())
+	const AErewhonPlayerState* State = Controller.IsValid() ? Controller->GetPlayerState<AErewhonPlayerState>() : nullptr;
+	if (!Body.IsValid() || !State)
 	{
 		return;
 	}
 	TSharedRef<SWidget> Content = Tab == ETab::Sectors ? BuildSectors() : Tab == ETab::Buy ? BuildBuy() : BuildSell();
 	Body->SetContent(
 		SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 12)
 		[
 			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1.f)[BuildTabs()]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-			[
-				SNew(STextBlock).Text(Coins(Controller->GetPlayerState<AErewhonPlayerState>()->GetCoins()))
-				.Font(Font(16, true)).ColorAndOpacity(CoinColor)
-			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)[BuildTabs()]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[CoinBadge(State->GetCoins(), 14)]
 		]
-		+ SVerticalBox::Slot().AutoHeight()[Separator()]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)[Content]);
+		+ SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride(GContentHeight)[Content]]);
 }
 
 TSharedRef<SWidget> SStorePanel::BuildTabs()
@@ -139,117 +121,233 @@ TSharedRef<SWidget> SStorePanel::BuildTabs()
 	for (const TPair<ETab, FText>& Entry : Entries)
 	{
 		const ETab Value = Entry.Key;
-		const bool bActive = Tab == Value;
-		Tabs->AddSlot().AutoWidth().Padding(0, 0, 6, 0)
+		Tabs->AddSlot().AutoWidth().Padding(0, 0, 8, 0)
 		[
-			SNew(SButton)
-			.ButtonColorAndOpacity(bActive ? EquipmentAccent : FLinearColor(0.3f, 0.26f, 0.2f, 1.f))
-			.OnClicked_Lambda([this, Value]() { Tab = Value; Rebuild(); return FReply::Handled(); })
-			[
-				SNew(STextBlock).Text(Entry.Value).Font(Font(11, true)).ColorAndOpacity(TextColor)
-			]
+			Button(Entry.Value, [this, Value]() { Tab = Value; Rebuild(); }, Tab == Value ? EButton::TabActive : EButton::Tab, true, 110.f, 11)
 		];
 	}
 	return Tabs;
 }
 
+// ── Secteurs ─────────────────────────────────────────────────────────────────
+
 TSharedRef<SWidget> SStorePanel::BuildSectors()
 {
 	const AErewhonGameState* World = AErewhonGameState::Get(Controller.Get());
 	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
-	const UErewhonSettings& Settings = UErewhonSettings::Get();
-	TSharedRef<SVerticalBox> List = SNew(SVerticalBox);
 	if (!World)
 	{
-		return List;
+		return SNew(SBox);
 	}
+	const int32 R = UErewhonSettings::Get().StoreSectorRadius;
 
-	// Secteurs autour du spawn, du plus proche au plus lointain.
-	TArray<FIntPoint> Sectors;
-	const int32 R = Settings.StoreSectorRadius;
-	for (int32 Y = -R; Y <= R; ++Y)
+	// La carte : nord (+X) en haut, est (+Y) à droite, la cabane au centre.
+	TSharedRef<SUniformGridPanel> Map = SNew(SUniformGridPanel).SlotPadding(2.f);
+	for (int32 X = R; X >= -R; --X)
 	{
-		for (int32 X = -R; X <= R; ++X)
+		for (int32 Y = -R; Y <= R; ++Y)
 		{
-			if (ErewhonSector::IsPurchasable(FIntPoint(X, Y)))
+			const FIntPoint Sector(X, Y);
+			const ESectorType Type = ErewhonSector::TypeAt(Sector, World->GetWorldSeed());
+			const FString* Owner = World->FindSectorOwnerKey(Sector);
+			const ESectorState TileState = Type == ESectorType::Spawn ? ESectorState::Merchant
+				: Type == ESectorType::Road ? ESectorState::Road
+				: !Owner ? ESectorState::Free
+				: *Owner == State->GetPlayerKey() ? ESectorState::Mine : ESectorState::Taken;
+			const bool bSelected = Sector == Selected;
+			const FLinearColor Fill = StateColor(TileState);
+
+			FText Glyph;
+			if (TileState == ESectorState::Merchant)
 			{
-				Sectors.Add(FIntPoint(X, Y));
+				Glyph = FText::FromString(TEXT("⌂"));   // maisonnette
 			}
+			else if (TileState == ESectorState::Mine)
+			{
+				Glyph = FText::FromString(TEXT("★"));
+			}
+
+			Map->AddSlot(Y + R, R - X)
+			[
+				SNew(SBox).WidthOverride(GTileSize).HeightOverride(GTileSize)
+				[
+					SNew(SButton)
+					.ButtonStyle(&FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("NoBorder"))
+					.ContentPadding(0.f)
+					.ToolTipText(FText::Format(LOCTEXT("TileTip", "Secteur {0} · {1}"), FText::FromString(ErewhonSector::ToString(Sector)), ErewhonSector::TypeLabel(Type)))
+					.OnClicked_Lambda([this, Sector]() { Selected = Sector; Rebuild(); return FReply::Handled(); })
+					[
+						SNew(SBorder)
+						.BorderImage(Rounded(Fill, 6.f, bSelected ? Gold : Mix(Fill, Ink, 0.25f), bSelected ? 3.f : 1.f))
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						[
+							SNew(STextBlock).Text(Glyph).Font(Font(14, true)).ColorAndOpacity(FLinearColor::White)
+						]
+					]
+				]
+			];
 		}
 	}
-	Sectors.Sort([](const FIntPoint& A, const FIntPoint& B)
+
+	const auto Legend = [](ESectorState LegendState, const FText& Label)
 	{
-		const int32 DA = A.X * A.X + A.Y * A.Y;
-		const int32 DB = B.X * B.X + B.Y * B.Y;
-		return DA != DB ? DA < DB : (A.X != B.X ? A.X < B.X : A.Y < B.Y);
-	});
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 5, 0)
+			[
+				SNew(SBox).WidthOverride(12.f).HeightOverride(12.f)[SNew(SBorder).BorderImage(Rounded(StateColor(LegendState), 3.f))]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(STextBlock).Text(Label).Font(Font(9)).ColorAndOpacity(MutedInk)
+			];
+	};
 
-	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
-	for (const FIntPoint& Sector : Sectors)
-	{
-		const FString* OwnerKey = World->FindSectorOwnerKey(Sector);
-		const bool bMine = OwnerKey && *OwnerKey == State->GetPlayerKey();
-		const FText Label = FText::Format(LOCTEXT("SectorLabel", "{0} · {1}"),
-			FText::FromString(ErewhonSector::ToString(Sector)), ErewhonSector::TypeLabel(ErewhonSector::TypeAt(Sector, World->GetWorldSeed())));
-
-		FText Detail;
-		FLinearColor DetailColor = MutedText;
-		TSharedPtr<SWidget> Action;
-		if (bMine)
-		{
-			Detail = LOCTEXT("Mine", "à vous");
-			DetailColor = InventoryAccent;
-			Action = ActionButton(FText::Format(LOCTEXT("SellSector", "Revendre {0}"), Coins(Settings.SectorSellPrice)), true,
-				[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerSellSector(Sector); } });
-		}
-		else if (OwnerKey)
-		{
-			Detail = FText::FromString(World->GetSectorOwnerName(Sector));
-			Action = SNew(SBox).MinDesiredWidth(96.f);
-		}
-		else
-		{
-			Detail = LOCTEXT("Free", "libre");
-			DetailColor = ClothingAccent;
-			Action = ActionButton(FText::Format(LOCTEXT("BuySector", "Acheter {0}"), Coins(Settings.SectorBuyPrice)),
-				State->GetCoins() >= Settings.SectorBuyPrice,
-				[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerBuySector(Sector); } });
-		}
-
-		TSharedRef<SHorizontalBox> Row = ListRow(SNew(SBox), Label, Detail, DetailColor);
-		Row->AddSlot().AutoWidth().VAlign(VAlign_Center)[Action.ToSharedRef()];
-		List->AddSlot().AutoHeight().Padding(0, 2)[Row];
-	}
-	return Scrolling(List);
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth()
+		[
+			CardBox(
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()[Map]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[Legend(ESectorState::Free, LOCTEXT("LegendFree", "Libre"))]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[Legend(ESectorState::Mine, LOCTEXT("LegendMine", "À vous"))]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[Legend(ESectorState::Taken, LOCTEXT("LegendTaken", "Pris"))]
+					+ SHorizontalBox::Slot().AutoWidth()[Legend(ESectorState::Road, LOCTEXT("LegendRoad", "Route"))]
+				],
+				10.f)
+		]
+		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(14, 0, 0, 0)[BuildSectorDetail()];
 }
+
+TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
+{
+	const AErewhonGameState* World = AErewhonGameState::Get(Controller.Get());
+	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
+	const UErewhonSettings& Settings = UErewhonSettings::Get();
+	const FIntPoint Sector = Selected;
+	const ESectorType Type = ErewhonSector::TypeAt(Sector, World->GetWorldSeed());
+	const FString* Owner = World->FindSectorOwnerKey(Sector);
+	const bool bMine = Owner && *Owner == State->GetPlayerKey();
+
+	FText Status;
+	TSharedRef<SWidget> Action = SNew(SBox);
+	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
+	if (Type == ESectorType::Spawn)
+	{
+		Status = LOCTEXT("StatusMerchant", "Ma cabane et sa place. Pas à vendre, désolé !");
+	}
+	else if (Type == ESectorType::Road)
+	{
+		Status = LOCTEXT("StatusRoad", "Une route, à tout le monde. Achetez un secteur qui la borde : un chemin vous y mènera.");
+	}
+	else if (bMine)
+	{
+		Status = LOCTEXT("StatusMine", "C'est chez vous. Je vous le reprends à moitié prix si vous voulez.");
+		Action = Button(FText::Format(LOCTEXT("Resell", "Revendre · {0}"), CoinsText(Settings.SectorSellPrice)),
+			[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerSellSector(Sector); } }, EButton::Secondary, true, 200.f);
+	}
+	else if (Owner)
+	{
+		Status = FText::Format(LOCTEXT("StatusTaken", "Ce secteur appartient à {0}."), FText::FromString(World->GetSectorOwnerName(Sector)));
+	}
+	else
+	{
+		bool bNearRoad = false;
+		for (const FIntPoint& Side : { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+		{
+			bNearRoad |= ErewhonSector::IsRoad(Sector + Side);
+		}
+		Status = bNearRoad
+			? LOCTEXT("StatusFreeRoad", "Une belle prairie au bord de la route. Un chemin y sera tracé.")
+			: LOCTEXT("StatusFree", "Une prairie libre, rien que pour vous.");
+		const bool bAfford = State->GetCoins() >= Settings.SectorBuyPrice;
+		Action = Button(FText::Format(LOCTEXT("Buy", "Acheter · {0}"), CoinsText(Settings.SectorBuyPrice)),
+			[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerBuySector(Sector); } }, EButton::Primary, bAfford, 200.f);
+	}
+
+	const TArray<FIntPoint> Owned = World->GetSectorsOwnedBy(State->GetPlayerKey());
+	FString OwnedList;
+	for (const FIntPoint& Mine : Owned)
+	{
+		OwnedList += (OwnedList.IsEmpty() ? TEXT("") : TEXT(", ")) + ErewhonSector::ToString(Mine);
+	}
+
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			CardBox(
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock).Text(FText::Format(LOCTEXT("DetailTitle", "Secteur {0}"), FText::FromString(ErewhonSector::ToString(Sector))))
+					.Font(Font(18, true)).ColorAndOpacity(Ink)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 10)
+				[
+					SNew(STextBlock).Text(ErewhonSector::TypeLabel(Type)).Font(Font(11, true)).ColorAndOpacity(Clay)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 14)
+				[
+					SNew(STextBlock).Text(Status).Font(Font(11)).ColorAndOpacity(Ink).AutoWrapText(true)
+				]
+				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left)[Action],
+				16.f)
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(4, 14, 0, 0)
+		[
+			SNew(STextBlock)
+			.Text(Owned.IsEmpty()
+				? LOCTEXT("NoneOwned", "Vous ne possédez encore aucun secteur : on ne récolte que chez soi.")
+				: FText::Format(LOCTEXT("OwnedList", "Vos secteurs : {0}"), FText::FromString(OwnedList)))
+			.Font(Font(10)).ColorAndOpacity(MutedInk).AutoWrapText(true)
+		];
+}
+
+// ── Acheter ──────────────────────────────────────────────────────────────────
 
 TSharedRef<SWidget> SStorePanel::BuildBuy()
 {
 	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
 	const UItemDatabase* Items = UItemDatabase::Get(Controller.Get());
-	TSharedRef<SVerticalBox> List = SNew(SVerticalBox);
+	TSharedRef<SUniformGridPanel> Grid = SNew(SUniformGridPanel).SlotPadding(6.f);
 	if (!Items)
 	{
-		return List;
+		return Grid;
 	}
 
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
+	int32 Index = 0;
 	for (const FItemDef* Def : Items->GetPurchasable())
 	{
 		const bool bOwned = Def->IsUnique() && State->GetInventory()->Owns(Def->Id);
+		const bool bAfford = State->GetCoins() >= Def->BuyPrice;
 		const FName Id = Def->Id;
-		TSharedRef<SHorizontalBox> Row = ListRow(ItemIcon(Def, 32.f), Def->Name, Coins(Def->BuyPrice), CoinColor);
-		Row->AddSlot().AutoWidth().VAlign(VAlign_Center)
-		[
-			ActionButton(bOwned ? LOCTEXT("Owned", "Possédé") : LOCTEXT("Buy", "Acheter"),
-				!bOwned && State->GetCoins() >= Def->BuyPrice,
-				[WeakController, Id]() { if (WeakController.IsValid()) { WeakController->ServerBuyItem(Id); } })
-		];
-		Row->SetToolTip(ItemTooltip(*Def));
-		List->AddSlot().AutoHeight().Padding(0, 3)[Row];
+		TSharedRef<SWidget> ItemCard = CardBox(
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)[ItemIcon(Def, 72.f)]
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 6, 0, 2)
+			[
+				SNew(STextBlock).Text(Def->Name).Font(Font(11, true)).ColorAndOpacity(Ink).Justification(ETextJustify::Center)
+			]
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 0, 0, 8)[CoinBadge(Def->BuyPrice, 10)]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				Button(bOwned ? LOCTEXT("Owned", "Déjà à vous") : LOCTEXT("BuyItem", "Acheter"),
+					[WeakController, Id]() { if (WeakController.IsValid()) { WeakController->ServerBuyItem(Id); } },
+					EButton::Primary, !bOwned && bAfford, 0.f, 11)
+			],
+			10.f);
+		ItemCard->SetToolTip(ItemTooltip(*Def));
+		Grid->AddSlot(Index % GBuyColumns, Index / GBuyColumns)[ItemCard];
+		++Index;
 	}
-	return Scrolling(List);
+	return SNew(SScrollBox) + SScrollBox::Slot()[Grid];
 }
+
+// ── Vendre ───────────────────────────────────────────────────────────────────
 
 TSharedRef<SWidget> SStorePanel::BuildSell()
 {
@@ -273,6 +371,7 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 	}
 
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
+	int32 Total = 0;
 	for (const FName Id : Seen)
 	{
 		const FItemDef* Def = Items->Find(Id);
@@ -282,31 +381,51 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 			continue;
 		}
 		const int32 Count = State->GetInventory()->CountStored(Id);
-		const FText Label = FText::Format(LOCTEXT("SellLabel", "{0} × {1}"), Def->Name, FText::AsNumber(Count));
-		TSharedRef<SHorizontalBox> Row = ListRow(ItemIcon(Def, 32.f), Label, Coins(Price), CoinColor);
-		Row->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
-		[
-			ActionButton(LOCTEXT("SellOne", "Vendre"), true,
-				[WeakController, Id]() { if (WeakController.IsValid()) { WeakController->ServerSellItem(Id, 1); } })
-		];
-		Row->AddSlot().AutoWidth().VAlign(VAlign_Center)
-		[
-			ActionButton(FText::Format(LOCTEXT("SellAll", "Tout ({0})"), Coins(Price * Count)), true,
-				[WeakController, Id, Count]() { if (WeakController.IsValid()) { WeakController->ServerSellItem(Id, Count); } })
-		];
+		Total += Price * Count;
+		TSharedRef<SWidget> Row = CardBox(
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 12, 0)[ItemIcon(Def, 44.f)]
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(Def->Name).Font(Font(12, true)).ColorAndOpacity(Ink)]
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock).Text(FText::Format(LOCTEXT("SellCount", "{0} en stock · {1} pièce"), FText::AsNumber(Count), CoinsText(Price)))
+					.Font(Font(10)).ColorAndOpacity(MutedInk)
+				]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 8, 0)
+			[
+				Button(LOCTEXT("SellOne", "Vendre 1"), [WeakController, Id]() { if (WeakController.IsValid()) { WeakController->ServerSellItem(Id, 1); } }, EButton::Secondary, true, 100.f, 11)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				Button(FText::Format(LOCTEXT("SellAll", "Tout · {0}"), CoinsText(Price * Count)),
+					[WeakController, Id, Count]() { if (WeakController.IsValid()) { WeakController->ServerSellItem(Id, Count); } }, EButton::Primary, true, 130.f, 11)
+			],
+			8.f);
 		Row->SetToolTip(ItemTooltip(*Def));
-		List->AddSlot().AutoHeight().Padding(0, 3)[Row];
+		List->AddSlot().AutoHeight().Padding(0, 0, 0, 6)[Row];
 	}
 
-	if (Seen.IsEmpty())
+	if (List->NumSlots() == 0)
 	{
-		List->AddSlot().AutoHeight()
-		[
-			SNew(STextBlock).Text(LOCTEXT("NothingToSell", "Rien à vendre. Récoltez herbes et fleurs sur vos secteurs !"))
-			.Font(Font(11)).ColorAndOpacity(MutedText)
-		];
+		return SNew(SBox).HAlign(HAlign_Center).VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("NothingToSell", "Rien à vendre pour l'instant.\nRécoltez herbes et fleurs sur vos secteurs, je vous les rachète !"))
+				.Justification(ETextJustify::Center)
+				.Font(Font(12)).ColorAndOpacity(MutedInk)
+			];
 	}
-	return Scrolling(List);
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot().FillHeight(1.f)[SNew(SScrollBox) + SScrollBox::Slot()[List]]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0).HAlign(HAlign_Right)
+		[
+			SNew(STextBlock).Text(FText::Format(LOCTEXT("SellTotal", "Valeur de tout votre stock : {0}"), CoinsText(Total)))
+			.Font(Font(11, true)).ColorAndOpacity(Ink)
+		];
 }
 
 #undef LOCTEXT_NAMESPACE

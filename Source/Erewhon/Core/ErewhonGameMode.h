@@ -45,4 +45,5 @@ private:
 	TObjectPtr<UErewhonWorldSave> WorldSave;
 
 	FTimerHandle AutosaveTimer;
+	FString SaveSlot;
 };

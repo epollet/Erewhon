@@ -23,9 +23,13 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	/** Secteur affiché à ces coordonnées, nul s'il n'est pas chargé. */
+	static ASector* FindLoaded(const UObject* WorldContext, const FIntPoint& Coord);
+
 private:
 	void Refresh();
 	void RebuildAll();
+	void OnSectorOwnerChanged(const FIntPoint& Sector);
 	void OnPlantHarvestChanged(const FIntPoint& Sector, int32 PlantIndex, bool bHarvested);
 
 	UPROPERTY(Transient)
@@ -37,4 +41,5 @@ private:
 
 	FDelegateHandle HarvestHandle;
 	FDelegateHandle DetailHandle;
+	FDelegateHandle OwnerHandle;
 };

@@ -391,6 +391,25 @@ void ASector::PlantTransforms(int32 PlantIndex, TArray<FTransform>& Out) const
 	}
 }
 
+void ASector::GetPlantVisual(int32 PlantIndex, TArray<TPair<UStaticMesh*, FTransform>>& Out) const
+{
+	Out.Reset();
+	if (!bPlantsBuilt || !KindOfPlant.IsValidIndex(PlantIndex))
+	{
+		return;
+	}
+	const FPlantKind& Kind = Kinds[KindOfPlant[PlantIndex]];
+	TArray<FTransform> Members;
+	PlantTransforms(PlantIndex, Members);
+	for (const FTransform& Member : Members)
+	{
+		for (int32 PartIndex = 0; PartIndex < Kind.Parts.Num(); ++PartIndex)
+		{
+			Out.Emplace(Kind.Parts[PartIndex]->GetStaticMesh(), Kind.PartLocal[PartIndex] * Member * GetActorTransform());
+		}
+	}
+}
+
 void ASector::BuildPlants()
 {
 	const int32 Count = Layout->Plants.Num();
@@ -414,8 +433,13 @@ void ASector::BuildPlants()
 		PlantTransforms(Index, Members);
 		KindOfPlant[Index] = KindIndex;
 		InstanceOfPlant[Index] = Batches[KindIndex][0].Num();
-		for (const FTransform& Member : Members)
+		const bool bCovered = Layout->CoveredPlants.Contains(Index);
+		for (FTransform Member : Members)
 		{
+			if (bCovered)
+			{
+				Member.SetScale3D(FVector(KINDA_SMALL_NUMBER));   // sous un chemin d'accès
+			}
 			for (int32 PartIndex = 0; PartIndex < Kind.Parts.Num(); ++PartIndex)
 			{
 				Batches[KindIndex][PartIndex].Add(Kind.PartLocal[PartIndex] * Member);
@@ -435,7 +459,7 @@ void ASector::BuildPlants()
 
 void ASector::SetPlantHarvested(int32 PlantIndex, bool bHarvested)
 {
-	if (!bPlantsBuilt || !KindOfPlant.IsValidIndex(PlantIndex))
+	if (!bPlantsBuilt || !KindOfPlant.IsValidIndex(PlantIndex) || Layout->CoveredPlants.Contains(PlantIndex))
 	{
 		return;
 	}

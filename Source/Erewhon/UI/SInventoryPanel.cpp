@@ -7,6 +7,7 @@
 #include "UI/ErewhonSlate.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Styling/CoreStyle.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SUniformGridPanel.h"
@@ -94,8 +95,10 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(int32 SlotIndex, const FLinearCol
 		{
 			Content->AddSlot().HAlign(HAlign_Right).VAlign(VAlign_Bottom)
 			[
-				SNew(STextBlock).Text(FText::AsNumber(Slot.Count)).Font(Font(11, true)).ColorAndOpacity(TextColor)
-				.ShadowOffset(FVector2D(1, 1))
+				SNew(SBorder).BorderImage(Rounded(Ink, 7.f)).Padding(FMargin(5.f, 0.f))
+				[
+					SNew(STextBlock).Text(FText::AsNumber(Slot.Count)).Font(Font(9, true)).ColorAndOpacity(FLinearColor::White)
+				]
 			];
 		}
 	}
@@ -103,14 +106,14 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(int32 SlotIndex, const FLinearCol
 	{
 		Content->AddSlot().HAlign(HAlign_Center).VAlign(VAlign_Center)
 		[
-			SNew(STextBlock).Text(EmptyLabel).Font(Font(8)).ColorAndOpacity(MutedText)
+			SNew(STextBlock).Text(EmptyLabel).Font(Font(8)).ColorAndOpacity(Mix(Accent, MutedInk, 0.4f))
 		];
 	}
 
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	TSharedRef<SButton> Button = SNew(SButton)
-		.ButtonColorAndOpacity(FLinearColor(Accent.R * 0.35f, Accent.G * 0.35f, Accent.B * 0.35f, 1.f))
-		.ContentPadding(2.f)
+		.ButtonStyle(&FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("NoBorder"))
+		.ContentPadding(3.f)
 		.OnClicked_Lambda([WeakController, SlotIndex]()
 		{
 			const AErewhonPlayerState* State = WeakController.IsValid() ? WeakController->GetPlayerState<AErewhonPlayerState>() : nullptr;
@@ -128,9 +131,19 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(int32 SlotIndex, const FLinearCol
 		Button->SetToolTip(ItemTooltip(*Def));
 	}
 
+	// Case arrondie, teintée par son type ; elle s'éclaire au survol.
+	const TWeakPtr<SButton> WeakButton = Button;
+	const FSlateBrush* Normal = Rounded(Mix(Card, Accent, Def ? 0.12f : 0.06f), 10.f, Mix(Accent, Card, 0.25f), 2.f);
+	const FSlateBrush* Hovered = Rounded(Mix(Card, Gold, 0.25f), 10.f, Gold, 2.5f);
 	return SNew(SBox).WidthOverride(GSlotSize).HeightOverride(GSlotSize)
 		[
-			SNew(SBorder).BorderImage(WhiteBrush()).BorderBackgroundColor(Accent).Padding(2.f)
+			SNew(SBorder)
+			.BorderImage_Lambda([WeakButton, Normal, Hovered]()
+			{
+				const TSharedPtr<SButton> Pinned = WeakButton.Pin();
+				return Pinned.IsValid() && Pinned->IsHovered() ? Hovered : Normal;
+			})
+			.Padding(0.f)
 			[
 				Button
 			]
@@ -148,7 +161,7 @@ void SInventoryPanel::Rebuild()
 	const AErewhonPlayerState* State = Controller.IsValid() ? Controller->GetPlayerState<AErewhonPlayerState>() : nullptr;
 	if (!Inventory || !Items || !State || Inventory->GetSlots().IsEmpty())
 	{
-		Body->SetContent(SNew(STextBlock).Text(LOCTEXT("Loading", "Chargement…")).ColorAndOpacity(MutedText));
+		Body->SetContent(SNew(STextBlock).Text(LOCTEXT("Loading", "Chargement…")).ColorAndOpacity(MutedInk));
 		return;
 	}
 	const TArray<FInventorySlot>& Slots = Inventory->GetSlots();
@@ -219,7 +232,7 @@ void SInventoryPanel::Rebuild()
 		RowsBox->AddSlot().AutoHeight().Padding(0, bBase ? 0 : 10, 0, 4)[Separator()];
 		RowsBox->AddSlot().AutoHeight().Padding(0, 2, 0, 4)
 		[
-			SNew(STextBlock).Text(Row.Label).Font(Font(11, true)).ColorAndOpacity(MutedText)
+			SNew(STextBlock).Text(Row.Label).Font(Font(11, true)).ColorAndOpacity(MutedInk)
 		];
 		RowsBox->AddSlot().AutoHeight()
 		[
@@ -243,8 +256,7 @@ void SInventoryPanel::Rebuild()
 		SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
 		[
-			SNew(STextBlock).Text(FText::Format(LOCTEXT("Coins", "{0} C"), FText::AsNumber(State->GetCoins())))
-			.Font(Font(16, true)).ColorAndOpacity(CoinColor)
+			SNew(SBox).HAlign(HAlign_Left)[CoinBadge(State->GetCoins(), 14)]
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
 		[
@@ -263,7 +275,7 @@ void SInventoryPanel::Rebuild()
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 		[
 			SNew(STextBlock).Text(LOCTEXT("Help", "Clic : équiper / ranger. Survol : description."))
-			.Font(Font(9)).ColorAndOpacity(MutedText)
+			.Font(Font(9)).ColorAndOpacity(MutedInk)
 		]);
 }
 

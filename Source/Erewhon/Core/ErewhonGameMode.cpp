@@ -38,7 +38,12 @@ void AErewhonGameMode::InitGameState()
 	Super::InitGameState();
 
 	const UErewhonSettings& Settings = UErewhonSettings::Get();
-	WorldSave = Cast<UErewhonWorldSave>(UGameplayStatics::LoadGameFromSlot(Settings.WorldSaveSlot, 0));
+	SaveSlot = Settings.WorldSaveSlot;
+#if !UE_BUILD_SHIPPING
+	// -ErewhonSaveSlot=<nom> : les tests jouent sur leur propre monde, sans toucher au vôtre.
+	FParse::Value(FCommandLine::Get(), TEXT("ErewhonSaveSlot="), SaveSlot);
+#endif
+	WorldSave = Cast<UErewhonWorldSave>(UGameplayStatics::LoadGameFromSlot(SaveSlot, 0));
 	if (!WorldSave)
 	{
 		WorldSave = Cast<UErewhonWorldSave>(UGameplayStatics::CreateSaveGameObject(UErewhonWorldSave::StaticClass()));
@@ -55,8 +60,31 @@ void AErewhonGameMode::InitGameState()
 
 	AErewhonGameState* State = GetGameState<AErewhonGameState>();
 	State->InitializeWorld(WorldSave->WorldSeed, WorldSave->WorldAge);
+	FIntPoint Disowned(TNumericLimits<int32>::Max());
+#if !UE_BUILD_SHIPPING
+	FString Disown, DisownX, DisownY;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ErewhonDisown="), Disown, false) && Disown.Split(TEXT(","), &DisownX, &DisownY))
+	{
+		Disowned = FIntPoint(FCString::Atoi(*DisownX), FCString::Atoi(*DisownY));
+	}
+#endif
 	for (const FSavedSectorOwner& Saved : WorldSave->SectorOwners)
 	{
+		if (Saved.Sector == Disowned)
+		{
+			UE_LOG(LogErewhonGame, Log, TEXT("Secteur %s rendu libre"), *ErewhonSector::ToString(Saved.Sector));
+			continue;
+		}
+		// Un secteur devenu route (ou spawn) n'est plus à personne : son acheteur est remboursé.
+		if (!ErewhonSector::IsPurchasable(Saved.Sector))
+		{
+			if (FSavedPlayer* Player = WorldSave->Players.Find(Saved.OwnerKey))
+			{
+				Player->Coins += Settings.SectorBuyPrice;
+			}
+			UE_LOG(LogErewhonGame, Log, TEXT("Secteur %s devenu non achetable : %s remboursé"), *ErewhonSector::ToString(Saved.Sector), *Saved.OwnerName);
+			continue;
+		}
 		State->SetSectorOwner(Saved.Sector, Saved.OwnerKey, Saved.OwnerName);
 	}
 	const double Now = State->GetWorldClock();
@@ -110,7 +138,7 @@ void AErewhonGameMode::SaveWorld()
 	{
 		CapturePlayer(Cast<AErewhonPlayerState>(PlayerState));
 	}
-	UGameplayStatics::SaveGameToSlot(WorldSave, UErewhonSettings::Get().WorldSaveSlot, 0);
+	UGameplayStatics::SaveGameToSlot(WorldSave, SaveSlot, 0);
 }
 
 // ── Joueurs ──────────────────────────────────────────────────────────────────
@@ -179,6 +207,19 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 	}
 
 	PlayerState->SetPlayerKey(Key);
+#if !UE_BUILD_SHIPPING
+	// -ErewhonOwn=x,y : tests, le joueur reçoit ce secteur.
+	FString Own;
+	FString OwnX, OwnY;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ErewhonOwn="), Own, false) && Own.Split(TEXT(","), &OwnX, &OwnY))
+	{
+		const FIntPoint Sector(FCString::Atoi(*OwnX), FCString::Atoi(*OwnY));
+		if (ErewhonSector::IsPurchasable(Sector))
+		{
+			GetGameState<AErewhonGameState>()->SetSectorOwner(Sector, Key, DisplayName);
+		}
+	}
+#endif
 	if (!DisplayName.IsEmpty())
 	{
 		PlayerState->SetPlayerName(DisplayName.Left(24));
@@ -227,7 +268,7 @@ FText AErewhonGameMode::TryHarvest(AErewhonPlayerController* Controller, const F
 
 	USectorLayoutSubsystem* Layouts = GetWorld()->GetSubsystem<USectorLayoutSubsystem>();
 	const TSharedRef<const FSectorLayout> Layout = Layouts->GetLayout(Sector, State->GetWorldSeed());
-	if (!Layout->Plants.IsValidIndex(PlantIndex) || State->IsHarvested(Sector, PlantIndex))
+	if (!Layout->Plants.IsValidIndex(PlantIndex) || Layout->CoveredPlants.Contains(PlantIndex) || State->IsHarvested(Sector, PlantIndex))
 	{
 		return FText::GetEmpty();
 	}

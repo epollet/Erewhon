@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "World/SectorTypes.h"
 
 /**
  * Plan du secteur de spawn (0:0), partagé entre la génération de végétation
@@ -25,11 +26,24 @@ namespace ErewhonSpawn
 	constexpr float DoorHalfWidth = 70.f;
 	constexpr float DoorHeight = 220.f;
 
+	/** Surface sous les pieds, pour les bruits de pas. */
+	enum class ESurface : uint8 { Grass, Dirt, Stone, Wood };
+
+	/** Dans la cabane (sur son dallage). */
+	EREWHON_API bool IsInsideCabin(const FVector& World);
+
+	/** Sur le perron de bois devant la porte. */
+	EREWHON_API bool IsOnPorch(const FVector& World);
+
 	/** Position des gonds de la porte (bord −Y de l'ouverture, au ras du plancher). */
 	EREWHON_API FVector DoorHingeLocation();
 
-	/** Chemins (cœur, à fondre dans l'herbe) en coordonnées monde. */
-	EREWHON_API void BuildPaths(const FIntPoint& Sector, TArray<FBox2D>& OutPaths);
+	/** Largeur d'un chemin d'accès vers un secteur acheté, et rayon de sa clairière. */
+	constexpr float AccessPathWidth = 320.f;
+	constexpr float AccessClearingRadius = 380.f;
+
+	/** Chemins principaux du secteur (cœur, à fondre dans l'herbe), en coordonnées monde. */
+	EREWHON_API void BuildPaths(const FIntPoint& Sector, ESectorType Type, TArray<FBox2D>& OutPaths);
 
 	/** Point d'apparition des joueurs : sur le chemin sud, face à la porte. */
 	EREWHON_API FTransform PlayerSpawnTransform();

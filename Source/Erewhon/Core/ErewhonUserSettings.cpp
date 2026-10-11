@@ -16,6 +16,8 @@ void UErewhonUserSettings::SetToDefaults()
 	bVegetationShadows = true;
 	bShowFps = true;
 	CloudQuality = 1;
+	EffectsVolume = 0.8f;
+	AmbientVolume = 0.6f;
 }
 
 void UErewhonUserSettings::NotifyWorldDetailChanged()

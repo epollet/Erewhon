@@ -45,6 +45,12 @@ struct EREWHON_API FSectorLayout
 	/** Chemins de terre (cœur du chemin, avant le fondu des bords). */
 	TArray<FBox2D> Paths;
 
+	/**
+	 * Plantes recouvertes par un chemin d'accès tracé après coup (achat d'un secteur) :
+	 * leurs index restent valides, mais elles ne s'affichent ni ne se récoltent.
+	 */
+	TSet<int32> CoveredPlants;
+
 	/** Place de terre ronde autour de la cabane (rayon 0 : pas de place). */
 	FVector2D PlazaCenter = FVector2D::ZeroVector;
 	float PlazaRadius = 0.f;
@@ -97,6 +103,9 @@ class EREWHON_API USectorLayoutSubsystem : public UWorldSubsystem
 public:
 	TSharedRef<const FSectorLayout> GetLayout(const FIntPoint& Sector, int32 WorldSeed);
 
+	/** Oublie le layout d'un secteur et de ses voisins (ex. un achat trace un chemin d'accès). */
+	void InvalidateAround(const FIntPoint& Sector);
+
 	/**
 	 * Plante visée depuis Eye dans la direction Look.
 	 * ConeDegrees <= 0 : visée au rayon (plante la plus proche du réticule).
@@ -109,6 +118,7 @@ public:
 private:
 	TSharedRef<FSectorLayout> Build(const FIntPoint& Sector, int32 WorldSeed) const;
 	void BuildBushes(FSectorLayout& Layout, int32 WorldSeed) const;
+	void BuildAccessPaths(FSectorLayout& Layout) const;
 
 	TMap<FIntPoint, TSharedRef<FSectorLayout>> Cache;
 	TArray<FIntPoint> CacheOrder;

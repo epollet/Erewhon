@@ -46,4 +46,5 @@ private:
 	bool bOpen = false;
 
 	float CurrentYaw = 0.f;
+	bool bLastOpen = false;
 };

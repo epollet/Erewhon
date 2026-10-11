@@ -7,7 +7,7 @@ class AErewhonPlayerController;
 class SBox;
 
 /**
- * Menu Échap : reprendre, options graphiques, quitter.
+ * Menu Échap : reprendre, options, quitter. Les options sont rangées en onglets.
  * Le monde continue de tourner (jeu multijoueur) ; seul le joueur est en pause.
  */
 class SGameMenu : public SCompoundWidget
@@ -20,16 +20,22 @@ public:
 	void Construct(const FArguments& InArgs);
 
 	virtual bool SupportsKeyboardFocus() const override { return true; }
+
+	/** Captures automatiques : ouvre directement les options. */
+	void ShowOptionsForTest() { Show(EPage::Display); }
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 
 private:
-	void ShowMain();
-	void ShowOptions();
+	enum class EPage : uint8 { Main, Display, World, Sound };
 
-	/** Une ligne d'option : libellé, valeur, et flèches pour la changer. */
-	TSharedRef<SWidget> OptionRow(const FText& Label, TFunction<FText()> Value, TFunction<void(int32)> Step);
+	void Show(EPage Page);
+	TSharedRef<SWidget> BuildMain();
+	TSharedRef<SWidget> BuildOptions();
+
+	/** Une ligne d'option : libellé, aide, et sélecteur ‹ valeur ›. */
+	TSharedRef<SWidget> OptionRow(const FText& Label, const FText& Help, TFunction<FText()> Value, TFunction<void(int32)> Step);
 
 	TWeakObjectPtr<AErewhonPlayerController> Controller;
 	TSharedPtr<SBox> Body;
-	bool bShowingOptions = false;
+	EPage Page = EPage::Main;
 };

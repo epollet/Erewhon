@@ -16,6 +16,11 @@
 #include "Items/ItemDatabase.h"
 #include "Player/Interactable.h"
 #include "World/ErewhonVisuals.h"
+#include "World/ErewhonSound.h"
+#include "World/SpawnLayout.h"
+#include "World/Sector.h"
+#include "World/SectorManager.h"
+#include "Materials/MaterialInterface.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonCharacter"
 
@@ -336,11 +341,16 @@ void AErewhonCharacter::Tick(float DeltaSeconds)
 	{
 		UpdateGroundSpeed();
 	}
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		UpdateFootsteps(DeltaSeconds);
+	}
 	if (!IsLocallyControlled())
 	{
 		return;
 	}
 	UpdateTarget();
+	UpdateHighlight();
 
 	// Coup de l'objet tenu : un aller-retour vers le bas.
 	if (SwingTime > 0.f)
@@ -349,6 +359,101 @@ void AErewhonCharacter::Tick(float DeltaSeconds)
 		const float Progress = 1.f - SwingTime / GSwingDuration;
 		const float Arc = FMath::Sin(Progress * UE_PI) * 55.f;
 		HeldFirstPerson->SetRelativeRotation(GHeldFirstPersonRotation + FRotator(-Arc, -Arc * 0.4f, 0.f));
+	}
+}
+
+void AErewhonCharacter::UpdateFootsteps(float DeltaSeconds)
+{
+	// Un pas tous les ~70 cm parcourus au sol (plus courts accroupi), son selon la surface.
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	const float Speed = GetVelocity().Size2D();
+	if (!Movement->IsMovingOnGround() || Speed < 40.f)
+	{
+		StrideDistance = 0.f;
+		return;
+	}
+	StrideDistance += Speed * DeltaSeconds;
+	const float Stride = bIsCrouched ? 50.f : (Speed > 500.f ? 95.f : 70.f);
+	if (StrideDistance < Stride)
+	{
+		return;
+	}
+	StrideDistance -= Stride;
+
+	const FVector Feet = GetActorLocation() - FVector(0.f, 0.f, GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+	FString Prefix = TEXT("step_grass");
+	int32 Count = 3;
+	if (ErewhonSpawn::IsInsideCabin(Feet))
+	{
+		Prefix = TEXT("step_stone");
+		Count = 2;
+	}
+	else if (ErewhonSpawn::IsOnPorch(Feet))
+	{
+		Prefix = TEXT("step_wood");
+		Count = 2;
+	}
+	else if (const AErewhonGameState* State = AErewhonGameState::Get(this))
+	{
+		const TSharedRef<const FSectorLayout> Layout = GetWorld()->GetSubsystem<USectorLayoutSubsystem>()->GetLayout(ErewhonSector::FromWorld(Feet), State->GetWorldSeed());
+		if (Layout->DirtAmount(FVector2D(Feet)) > 0.4f)
+		{
+			Prefix = TEXT("step_dirt");
+		}
+	}
+	const float Volume = (bIsCrouched ? 0.25f : Speed > 500.f ? 0.7f : 0.5f) * (IsLocallyControlled() ? 0.8f : 1.f);
+	ErewhonSound::PlayAt(this, ErewhonSound::LoadVariant(Prefix, Count), Feet, Volume, 200.f, 2200.f);
+}
+
+void AErewhonCharacter::UpdateHighlight()
+{
+	// La plante qu'on peut récolter s'entoure d'un halo chaud ; rien sinon.
+	TArray<TPair<UStaticMesh*, FTransform>> Parts;
+	if (Target.Plant.IsValid() && Target.bPlantHarvestable)
+	{
+		if (const ASector* Sector = ASectorManager::FindLoaded(this, Target.Plant.Sector))
+		{
+			Sector->GetPlantVisual(Target.Plant.PlantIndex, Parts);
+		}
+	}
+	if (!HighlightMaterial)
+	{
+		HighlightMaterial = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_Highlight"));
+	}
+	while (Highlights.Num() < Parts.Num())
+	{
+		UStaticMeshComponent* Glow = NewObject<UStaticMeshComponent>(this);
+		Glow->SetUsingAbsoluteLocation(true);
+		Glow->SetUsingAbsoluteRotation(true);
+		Glow->SetUsingAbsoluteScale(true);
+		Glow->SetupAttachment(GetRootComponent());
+		Glow->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Glow->SetCastShadow(false);
+		Glow->SetOnlyOwnerSee(true);
+		Glow->RegisterComponent();
+		Highlights.Add(Glow);
+	}
+	for (int32 i = 0; i < Highlights.Num(); ++i)
+	{
+		UStaticMeshComponent* Glow = Highlights[i];
+		const bool bShow = i < Parts.Num() && HighlightMaterial;
+		Glow->SetVisibility(bShow);
+		if (!bShow)
+		{
+			continue;
+		}
+		if (Glow->GetStaticMesh() != Parts[i].Key)
+		{
+			Glow->SetStaticMesh(Parts[i].Key);
+			for (int32 Slot = 0; Slot < Glow->GetNumMaterials(); ++Slot)
+			{
+				Glow->SetMaterial(Slot, HighlightMaterial);
+			}
+		}
+		// Un peu plus grand que la plante, pour l'envelopper.
+		FTransform Transform = Parts[i].Value;
+		Transform.SetScale3D(Transform.GetScale3D() * 1.06f);
+		Glow->SetWorldTransform(Transform);
 	}
 }
 

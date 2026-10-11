@@ -5,18 +5,35 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "ProceduralMeshComponent.h"
 #include "Sky/CelestialSystem.h"
 #include "World/ErewhonVisuals.h"
 #include "World/Terrain.h"
+#include "Components/AudioComponent.h"
+#include "Engine/StaticMesh.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Sky/ErewhonWind.h"
+#include "Sound/SoundWave.h"
+#include "World/ErewhonSound.h"
+#include "World/SectorLayout.h"
+#include "World/SpawnLayout.h"
 
 using namespace ErewhonVisuals;
 
 namespace
 {
 	constexpr int32 GButterflyCount = 24;
-	constexpr int32 GFlockCount = 4;
+	constexpr int32 GFlockCount = 3;
 	constexpr int32 GBirdsPerFlock = 6;
+	constexpr int32 GSoloBirds = 6;
+
+	/** Envergure d'un oiseau (cm). */
+	constexpr float GBirdSpan = 70.f;
+
+	/** Le modèle généré regarde vers −Y une fois mis à la longueur : un quart de tour l'aligne sur +X. */
+	constexpr float GBirdMeshYaw = 90.f;
 
 	/** Rayons d'apparition des papillons autour du joueur (cm). */
 	constexpr float GButterflyMin = 300.f;
@@ -57,22 +74,102 @@ void AWildlife::BeginPlay()
 		Butterflies.Add(Butterfly);
 	}
 
-	const FLinearColor Back = FLinearColor::FromSRGBColor(FColor(70, 76, 92));
-	const FLinearColor Tip = FLinearColor::FromSRGBColor(FColor(36, 38, 48));
+	BirdMesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_bird"));
+	if (BirdMesh)
+	{
+		// Envergure sur Y ; le matériau a besoin de savoir sur quel axe local se trouvent les ailes.
+		const FVector Size = BirdMesh->GetBoundingBox().GetSize();
+		bBirdSpanAlongX = Size.X > Size.Y;
+		BirdFit = FitToLength(BirdMesh, GBirdSpan) * FTransform(FRotator(0.f, GBirdMeshYaw, 0.f));
+	}
+
 	for (int32 Flock = 0; Flock < GFlockCount; ++Flock)
 	{
 		for (int32 i = 0; i < GBirdsPerFlock; ++i)
 		{
-			FCreature Bird = MakeCreature(Back, Tip, 55.f, true);
+			FCreature Bird = MakeBird();
 			// Formation en V : rang i en arrière, de part et d'autre de la tête du vol.
 			const float Row = static_cast<float>((i + 1) / 2);
 			const float Side = i == 0 ? 0.f : (i % 2 == 0 ? 1.f : -1.f);
-			Bird.Home = FVector(-Row * 160.f, Side * Row * 130.f, Rand.FRandRange(-60.f, 60.f));
-			Bird.Phase = Rand.FRandRange(0.f, UE_TWO_PI);
-			Bird.Speed = Flock;   // index du vol
+			Bird.Home = FVector(-Row * 140.f, Side * Row * 110.f, Rand.FRandRange(-50.f, 50.f));
+			Bird.Flock = Flock;
 			Birds.Add(Bird);
 		}
 	}
+	// Des solitaires, chacun sur son propre cercle, plus bas et plus libres.
+	for (int32 i = 0; i < GSoloBirds; ++i)
+	{
+		FCreature Bird = MakeBird();
+		Bird.Home = FVector(Rand.FRandRange(-6000.f, 6000.f), Rand.FRandRange(-6000.f, 6000.f), 0.f);
+		Bird.Radius = Rand.FRandRange(900.f, 2800.f);
+		Bird.Altitude = Rand.FRandRange(700.f, 2200.f);
+		Bird.Speed = Rand.FRandRange(0.12f, 0.3f) * (Rand.FRand() < 0.5f ? -1.f : 1.f);
+#if !UE_BUILD_SHIPPING
+		if (i == 0 && FParse::Param(FCommandLine::Get(), TEXT("ErewhonBirdTest")))
+		{
+			// Captures : un oiseau qui tourne tout près, devant la caméra.
+			Bird.Home = FVector(600.f, 0.f, 0.f);
+			Bird.Radius = 250.f;
+			Bird.Altitude = 250.f;
+			Bird.Speed = 0.35f;
+		}
+#endif
+		Birds.Add(Bird);
+	}
+
+	// Ambiance : vent et herbe en boucle, non spatialisés.
+	const auto Loop = [this](const TCHAR* Name)
+	{
+		UAudioComponent* Audio = NewObject<UAudioComponent>(this);
+		Audio->SetupAttachment(RootComponent);
+		Audio->SetSound(ErewhonSound::Load(Name));
+		Audio->bAllowSpatialization = false;
+		Audio->bIsUISound = false;
+		Audio->SetVolumeMultiplier(0.f);
+		Audio->RegisterComponent();
+		Audio->Play(Rand.FRandRange(0.f, 5.f));
+		return Audio;
+	};
+	WindAudio = Loop(TEXT("amb_wind"));
+	GrassAudio = Loop(TEXT("amb_grass"));
+}
+
+AWildlife::FCreature AWildlife::MakeBird()
+{
+	if (!BirdMesh)
+	{
+		// Repli : silhouette procédurale.
+		FCreature Bird = MakeCreature(FLinearColor::FromSRGBColor(FColor(70, 76, 92)), FLinearColor::FromSRGBColor(FColor(36, 38, 48)), 55.f, true);
+		Bird.Phase = Rand.FRandRange(0.f, UE_TWO_PI);
+		return Bird;
+	}
+	FCreature Bird;
+	USceneComponent* Body = NewObject<USceneComponent>(this);
+	Body->SetupAttachment(RootComponent);
+	Body->RegisterComponent();
+	AddInstanceComponent(Body);
+	Bird.Body = Body;
+
+	UStaticMeshComponent* Model = NewObject<UStaticMeshComponent>(this);
+	Model->SetStaticMesh(BirdMesh);
+	Model->SetupAttachment(Body);
+	Model->SetRelativeTransform(BirdFit);
+	Model->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Model->SetCastShadow(false);
+	// Paramètres lus par M_BirdFlap : amplitude du battement, axe des ailes, phase.
+	Bird.Phase = Rand.FRandRange(0.f, UE_TWO_PI);
+	UMaterialInstanceDynamic* Flap = Model->CreateAndSetMaterialInstanceDynamic(0);
+	if (Flap)
+	{
+		Flap->SetScalarParameterValue(TEXT("FlapAmount"), 1.f);
+		Flap->SetScalarParameterValue(TEXT("SpanIsX"), bBirdSpanAlongX ? 1.f : 0.f);
+		Flap->SetScalarParameterValue(TEXT("Phase"), Bird.Phase);
+	}
+	Bird.Flap = Flap;
+	Model->RegisterComponent();
+	AddInstanceComponent(Model);
+	Bird.Model = Model;
+	return Bird;
 }
 
 AWildlife::FCreature AWildlife::MakeCreature(const FLinearColor& Inner, const FLinearColor& Outer, float Span, bool bBird)
@@ -158,19 +255,72 @@ void AWildlife::Tick(float DeltaSeconds)
 	if (bDay != bVisible)
 	{
 		bVisible = bDay;
-		SetActorHiddenInGame(!bDay);
+		for (const FCreature& Creature : Butterflies)
+		{
+			Creature.Body->SetVisibility(bDay, true);
+		}
+		for (const FCreature& Creature : Birds)
+		{
+			Creature.Body->SetVisibility(bDay, true);
+		}
 	}
+	UpdateAmbience(Pawn->GetActorLocation(), Clock, DeltaSeconds, bDay);
 	if (!bDay)
 	{
 		return;
 	}
 
 	const double Time = GetWorld()->GetTimeSeconds();
-	UpdateButterflies(Pawn->GetActorLocation(), Time, DeltaSeconds);
-	UpdateBirds(Pawn->GetActorLocation(), Time);
+	UpdateButterflies(Pawn->GetActorLocation(), Time);
+	UpdateBirds(Pawn->GetActorLocation(), Time, DeltaSeconds);
 }
 
-void AWildlife::UpdateButterflies(const FVector& Focus, double Time, float DeltaSeconds)
+void AWildlife::UpdateAmbience(const FVector& Focus, double Clock, float DeltaSeconds, bool bDay)
+{
+	const float Ambient = ErewhonSound::ChannelVolume(ErewhonSound::EChannel::Ambient);
+
+	// Le vent souffle plus ou moins fort avec le vent du monde.
+	const float Strength = FMath::Clamp(static_cast<float>(ErewhonWind::Velocity(Clock).Size() / (ErewhonWind::BaseSpeed + ErewhonWind::SpeedAmplitude)), 0.f, 1.f);
+	if (WindAudio)
+	{
+		WindAudio->SetVolumeMultiplier(FMath::Lerp(0.25f, 0.75f, Strength) * Ambient);
+	}
+
+	// L'herbe bruisse quand on avance dans la prairie (pas sur les chemins).
+	float Target = 0.f;
+	const APlayerController* Controller = GetWorld()->GetFirstPlayerController();
+	const ACharacter* Character = Controller ? Cast<ACharacter>(Controller->GetPawn()) : nullptr;
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	if (Character && State && Character->GetCharacterMovement()->IsMovingOnGround())
+	{
+		const float Speed = Character->GetVelocity().Size2D();
+		const TSharedRef<const FSectorLayout> Layout = GetWorld()->GetSubsystem<USectorLayoutSubsystem>()->GetLayout(ErewhonSector::FromWorld(Focus), State->GetWorldSeed());
+		const bool bInGrass = Layout->DirtAmount(FVector2D(Focus)) < 0.4f && !ErewhonSpawn::IsInsideCabin(Focus);
+		Target = bInGrass ? FMath::Clamp(Speed / 400.f, 0.f, 1.f) : 0.f;
+	}
+	GrassLevel = FMath::FInterpTo(GrassLevel, Target, DeltaSeconds, 4.f);
+	if (GrassAudio)
+	{
+		GrassAudio->SetVolumeMultiplier(GrassLevel * 0.9f * ErewhonSound::ChannelVolume(ErewhonSound::EChannel::Effects));
+	}
+
+	// De temps en temps, un oiseau chante près de là.
+	NextChirp -= DeltaSeconds;
+	if (bDay && NextChirp <= 0.f && Birds.Num() > 0)
+	{
+		NextChirp = Rand.FRandRange(3.f, 9.f);
+		const FCreature& Singer = Birds[Rand.RandHelper(Birds.Num())];
+		const bool bSong = Rand.FRand() < 0.3f;
+		USoundWave* Sound = bSong ? ErewhonSound::LoadVariant(TEXT("bird_song"), 2) : ErewhonSound::LoadVariant(TEXT("bird_chirp"), 3);
+		// Souvent au-dessus du joueur plutôt qu'au loin, pour qu'on l'entende vraiment.
+		const FVector Where = Rand.FRand() < 0.6f
+			? Focus + FVector(Rand.FRandRange(-1500.f, 1500.f), Rand.FRandRange(-1500.f, 1500.f), Rand.FRandRange(500.f, 1200.f))
+			: Singer.Body->GetComponentLocation();
+		ErewhonSound::PlayAt(this, Sound, Where, bSong ? 0.7f : 0.55f, 800.f, 6000.f);
+	}
+}
+
+void AWildlife::UpdateButterflies(const FVector& Focus, double Time)
 {
 	for (FCreature& Butterfly : Butterflies)
 	{
@@ -200,31 +350,60 @@ void AWildlife::UpdateButterflies(const FVector& Focus, double Time, float Delta
 	}
 }
 
-void AWildlife::UpdateBirds(const FVector& Focus, double Time)
+void AWildlife::UpdateBirds(const FVector& Focus, double Time, float DeltaSeconds)
 {
 	if (BirdAnchor.IsZero() || FVector::Dist2D(BirdAnchor, Focus) > GBirdAnchorDrift)
 	{
 		BirdAnchor = Focus;
 	}
+	const float Ground = GroundAt(FVector2D(BirdAnchor));
 	for (FCreature& Bird : Birds)
 	{
-		// Chaque vol tourne en grand cercle, à sa propre altitude et à son rythme.
-		const int32 Flock = static_cast<int32>(Bird.Speed);
-		const float Radius = 2500.f + Flock * 1000.f;
-		const float Angular = (Flock % 2 == 0 ? 1.f : -1.f) * (0.09f + Flock * 0.015f);
-		const float Angle = static_cast<float>(Time) * Angular + Flock * 2.1f;
-		const FVector Center = BirdAnchor + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.f);
-		const float Heading = Angle + (Angular > 0.f ? UE_HALF_PI : -UE_HALF_PI);
-		const FRotator Facing(0.f, FMath::RadiansToDegrees(Heading), 0.f);
-		const float Altitude = 1800.f + Flock * 400.f + 120.f * FMath::Sin(static_cast<float>(Time) * 0.3f + Flock);
-		const FVector Location = Center + Facing.RotateVector(Bird.Home) + FVector(0.f, 0.f, Altitude + GroundAt(FVector2D(BirdAnchor)));
-		Bird.Body->SetWorldLocationAndRotation(Location, Facing + FRotator(0.f, 0.f, Angular > 0.f ? -12.f : 12.f));
+		FVector Location;
+		FRotator Facing;
+		float Bank;
+		if (Bird.Flock != INDEX_NONE)
+		{
+			// Chaque vol tourne en grand cercle, à sa propre altitude et à son rythme.
+			const int32 Flock = Bird.Flock;
+			const float Radius = 2500.f + Flock * 1100.f;
+			const float Angular = (Flock % 2 == 0 ? 1.f : -1.f) * (0.09f + Flock * 0.015f);
+			const float Angle = static_cast<float>(Time) * Angular + Flock * 2.1f;
+			const FVector Center = BirdAnchor + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.f);
+			Facing = FRotator(0.f, FMath::RadiansToDegrees(Angle + (Angular > 0.f ? UE_HALF_PI : -UE_HALF_PI)), 0.f);
+			const float Altitude = 1800.f + Flock * 400.f + 120.f * FMath::Sin(static_cast<float>(Time) * 0.3f + Flock);
+			Location = Center + Facing.RotateVector(Bird.Home) + FVector(0.f, 0.f, Altitude + Ground);
+			Bank = Angular > 0.f ? -14.f : 14.f;
+		}
+		else
+		{
+			// Solitaire : un cercle qui lui est propre, qui ondule en altitude et dérive un peu.
+			const float Angle = static_cast<float>(Time) * Bird.Speed + Bird.Phase;
+			const FVector Center = BirdAnchor + Bird.Home + FVector(FMath::Sin(static_cast<float>(Time) * 0.05f + Bird.Phase) * 800.f, 0.f, 0.f);
+			const float Radius = Bird.Radius * (1.f + 0.25f * FMath::Sin(static_cast<float>(Time) * 0.2f + Bird.Phase));
+			Location = Center + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius,
+				Bird.Altitude + Ground + 250.f * FMath::Sin(static_cast<float>(Time) * 0.4f + Bird.Phase));
+			Facing = FRotator(0.f, FMath::RadiansToDegrees(Angle + (Bird.Speed > 0.f ? UE_HALF_PI : -UE_HALF_PI)), 0.f);
+			Bank = Bird.Speed > 0.f ? -22.f : 22.f;
+		}
+		Bird.Body->SetWorldLocationAndRotation(Location, Facing + FRotator(0.f, 0.f, Bank));
 
 		// Battements par séries, entrecoupés de vol plané.
 		const float T = static_cast<float>(Time) + Bird.Phase;
 		const bool bGliding = FMath::Sin(T * 0.7f) < -0.3f;
-		const float Flap = bGliding ? 6.f : 40.f * FMath::Sin(T * 9.f);
-		Bird.WingLeft->SetRelativeRotation(FRotator(0.f, 0.f, Flap));
-		Bird.WingRight->SetRelativeRotation(FRotator(0.f, 0.f, -Flap));
+		if (Bird.Model)
+		{
+			Bird.FlapAmount = FMath::FInterpTo(Bird.FlapAmount, bGliding ? 0.08f : 1.f, DeltaSeconds, 3.f);
+			if (Bird.Flap)
+			{
+				Bird.Flap->SetScalarParameterValue(TEXT("FlapAmount"), Bird.FlapAmount);
+			}
+		}
+		else
+		{
+			const float Flap = bGliding ? 6.f : 40.f * FMath::Sin(T * 9.f);
+			Bird.WingLeft->SetRelativeRotation(FRotator(0.f, 0.f, Flap));
+			Bird.WingRight->SetRelativeRotation(FRotator(0.f, 0.f, -Flap));
+		}
 	}
 }

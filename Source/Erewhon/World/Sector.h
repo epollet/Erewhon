@@ -32,6 +32,9 @@ public:
 	bool HasPlants() const { return bPlantsBuilt; }
 	FIntPoint GetCoord() const;
 
+	/** Géométrie affichée d'une plante (toute sa touffe) : mesh et transformation monde par partie. */
+	void GetPlantVisual(int32 PlantIndex, TArray<TPair<UStaticMesh*, FTransform>>& Out) const;
+
 	/** Taille d'une répétition des textures de sol (cm). */
 	static constexpr float GroundTileSize = 450.f;
 	static constexpr float DirtTileSize = 260.f;

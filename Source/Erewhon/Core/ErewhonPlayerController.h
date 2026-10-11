@@ -102,6 +102,7 @@ private:
 	float ShotPitch = -6.f;
 	FVector ShotLocation = FVector::ZeroVector;
 	bool bShotHasLocation = false;
+	FString ShotMenu;
 	int32 ShotIndex = 0;
 	FTimerHandle ShotTimer;
 #endif

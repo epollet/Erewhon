@@ -31,7 +31,16 @@ namespace ErewhonSector
 
 	ESectorType TypeAt(const FIntPoint& Sector, int32 /*WorldSeed*/)
 	{
-		return Sector == FIntPoint::ZeroValue ? ESectorType::Spawn : ESectorType::Prairie;
+		if (Sector == FIntPoint::ZeroValue)
+		{
+			return ESectorType::Spawn;
+		}
+		return IsRoad(Sector) ? ESectorType::Road : ESectorType::Prairie;
+	}
+
+	bool IsPurchasable(const FIntPoint& Sector)
+	{
+		return TypeAt(Sector, 0) == ESectorType::Prairie;
 	}
 
 	FText TypeLabel(ESectorType Type)
@@ -40,6 +49,7 @@ namespace ErewhonSector
 		{
 		case ESectorType::Spawn:   return LOCTEXT("Spawn", "Cabane du marchand");
 		case ESectorType::Prairie: return LOCTEXT("Prairie", "Prairie");
+		case ESectorType::Road:    return LOCTEXT("Road", "Route");
 		default:                   return LOCTEXT("Undefined", "Inconnu");
 		}
 	}

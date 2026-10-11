@@ -27,6 +27,16 @@ TEXTURE_PROMPT = (
     "no perspective, orthographic top-down, the pattern fills the whole frame edge to edge, no text, no border."
 )
 
+# ── Images peintes non tuilables (Gemini) : panneaux, carte murale ──────────
+# nom → (description, format). Importées comme textures T_<nom>.
+PAINTINGS: dict[str, tuple[str, str]] = {
+    "sign_general_store": ("a rustic hand-painted wooden shop sign board, the words \"General Store\" painted in large cream and dark brown hand-lettered serif letters, small painted flowers and leaves in the corners, warm weathered planks, the sign fills the entire frame edge to edge, flat front view", "21:9"),
+    "sign_sector_manager": ("a rustic hand-painted wooden shop sign board, the words \"Sector Manager\" painted in large cream and dark green hand-lettered serif letters, a small painted compass rose and map motif in the corners, warm weathered planks, the sign fills the entire frame edge to edge, flat front view", "21:9"),
+    "map_wall": ("a hand-painted parchment map of a countryside divided into a grid of square plots, meadows, a crossroads of dirt roads and a small cottage at the center, compass rose, no readable text, the parchment fills the entire frame", "4:3"),
+}
+
+PAINTING_PROMPT = "{subject}. {style}. No border outside the object, no extra text."
+
 # ── Icônes d'inventaire (Gemini) ────────────────────────────────────────────
 # Une par objet de Content/Data/Items.json → T_Icon_<id>.
 ICONS: dict[str, str] = {
@@ -43,6 +53,10 @@ ICONS: dict[str, str] = {
     "jean": "a pair of folded blue denim jeans",
     "short_red": "a pair of red cotton shorts",
     "short_blue": "a pair of blue cotton shorts",
+    "fern": "a single green fern frond",
+    "broadleaf": "a large broad round green leaf",
+    "weed_dock": "a bunch of dock leaves with a reddish seed stalk",
+    "weed_nettle": "a small bunch of fresh nettle and mint sprigs",
 }
 
 ICON_PROMPT = (
@@ -145,6 +159,18 @@ MODELS: dict[str, dict] = {
         "subject": "a gray striped tabby cat with bright yellow eyes, sitting calmly upright, tail wrapped around its front paws, full body",
         "polycount": 6000,
     },
+    "bird": {
+        "subject": "a small swallow-like songbird in flight seen from above at a slight angle, wings fully spread wide and flat, forked tail, dark blue back and cream belly",
+        "polycount": 3000,
+    },
+    "sector_manager": {
+        "subject": "a friendly countryside land surveyor manager standing upright, round spectacles, neat waistcoat over a white shirt with rolled sleeves, flat cap, holding a rolled map under one arm, kind smile, full body",
+        "polycount": 12000,
+    },
+    "desk_maps": {
+        "subject": "a sturdy rustic wooden desk covered with rolled maps, an open map, a brass compass, an inkwell with a quill and a small oil lamp",
+        "polycount": 6000,
+    },
     "crates": {
         "subject": "two rustic wooden crates stacked, the top one filled with apples",
         "polycount": 3000,
@@ -155,3 +181,28 @@ CONCEPT_PROMPT = (
     "Concept render of {subject}. {style}. Stylized game asset, single object, centered, the entire object "
     "visible with margin around it, three-quarter front view, plain pure white background, no ground shadow, no text."
 )
+
+
+# ── Sons (ElevenLabs) ───────────────────────────────────────────────────────
+# nom → (description, durée en s ou None, boucle). Fichiers : SourceArt/Generated/sounds/<nom>.wav
+SOUNDS: dict[str, tuple[str, float | None, bool]] = {
+    "amb_wind": ("gentle steady wind blowing across a wide open countryside meadow, soft airy whoosh, no birds, no voices", 20.0, True),
+    "amb_grass": ("continuous soft rustling of tall dry grass brushing against legs while walking through a meadow", 8.0, True),
+    "step_grass_1": ("a single soft footstep on thick grass", 0.6, False),
+    "step_grass_2": ("one quiet footstep in a grassy meadow, soft crunch", 0.6, False),
+    "step_grass_3": ("a single light footstep on soft grass and earth", 0.6, False),
+    "step_dirt_1": ("a single footstep on a packed dirt path with light gravel", 0.6, False),
+    "step_dirt_2": ("one footstep on a dry dusty country path", 0.6, False),
+    "step_dirt_3": ("a single shoe step on firm dirt with small pebbles", 0.6, False),
+    "step_stone_1": ("a single footstep with leather shoes on a stone flagstone floor indoors", 0.6, False),
+    "step_stone_2": ("one footstep on a hard stone tile floor in a small room", 0.6, False),
+    "step_wood_1": ("a single footstep on old wooden porch planks, slight creak", 0.6, False),
+    "step_wood_2": ("one footstep on a wooden stair step, hollow thud", 0.6, False),
+    "door_open": ("an old wooden cottage door opening slowly with a soft creak of iron hinges", 1.6, False),
+    "door_close": ("an old wooden cottage door closing with a gentle thud and latch click", 1.2, False),
+    "bird_chirp_1": ("a small songbird chirping twice, short and bright, outdoors", 1.0, False),
+    "bird_chirp_2": ("a swallow twittering quickly in flight", 1.2, False),
+    "bird_chirp_3": ("a single sparrow chirp, clear, distant countryside", 0.8, False),
+    "bird_song_1": ("a skylark singing a short melodic song high above a meadow", 4.0, False),
+    "bird_song_2": ("a blackbird singing a short gentle phrase in the countryside", 3.5, False),
+}

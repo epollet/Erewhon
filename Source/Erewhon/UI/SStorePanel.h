@@ -6,7 +6,12 @@
 class AErewhonPlayerController;
 class SBox;
 
-/** Boutique du marchand : onglets Secteurs, Acheter, Vendre. */
+/**
+ * Boutique du marchand, en trois onglets :
+ * - Secteurs : une carte des environs de la cabane ; on choisit une case, on l'achète ou la revend ;
+ * - Acheter : outils et vêtements en cartes illustrées ;
+ * - Vendre : les objets rangés, à l'unité ou en totalité.
+ */
 class SStorePanel : public SCompoundWidget
 {
 public:
@@ -26,10 +31,12 @@ private:
 	void OnSectorOwnerChanged(const FIntPoint& Sector) { Rebuild(); }
 	TSharedRef<SWidget> BuildTabs();
 	TSharedRef<SWidget> BuildSectors();
+	TSharedRef<SWidget> BuildSectorDetail();
 	TSharedRef<SWidget> BuildBuy();
 	TSharedRef<SWidget> BuildSell();
 
 	TWeakObjectPtr<AErewhonPlayerController> Controller;
 	TSharedPtr<SBox> Body;
 	ETab Tab = ETab::Sell;
+	FIntPoint Selected = FIntPoint(1, 1);
 };

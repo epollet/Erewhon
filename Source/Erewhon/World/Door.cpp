@@ -5,6 +5,7 @@
 #include "Core/ErewhonPlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "World/ErewhonVisuals.h"
+#include "World/ErewhonSound.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonDoor"
 
@@ -70,6 +71,12 @@ void ADoor::BeginPlay()
 void ADoor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (bOpen != bLastOpen)
+	{
+		bLastOpen = bOpen;
+		ErewhonSound::PlayAt(this, ErewhonSound::Load(bOpen ? TEXT("door_open") : TEXT("door_close")),
+			GetActorLocation() + FVector(0.f, PanelSize.Y * 0.5f, 110.f), 0.9f, 300.f, 2500.f);
+	}
 	const float Target = bOpen ? OpenYaw : 0.f;
 	if (FMath::IsNearlyEqual(CurrentYaw, Target))
 	{

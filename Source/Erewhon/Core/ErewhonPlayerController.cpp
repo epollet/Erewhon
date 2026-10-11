@@ -204,6 +204,9 @@ void AErewhonPlayerController::StartAutoShots()
 	}
 	float Delay = 35.f;
 	FParse::Value(FCommandLine::Get(), TEXT("ErewhonShotDelay="), Delay);
+
+	// -ErewhonOpenMenu=store|inventory|menu|options : ouvre un menu une fois le joueur placé.
+	FParse::Value(FCommandLine::Get(), TEXT("ErewhonOpenMenu="), ShotMenu);
 	GetWorldTimerManager().SetTimer(ShotTimer, this, &AErewhonPlayerController::NextAutoShot, Delay, false);
 }
 
@@ -227,6 +230,20 @@ void AErewhonPlayerController::NextAutoShot()
 			MyPawn->TeleportTo(ShotLocation + FVector(0, 0, Ground + 120.f), FRotator(0, ShotYaws[Shot], 0));
 		}
 		SetControlRotation(FRotator(ShotPitch, ShotYaws[Shot], 0));
+		if (Shot == 0 && !ShotMenu.IsEmpty())
+		{
+			if (ShotMenu == TEXT("store")) { OpenStore(); }
+			else if (ShotMenu == TEXT("inventory")) { ToggleInventory(); }
+			else
+			{
+				const TSharedRef<SGameMenu> GameMenu = SNew(SGameMenu).Controller(this);
+				if (ShotMenu == TEXT("options"))
+				{
+					GameMenu->ShowOptionsForTest();
+				}
+				ShowMenu(GameMenu, false);
+			}
+		}
 	}
 	else
 	{

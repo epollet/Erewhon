@@ -4,7 +4,7 @@
     python Tools/assetgen/generate.py icons --only cerpe,jean
     python Tools/assetgen/generate.py models --force --only merchant
 
-Étapes : textures, icons, concepts (images pour Meshy), models (Meshy), grass (procédural).
+Étapes : textures, icons, concepts (images pour Meshy), models (Meshy), grass (procédural), sounds (ElevenLabs).
 Un fichier déjà présent n'est jamais régénéré sans --force : relancer ne coûte rien.
 L'import dans Unreal se fait ensuite avec Tools/Editor/import_generated.py.
 """
@@ -21,7 +21,7 @@ import manifest  # noqa: E402
 from common import OUTPUT_ROOT  # noqa: E402
 from gemini import generate_image  # noqa: E402
 
-STEPS = ("textures", "icons", "concepts", "models", "grass")
+STEPS = ("textures", "paintings", "icons", "concepts", "models", "grass", "sounds")
 
 
 def _wanted(name: str, only: set[str]) -> bool:
@@ -45,6 +45,14 @@ def textures(only: set[str], force: bool) -> None:
             path = OUTPUT_ROOT / "textures" / f"{name}.jpg"
             prompt = manifest.TEXTURE_PROMPT.format(subject=subject, style=manifest.STYLE)
             _run(f"texture {name}", path, force, lambda p=path, q=prompt: generate_image(q, p))
+
+
+def paintings(only: set[str], force: bool) -> None:
+    for name, (subject, ratio) in manifest.PAINTINGS.items():
+        if _wanted(name, only):
+            path = OUTPUT_ROOT / "textures" / f"{name}.jpg"
+            prompt = manifest.PAINTING_PROMPT.format(subject=subject, style=manifest.STYLE)
+            _run(f"peinture {name}", path, force, lambda p=path, q=prompt, r=ratio: generate_image(q, p, aspect_ratio=r))
 
 
 def icons(only: set[str], force: bool) -> None:
@@ -80,6 +88,16 @@ def models(only: set[str], force: bool) -> None:
                                                            texture_prompt=f"{s['subject']}. {manifest.STYLE}"))
 
 
+def sounds(only: set[str], force: bool) -> None:
+    from elevenlabs import generate_sound
+
+    for name, (prompt, duration, loop) in manifest.SOUNDS.items():
+        if _wanted(name, only):
+            path = OUTPUT_ROOT / "sounds" / f"{name}.wav"
+            _run(f"son {name}", path, force,
+                 lambda p=path, q=prompt, d=duration, l=loop: generate_sound(q, p, duration=d, loop=l))
+
+
 def grass_step(only: set[str], force: bool) -> None:
     for path in grass.generate_all(OUTPUT_ROOT / "grass"):
         print(f"  + herbe {path.stem}")
@@ -94,7 +112,7 @@ def main() -> None:
 
     only = {name.strip() for name in args.only.split(",") if name.strip()}
     steps = STEPS if args.step == "all" else (args.step,)
-    runners = {"textures": textures, "icons": icons, "concepts": concepts, "models": models, "grass": grass_step}
+    runners = {"textures": textures, "paintings": paintings, "icons": icons, "concepts": concepts, "models": models, "grass": grass_step, "sounds": sounds}
     for step in steps:
         print(f"[{step}]")
         runners[step](only, args.force)

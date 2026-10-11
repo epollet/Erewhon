@@ -76,6 +76,10 @@ struct FPlantSpawnDef
 	int32 CountFor(ESectorType Type) const
 	{
 		const int32* Count = CountPerSector.Find(Type);
+		if (!Count && Type == ESectorType::Road)
+		{
+			Count = CountPerSector.Find(ESectorType::Prairie);   // bas-côtés de la route : de la prairie
+		}
 		return Count ? *Count : 0;
 	}
 };

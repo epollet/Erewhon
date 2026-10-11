@@ -3,13 +3,14 @@
 #include "CoreMinimal.h"
 #include "SectorTypes.generated.h"
 
-/** Types de secteur. Seuls Spawn et Prairie existent pour l'instant. */
+/** Types de secteur. */
 UENUM(BlueprintType)
 enum class ESectorType : uint8
 {
 	Undefined,
 	Spawn,    // secteur 0:0 — cabane du marchand, n'appartient à aucun joueur
 	Prairie,
+	Road,     // prolonge les chemins du marchand vers les quatre horizons ; jamais à vendre
 };
 
 /**
@@ -28,8 +29,11 @@ namespace ErewhonSector
 
 	EREWHON_API FText TypeLabel(ESectorType Type);
 
-	/** Le secteur de spawn appartient au marchand : jamais achetable. */
-	inline bool IsPurchasable(const FIntPoint& Sector) { return Sector != FIntPoint::ZeroValue; }
+	/** Le spawn appartient au marchand et les routes à tous : ni l'un ni les autres ne se vendent. */
+	EREWHON_API bool IsPurchasable(const FIntPoint& Sector);
+
+	/** Secteur traversé par une route : sur l'un des deux axes du marchand, hors spawn. */
+	inline bool IsRoad(const FIntPoint& Sector) { return (Sector.X == 0) != (Sector.Y == 0); }
 
 	/** Position du marchand (centre du secteur de spawn). */
 	EREWHON_API FVector MerchantLocation();

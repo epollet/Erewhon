@@ -4,6 +4,7 @@
 #include "Core/ErewhonSettings.h"
 #include "Core/ErewhonUserSettings.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "World/ErewhonVisuals.h"
@@ -29,6 +30,7 @@ void ASectorManager::BeginPlay()
 	if (AErewhonGameState* State = AErewhonGameState::Get(this))
 	{
 		HarvestHandle = State->OnPlantHarvestChanged.AddUObject(this, &ASectorManager::OnPlantHarvestChanged);
+		OwnerHandle = State->OnSectorOwnerChanged.AddUObject(this, &ASectorManager::OnSectorOwnerChanged);
 	}
 	if (UErewhonUserSettings* User = UErewhonUserSettings::Get())
 	{
@@ -54,6 +56,7 @@ void ASectorManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (AErewhonGameState* State = AErewhonGameState::Get(this))
 	{
 		State->OnPlantHarvestChanged.Remove(HarvestHandle);
+		State->OnSectorOwnerChanged.Remove(OwnerHandle);
 	}
 	if (UErewhonUserSettings* User = UErewhonUserSettings::Get())
 	{
@@ -196,6 +199,18 @@ void ASectorManager::Refresh()
 	}
 }
 
+ASector* ASectorManager::FindLoaded(const UObject* WorldContext, const FIntPoint& Coord)
+{
+	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	TActorIterator<ASectorManager> It(World);
+	if (!World || !It)
+	{
+		return nullptr;
+	}
+	const TObjectPtr<ASector>* Found = It->Loaded.Find(Coord);
+	return Found ? Found->Get() : nullptr;
+}
+
 void ASectorManager::RebuildAll()
 {
 	// Réglages graphiques changés : on repart de zéro, les secteurs se reconstruisent au fil des images.
@@ -205,6 +220,21 @@ void ASectorManager::RebuildAll()
 	}
 	Loaded.Reset();
 	Refresh();
+}
+
+void ASectorManager::OnSectorOwnerChanged(const FIntPoint& Sector)
+{
+	// Un achat (ou une revente) trace ou efface un chemin d'accès : le secteur et ses voisins
+	// se reconstruisent au prochain rafraîchissement.
+	GetWorld()->GetSubsystem<USectorLayoutSubsystem>()->InvalidateAround(Sector);
+	for (const FIntPoint& Offset : { FIntPoint(0, 0), FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+	{
+		if (TObjectPtr<ASector>* Found = Loaded.Find(Sector + Offset))
+		{
+			(*Found)->Destroy();
+			Loaded.Remove(Sector + Offset);
+		}
+	}
 }
 
 void ASectorManager::OnPlantHarvestChanged(const FIntPoint& Sector, int32 PlantIndex, bool bHarvested)

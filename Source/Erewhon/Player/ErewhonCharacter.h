@@ -52,6 +52,8 @@ private:
 	void ApplyRunning(bool bRunning);
 	void UpdateGroundSpeed();
 	void UpdateTarget();
+	void UpdateHighlight();
+	void UpdateFootsteps(float DeltaSeconds);
 	void BindAppearance();
 	void ApplyAppearance();
 	void BuildBody();
@@ -70,6 +72,10 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Torso;
 	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Legs;
 
+	/** Halo posé sur la plante visée (une copie par partie de la touffe). */
+	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> Highlights;
+	UPROPERTY(Transient) TObjectPtr<class UMaterialInterface> HighlightMaterial;
+
 	FCharacterTarget Target;
 	FDelegateHandle AppearanceHandle;
 	TWeakObjectPtr<class UInventoryComponent> BoundInventory;
@@ -79,4 +85,5 @@ private:
 
 	float SwingTime = 0.f;
 	bool bIsRunning = false;
+	float StrideDistance = 0.f;
 };
