@@ -26,7 +26,7 @@ namespace
 
 float FSectorLayout::DirtAmount(const FVector2D& World) const
 {
-	if (Paths.IsEmpty() && PlazaRadius <= 0.f)
+	if (Paths.IsEmpty() && Clearings.IsEmpty())
 	{
 		return 0.f;
 	}
@@ -38,13 +38,14 @@ float FSectorLayout::DirtAmount(const FVector2D& World) const
 	{
 		Distance = FMath::Min(Distance, SignedDistance(Path, World));
 	}
-	if (PlazaRadius > 0.f)
+	for (int32 Index = 0; Index < Clearings.Num(); ++Index)
 	{
-		// La place n'est pas un cercle parfait : son bord ondule largement.
-		const FVector2D Offset = World - PlazaCenter;
+		// Une place n'est pas un cercle parfait : son bord ondule largement, différemment pour chacune.
+		const FClearing& Clearing = Clearings[Index];
+		const FVector2D Offset = World - Clearing.Center;
 		const float Angle = FMath::Atan2(Offset.Y, Offset.X);
-		const float Bulge = FMath::PerlinNoise1D(Angle * 1.7f + 11.3f) * PlazaRadius * 0.18f;
-		Distance = FMath::Min(Distance, Offset.Size() - (PlazaRadius + Bulge));
+		const float Bulge = FMath::PerlinNoise1D(Angle * 1.7f + 11.3f + Index * 5.1f) * Clearing.Radius * 0.18f;
+		Distance = FMath::Min(Distance, Offset.Size() - (Clearing.Radius + Bulge));
 	}
 	return 1.f - FMath::SmoothStep(-Blend * 0.5f, Blend * 0.5f, Distance + Wobble);
 }
@@ -178,8 +179,8 @@ void USectorLayoutSubsystem::InvalidateAround(const FIntPoint& Sector)
 
 void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
 {
-	// Un secteur possédé qui borde une route est relié à elle : un chemin plus étroit part de
-	// la route et mène jusqu'à une petite clairière au centre du secteur.
+	// Amélioration « chemin d'accès » : un chemin plus étroit part de la route et rejoint
+	// le bord du secteur privé voisin.
 	const AErewhonGameState* State = AErewhonGameState::Get(GetWorld());
 	if (!State)
 	{
@@ -197,44 +198,26 @@ void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
 		Layout.Paths.Add(FBox2D(Min - FVector2D(Toward.Y != 0 ? Half : 0.f, Toward.X != 0 ? Half : 0.f),
 			Max + FVector2D(Toward.Y != 0 ? Half : 0.f, Toward.X != 0 ? Half : 0.f)));
 	};
-	const FIntPoint Sides[] = { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) };
-
-	if (Layout.Type == ESectorType::Prairie && State->FindSectorOwnerKey(Layout.Coord))
+	if (Layout.Type != ESectorType::Road)
 	{
-		for (const FIntPoint& Side : Sides)
-		{
-			if (ErewhonSector::IsRoad(Layout.Coord + Side))
-			{
-				Corridor(Side);
-				Layout.PlazaCenter = Center;
-				Layout.PlazaRadius = ErewhonSpawn::AccessClearingRadius;
-				break;   // un seul accès suffit, vers la première route trouvée
-			}
-		}
+		return;
 	}
-	else if (Layout.Type == ESectorType::Road)
+	// Seule la route porte le chemin : il part de la route et s'arrête à la limite du secteur
+	// privé, quand son propriétaire a acheté cette liaison au Sector Manager.
+	for (int32 Side = 0; Side < 4; ++Side)
 	{
-		// Côté route : l'embranchement part du chemin principal vers chaque voisin relié.
-		for (const FIntPoint& Side : Sides)
+		const FIntPoint Neighbor = Layout.Coord + ErewhonSector::Sides[Side];
+		const int32 Back = Side ^ 1;   // côté du voisin qui regarde vers nous (nord ↔ sud, est ↔ ouest)
+		if (ErewhonSector::TypeAt(Neighbor, Layout.WorldSeed) != ESectorType::Prairie || !(State->GetRoadLinks(Neighbor) & (1 << Back)))
 		{
-			const FIntPoint Neighbor = Layout.Coord + Side;
-			if (ErewhonSector::TypeAt(Neighbor, Layout.WorldSeed) != ESectorType::Prairie || !State->FindSectorOwnerKey(Neighbor))
-			{
-				continue;
-			}
-			// Le voisin se relie à sa première route : on ne trace que si c'est nous.
-			for (const FIntPoint& Back : Sides)
-			{
-				if (ErewhonSector::IsRoad(Neighbor + Back))
-				{
-					if (Neighbor + Back == Layout.Coord)
-					{
-						Corridor(Side);
-					}
-					break;
-				}
-			}
+			continue;
 		}
+		Corridor(ErewhonSector::Sides[Side]);
+		// Un panneau au coin du carrefour, côté place du village.
+		const FVector2D Road = FVector2D(-FMath::Sign(Layout.Coord.X), -FMath::Sign(Layout.Coord.Y));
+		const FVector2D Foot = Center + FVector2D(ErewhonSector::Sides[Side]) * (ErewhonSpawn::PathWidth * 0.5f + 60.f)
+			+ Road * (Half + 60.f);
+		Layout.Signposts.Add({ FVector(Foot, ErewhonTerrain::Height(Foot, Layout.WorldSeed)), Road });
 	}
 }
 
@@ -251,8 +234,12 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 	ErewhonSpawn::BuildPaths(Sector, Layout->Type, Layout->Paths);
 	if (Layout->Type == ESectorType::Spawn)
 	{
-		Layout->PlazaCenter = FVector2D(ErewhonSector::Center(Sector));
-		Layout->PlazaRadius = UErewhonSettings::Get().PlazaRadiusMeters * 100.f;
+		// La place ronde du General Store, puis la clairière de chaque cabane du bord des routes.
+		Layout->Clearings.Add({ FVector2D(ErewhonSector::Center(Sector)), UErewhonSettings::Get().PlazaRadiusMeters * 100.f });
+		for (const EShopKind Kind : { EShopKind::SectorManager, EShopKind::Tailor })
+		{
+			Layout->Clearings.Add({ FVector2D(ErewhonSpawn::CabinTransform(Kind).GetLocation()), ErewhonSpawn::ManagerClearingRadius });
+		}
 	}
 
 	Layout->CellSize = GCellSize;
@@ -278,13 +265,31 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 		Hash = HashCombine(Hash, GetTypeHash(Item->Plant.SeedSalt));
 		FRandomStream Rand(static_cast<int32>(Hash));
 
+		// Semis uniforme, ou par bosquets (fougères, orties…) : les exemplaires se resserrent autour d'un centre.
+		const int32 PatchSize = FMath::Max(1, Item->Plant.PatchSize);
+		const float PatchRadius = Item->Plant.PatchRadiusMeters * 100.f;
+		FVector2D PatchCenter = FVector2D::ZeroVector;
+
 		Layout->Plants.Reserve(Layout->Plants.Num() + Count);
 		for (int32 i = 0; i < Count; ++i)
 		{
+			if (PatchSize > 1 && i % PatchSize == 0)
+			{
+				PatchCenter = FVector2D(Origin.X + Rand.FRand() * Size, Origin.Y + Rand.FRand() * Size);
+			}
 			FVector2D Point = FVector2D::ZeroVector;
 			bool bPlaced = false;
 			for (int32 Attempt = 0; Attempt < GPlacementRetries && !bPlaced; ++Attempt)
 			{
+				if (PatchSize > 1)
+				{
+					const float Distance = PatchRadius * FMath::Sqrt(Rand.FRand());
+					const float Angle = Rand.FRandRange(0.f, UE_TWO_PI);
+					Point = PatchCenter + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Distance;
+					bPlaced = Point.X >= Origin.X && Point.Y >= Origin.Y && Point.X < Origin.X + Size && Point.Y < Origin.Y + Size
+						&& !Layout->IsBare(Point);
+					continue;
+				}
 				Point = FVector2D(Origin.X + Rand.FRand() * Size, Origin.Y + Rand.FRand() * Size);
 				bPlaced = !Layout->IsBare(Point);
 			}

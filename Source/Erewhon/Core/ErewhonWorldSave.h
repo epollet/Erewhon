@@ -57,6 +57,9 @@ struct FSavedSectorOwner
 
 	UPROPERTY()
 	FString OwnerName;
+
+	UPROPERTY()
+	uint8 RoadLinks = 0;
 };
 
 /** Sauvegarde serveur du monde (Saved/SaveGames/<WorldSaveSlot>.sav). */

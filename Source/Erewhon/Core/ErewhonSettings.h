@@ -106,6 +106,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Sky", meta = (ClampMin = 10))
 	float CloudCoveragePeriodSeconds = 1200.f;
 
+	/** Vitesse de défilement des nuages, relative à celle du matériau du moteur. */
+	UPROPERTY(Config, EditAnywhere, Category = "Sky", meta = (ClampMin = 0))
+	float CloudSpeedFactor = 2.f;
+
+	/** Vitesse d'ondulation de la végétation au vent (1 = réglage d'origine). */
+	UPROPERTY(Config, EditAnywhere, Category = "Sky", meta = (ClampMin = 0))
+	float FoliageWindSpeedFactor = 0.67f;
+
 	// ── Prairie décorative ──
 
 	/** Végétation non récoltable, purement visuelle : herbes, fougères, feuillages, buissons. */
@@ -127,6 +135,10 @@ public:
 	/** Largeur du fondu entre les chemins (ou la parcelle) et la prairie (m). */
 	UPROPERTY(Config, EditAnywhere, Category = "Meadow", meta = (ClampMin = 0))
 	float PathBlendMeters = 1.5f;
+
+	/** Prix d'une amélioration « chemin jusqu'à la route » (pièces). */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
+	int32 RoadLinkPrice = 50;
 
 	// ── Récolte ──────────────────────────────────────────────────────────────
 

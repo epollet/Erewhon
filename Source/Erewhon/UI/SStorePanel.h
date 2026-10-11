@@ -2,21 +2,23 @@
 
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
+#include "World/SectorTypes.h"
 
 class AErewhonPlayerController;
 class SBox;
 
 /**
- * Boutique du marchand, en trois onglets :
- * - Secteurs : une carte des environs de la cabane ; on choisit une case, on l'achète ou la revend ;
- * - Acheter : outils et vêtements en cartes illustrées ;
- * - Vendre : les objets rangés, à l'unité ou en totalité.
+ * Comptoir d'un commerce de la place :
+ * - General Store, en deux onglets : Acheter (outils et vêtements en cartes illustrées) et
+ *   Vendre (les objets rangés, à l'unité ou en totalité) ;
+ * - Sector Manager : une carte des environs ; on choisit une case, on l'achète ou la revend.
  */
 class SStorePanel : public SCompoundWidget
 {
 public:
 	SLATE_BEGIN_ARGS(SStorePanel) {}
 		SLATE_ARGUMENT(AErewhonPlayerController*, Controller)
+		SLATE_ARGUMENT(EShopKind, Kind)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -37,6 +39,7 @@ private:
 
 	TWeakObjectPtr<AErewhonPlayerController> Controller;
 	TSharedPtr<SBox> Body;
+	EShopKind Kind = EShopKind::GeneralStore;
 	ETab Tab = ETab::Sell;
 	FIntPoint Selected = FIntPoint(1, 1);
 };

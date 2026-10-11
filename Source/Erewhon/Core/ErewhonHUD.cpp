@@ -72,19 +72,15 @@ void AErewhonHUD::DrawHUD()
 		const FIntPoint Sector = ErewhonSector::FromWorld(Character->GetActorLocation());
 		const ESectorType Type = ErewhonSector::TypeAt(Sector, State->GetWorldSeed());
 		FText OwnerText;
-		if (Type == ESectorType::Spawn)
+		if (Type == ESectorType::Spawn || Type == ESectorType::Road)
 		{
-			OwnerText = LOCTEXT("MerchantOwner", "le marchand");
-		}
-		else if (Type == ESectorType::Road)
-		{
-			OwnerText = LOCTEXT("PublicOwner", "public");
+			OwnerText = LOCTEXT("PublicOwner", "public");   // commerces et routes
 		}
 		else if (const FString* Key = State->FindSectorOwnerKey(Sector))
 		{
 			OwnerText = PlayerState && *Key == PlayerState->GetPlayerKey()
-				? LOCTEXT("YouOwner", "vous")
-				: FText::FromString(State->GetSectorOwnerName(Sector));
+				? LOCTEXT("YouOwner", "à vous")
+				: FText::Format(LOCTEXT("PrivateOwner", "privé ({0})"), FText::FromString(State->GetSectorOwnerName(Sector)));
 		}
 		else
 		{

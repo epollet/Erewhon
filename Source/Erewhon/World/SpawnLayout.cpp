@@ -5,6 +5,52 @@
 
 namespace ErewhonSpawn
 {
+	namespace
+	{
+		/** Point monde exprimé dans le repère d'une cabane. */
+		FVector ToCabin(EShopKind Kind, const FVector& World)
+		{
+			return CabinTransform(Kind).InverseTransformPosition(World);
+		}
+	}
+
+	FTransform CabinTransform(EShopKind Kind)
+	{
+		const FVector Plaza = ErewhonSector::Center(FIntPoint::ZeroValue);
+		if (Kind == EShopKind::SectorManager)
+		{
+			// Au nord de la route de l'est, à une vingtaine de mètres de la place.
+			return FTransform(FRotator::ZeroRotator, Plaza + FVector(1100.0, 2000.0, 0.0));
+		}
+		if (Kind == EShopKind::Tailor)
+		{
+			// En face, au sud de la route de l'ouest : la porte regarde vers le nord.
+			return FTransform(FRotator(0.0, 180.0, 0.0), Plaza + FVector(-1100.0, -2000.0, 0.0));
+		}
+		return FTransform(FRotator::ZeroRotator, Plaza);
+	}
+
+	FString ShopName(EShopKind Kind)
+	{
+		switch (Kind)
+		{
+		case EShopKind::SectorManager: return TEXT("Sector Manager");
+		case EShopKind::Tailor:        return TEXT("Tailor");
+		default:                       return TEXT("General Store");
+		}
+	}
+
+	FVector MerchantLocation(EShopKind Kind)
+	{
+		// Au fond de la cabane, derrière le comptoir (la porte est côté −X).
+		return CabinTransform(Kind).TransformPosition(FVector(220.0, 0.0, 0.0));
+	}
+
+	FVector DoorstepLocation(EShopKind Kind)
+	{
+		return CabinTransform(Kind).TransformPosition(FVector(-CabinHalfLength - 190.0, 0.0, 0.0));
+	}
+
 	void BuildPaths(const FIntPoint& Sector, ESectorType Type, TArray<FBox2D>& OutPaths)
 	{
 		const float Size = UErewhonSettings::Get().SectorSize();
@@ -26,20 +72,34 @@ namespace ErewhonSpawn
 
 	bool IsInsideCabin(const FVector& World)
 	{
-		const FVector Local = World - ErewhonSector::Center(FIntPoint::ZeroValue);
-		return FMath::Abs(Local.X) < CabinHalfLength && FMath::Abs(Local.Y) < CabinHalfWidth && Local.Z > CabinFloorTop - 20.f;
+		for (const EShopKind Kind : ShopKinds)
+		{
+			const FVector Local = ToCabin(Kind, World);
+			if (FMath::Abs(Local.X) < CabinHalfLength && FMath::Abs(Local.Y) < CabinHalfWidth && Local.Z > CabinFloorTop - 20.f)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	bool IsOnPorch(const FVector& World)
 	{
-		// Palier et marches : du mur sud jusqu'à 1,8 m devant, sur la largeur de l'escalier.
-		const FVector Local = World - ErewhonSector::Center(FIntPoint::ZeroValue);
-		return Local.X < -CabinHalfLength + CabinWallThickness && Local.X > -CabinHalfLength - 180.f && FMath::Abs(Local.Y) < 100.f;
+		// Palier et marches : du mur de la porte jusqu'à 1,8 m devant, sur la largeur de l'escalier.
+		for (const EShopKind Kind : ShopKinds)
+		{
+			const FVector Local = ToCabin(Kind, World);
+			if (Local.X < -CabinHalfLength + CabinWallThickness && Local.X > -CabinHalfLength - 180.f && FMath::Abs(Local.Y) < 100.f)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
-	FVector DoorHingeLocation()
+	FTransform DoorHingeTransform(EShopKind Kind)
 	{
-		return ErewhonSector::Center(FIntPoint::ZeroValue) + FVector(-CabinHalfLength + CabinWallThickness * 0.5f, -DoorHalfWidth, CabinFloorTop);
+		return FTransform(FVector(-CabinHalfLength + CabinWallThickness * 0.5f, -DoorHalfWidth, CabinFloorTop)) * CabinTransform(Kind);
 	}
 
 	FTransform PlayerSpawnTransform()

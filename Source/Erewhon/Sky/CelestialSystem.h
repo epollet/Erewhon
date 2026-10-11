@@ -84,5 +84,4 @@ private:
 
 	/** Amplitude relative de la variation de couverture autour de la valeur du matériau. */
 	UPROPERTY(EditAnywhere, Category = "Sky") float CloudCoverageSwing = 0.5f;
-	FName CloudWindParam;
 };

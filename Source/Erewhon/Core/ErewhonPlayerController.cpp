@@ -23,6 +23,7 @@
 #include "TimerManager.h"
 #include "UnrealClient.h"
 #include "World/SectorTypes.h"
+#include "World/SpawnLayout.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonPlayerController"
 
@@ -232,7 +233,9 @@ void AErewhonPlayerController::NextAutoShot()
 		SetControlRotation(FRotator(ShotPitch, ShotYaws[Shot], 0));
 		if (Shot == 0 && !ShotMenu.IsEmpty())
 		{
-			if (ShotMenu == TEXT("store")) { OpenStore(); }
+			if (ShotMenu == TEXT("store")) { OpenStore(EShopKind::GeneralStore); }
+			else if (ShotMenu == TEXT("sectors")) { OpenStore(EShopKind::SectorManager); }
+			else if (ShotMenu == TEXT("tailor")) { OpenStore(EShopKind::Tailor); }
 			else if (ShotMenu == TEXT("inventory")) { ToggleInventory(); }
 			else
 			{
@@ -329,9 +332,10 @@ void AErewhonPlayerController::HandleEscape()
 	ShowMenu(SNew(SGameMenu).Controller(this), false);
 }
 
-void AErewhonPlayerController::OpenStore()
+void AErewhonPlayerController::OpenStore(EShopKind Kind)
 {
-	ShowMenu(SNew(SStorePanel).Controller(this), true);
+	StoreKind = Kind;
+	ShowMenu(SNew(SStorePanel).Controller(this).Kind(Kind), true);
 }
 
 void AErewhonPlayerController::PlayerTick(float DeltaTime)
@@ -341,7 +345,7 @@ void AErewhonPlayerController::PlayerTick(float DeltaTime)
 	// On ne repart pas avec la boutique ouverte.
 	const APawn* MyPawn = GetPawn();
 	if (bStoreOpen && OpenMenu.IsValid() && MyPawn
-		&& FVector::Dist2D(MyPawn->GetActorLocation(), ErewhonSector::MerchantLocation()) > UErewhonSettings::Get().MerchantReach() + 150.f)
+		&& FVector::Dist2D(MyPawn->GetActorLocation(), ErewhonSpawn::MerchantLocation(StoreKind)) > UErewhonSettings::Get().MerchantReach() + 150.f)
 	{
 		CloseMenu();
 	}
@@ -414,6 +418,14 @@ void AErewhonPlayerController::ServerSellSector_Implementation(FIntPoint Sector)
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
 	{
 		ReportResult(Mode->TrySellSector(this, Sector));
+	}
+}
+
+void AErewhonPlayerController::ServerBuyRoadLink_Implementation(FIntPoint Sector, uint8 Side)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryBuyRoadLink(this, Sector, Side));
 	}
 }
 

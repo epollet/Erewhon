@@ -135,6 +135,12 @@ namespace
 				Plant.ClusterMin = FMath::Max(1, static_cast<int32>((*Cluster)[0]->AsNumber()));
 				Plant.ClusterMax = FMath::Max(Plant.ClusterMin, static_cast<int32>((*Cluster)[1]->AsNumber()));
 			}
+			const TArray<TSharedPtr<FJsonValue>>* Patch = nullptr;
+			if ((*PlantObj)->TryGetArrayField(TEXT("patch"), Patch) && Patch->Num() == 2)
+			{
+				Plant.PatchRadiusMeters = FMath::Max(0.f, static_cast<float>((*Patch)[0]->AsNumber()));
+				Plant.PatchSize = FMath::Max(1, static_cast<int32>((*Patch)[1]->AsNumber()));
+			}
 			Plant.AccentColor = ParseColor(*PlantObj, TEXT("accent_color"), FLinearColor::Yellow);
 
 			const TSharedPtr<FJsonObject>* Counts = nullptr;

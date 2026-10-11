@@ -66,6 +66,10 @@ struct FSectorOwnerEntry : public FFastArraySerializerItem
 	UPROPERTY()
 	FString OwnerName;
 
+	/** Améliorations achetées : un chemin relie la route voisine, un bit par côté (voir ErewhonSector::Sides). */
+	UPROPERTY()
+	uint8 RoadLinks = 0;
+
 	void PostReplicatedAdd(const struct FSectorOwnerArray& Array);
 	void PostReplicatedChange(const struct FSectorOwnerArray& Array);
 	void PreReplicatedRemove(const struct FSectorOwnerArray& Array);
@@ -139,7 +143,11 @@ public:
 
 	void InitializeWorld(int32 InSeed, double InWorldAge);
 	void AddHarvest(const FIntPoint& Sector, int32 PlantIndex, double HarvestTime);
-	void SetSectorOwner(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName);
+	void SetSectorOwner(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName, uint8 RoadLinks = 0);
+
+	/** Côtés du secteur reliés à la route par un chemin (0 s'il n'a pas de propriétaire). */
+	uint8 GetRoadLinks(const FIntPoint& Sector) const;
+	void AddRoadLink(const FIntPoint& Sector, int32 Side);
 	void ClearSectorOwner(const FIntPoint& Sector);
 	const TArray<FHarvestEntry>& GetHarvestEntries() const { return Harvests.Items; }
 	const TArray<FSectorOwnerEntry>& GetOwnerEntries() const { return SectorOwners.Items; }

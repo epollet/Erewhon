@@ -191,16 +191,19 @@ void ACelestialSystem::SetupCloudMaterial()
 		}
 	}
 	Base->GetAllVectorParameterInfo(Infos, Ids);
+	FLinearColor Wind = FLinearColor::Transparent;
 	for (const FMaterialParameterInfo& Info : Infos)
 	{
-		const FString Name = Info.Name.ToString();
-		// « Layout_* » déplace la carte de couverture, ce n'est pas le vent.
-		if (CloudWindParam.IsNone() && Name.Contains(TEXT("Wind")) && !Name.StartsWith(TEXT("Layout")))
+		// Le vent du matériau fait défiler la carte des nuages : direction (RG), vitesses (BA).
+		// On garde la direction, on accélère le défilement.
+		if (Info.Name.ToString().Contains(TEXT("WindControls")) && Base->GetVectorParameterValue(Info, Wind))
 		{
-			CloudWindParam = Info.Name;
+			const float Factor = UErewhonSettings::Get().CloudSpeedFactor;
+			CloudMaterial->SetVectorParameterValue(Info.Name, FLinearColor(Wind.R, Wind.G, Wind.B * Factor, Wind.A * Factor));
+			break;
 		}
 	}
-	UE_LOG(LogErewhonSky, Log, TEXT("Nuages : couverture='%s' (défaut %.3f), vent='%s'"), *CloudCoverageParam.ToString(), CloudCoverageDefault, *CloudWindParam.ToString());
+	UE_LOG(LogErewhonSky, Log, TEXT("Nuages : couverture='%s' (défaut %.3f), vent %s"), *CloudCoverageParam.ToString(), CloudCoverageDefault, *Wind.ToString());
 }
 
 // ── Mise à jour ──────────────────────────────────────────────────────────────
@@ -243,17 +246,12 @@ void ACelestialSystem::UpdateClouds(double WorldClock)
 	{
 		// L'herbe ondule avec le même vent que les nuages : plus fort, plus vite.
 		const float Strength = FMath::Clamp(static_cast<float>(ErewhonWind::Velocity(WorldClock).Size() / (ErewhonWind::BaseSpeed + ErewhonWind::SpeedAmplitude)), 0.f, 1.f);
-		Materials->SetWind(FMath::Lerp(0.15f, 0.6f, Strength), FMath::Lerp(0.35f, 1.1f, Strength));
+		Materials->SetWind(FMath::Lerp(0.15f, 0.6f, Strength), FMath::Lerp(0.35f, 1.1f, Strength) * Settings.FoliageWindSpeedFactor);
 	}
 	if (CloudMaterial && !CloudCoverageParam.IsNone())
 	{
 		// Le ciel se couvre et se dégage sur CloudCoveragePeriodSeconds, autour du réglage du matériau.
 		const float Wave = FMath::Sin(WorldClock * UE_DOUBLE_TWO_PI / Settings.CloudCoveragePeriodSeconds);
 		CloudMaterial->SetScalarParameterValue(CloudCoverageParam, CloudCoverageDefault * (1.f + CloudCoverageSwing * Wave));
-	}
-	if (CloudMaterial && !CloudWindParam.IsNone())
-	{
-		const FVector2D Wind = ErewhonWind::Velocity(WorldClock);
-		CloudMaterial->SetVectorParameterValue(CloudWindParam, FLinearColor(Wind.X, Wind.Y, 0.f, 0.1f));
 	}
 }

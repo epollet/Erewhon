@@ -52,6 +52,7 @@ private:
 	void BuildPlants();
 	void BuildDecor();
 	void BuildBushes();
+	void BuildSignposts();
 	static UStaticMesh* LoadDecorMesh(const struct FDecorPlant& Plant);
 	UTexture2D* BuildDirtMask() const;
 	bool IsSoftlyExcluded(const FVector2D& World, float Roll) const;

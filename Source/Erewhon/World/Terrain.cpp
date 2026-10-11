@@ -2,6 +2,7 @@
 
 #include "Core/ErewhonSettings.h"
 #include "World/SectorTypes.h"
+#include "World/SpawnLayout.h"
 
 namespace ErewhonTerrain
 {
@@ -32,10 +33,16 @@ namespace ErewhonTerrain
 		// Ramené à [0, 1] puis adouci vers le bas : des fonds larges, des sommets ronds.
 		const float Hill = FMath::Pow(FMath::Clamp(Noise * 0.5f + 0.5f, 0.f, 1.f), 1.4f);
 
-		// Autour de la cabane, le sol est plat ; il rejoint les collines en pente douce.
+		// Autour de la place du village, le sol est plat ; il rejoint les collines en pente douce.
 		const float FromSpawn = FVector2D::Distance(World, FVector2D(ErewhonSector::Center(FIntPoint::ZeroValue)));
 		const float FlatRadius = Settings.SpawnFlatRadiusMeters * 100.f;
-		const float Flatten = FMath::SmoothStep(FlatRadius, FlatRadius + 3000.f, FromSpawn);
+		float Flatten = FMath::SmoothStep(FlatRadius, FlatRadius + 3000.f, FromSpawn);
+		// Même chose, plus serré, autour des cabanes du bord des routes.
+		for (const EShopKind Kind : { EShopKind::SectorManager, EShopKind::Tailor })
+		{
+			const FVector2D Cabin(ErewhonSpawn::CabinTransform(Kind).GetLocation());
+			Flatten = FMath::Min(Flatten, FMath::SmoothStep(1300.f, 3300.f, static_cast<float>(FVector2D::Distance(World, Cabin))));
+		}
 
 		return Hill * Amplitude * Flatten;
 	}

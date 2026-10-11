@@ -91,11 +91,12 @@ def models(only: set[str], force: bool) -> None:
 def sounds(only: set[str], force: bool) -> None:
     from elevenlabs import generate_sound
 
-    for name, (prompt, duration, loop) in manifest.SOUNDS.items():
+    for name, (prompt, duration, loop, *rest) in manifest.SOUNDS.items():
         if _wanted(name, only):
             path = OUTPUT_ROOT / "sounds" / f"{name}.wav"
+            trim = rest[0] if rest else None
             _run(f"son {name}", path, force,
-                 lambda p=path, q=prompt, d=duration, l=loop: generate_sound(q, p, duration=d, loop=l))
+                 lambda p=path, q=prompt, d=duration, l=loop, t=trim: generate_sound(q, p, duration=d, loop=l, trim=t))
 
 
 def grass_step(only: set[str], force: bool) -> None:

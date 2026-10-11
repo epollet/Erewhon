@@ -6,6 +6,7 @@
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UStaticMesh;
+class UTexture;
 class UStaticMeshComponent;
 class UProceduralMeshComponent;
 class USceneComponent;
@@ -78,6 +79,18 @@ namespace ErewhonVisuals
 	 * Avec HeightCm > 0, la hauteur est imposée aussi (échelle non uniforme).
 	 */
 	EREWHON_API FTransform FitToLength(const UStaticMesh* Mesh, float LengthCm, float HeightCm = 0.f);
+
+	/**
+	 * Ajoute un tableau : un rectangle Width × Height (cm) qui montre la texture générée TextureName
+	 * (ex. « T_map_wall »), centré sur Center et tourné vers −X une fois pivoté de Yaw.
+	 * Nul si la texture manque.
+	 */
+	EREWHON_API UProceduralMeshComponent* AddPicture(AActor* Owner, USceneComponent* Parent, const FVector& Center,
+		float Width, float Height, float Yaw, const FString& TextureName);
+
+	/** Même chose avec une texture déjà chargée (ou peinte à la volée). */
+	EREWHON_API UProceduralMeshComponent* AddPicture(AActor* Owner, USceneComponent* Parent, const FVector& Center,
+		float Width, float Height, float Yaw, UTexture* Texture);
 
 	/** Ajoute à Owner un mesh généré, mis à la hauteur voulue. */
 	EREWHON_API UStaticMeshComponent* AddGeneratedMesh(AActor* Owner, USceneComponent* Parent, UStaticMesh* Mesh,

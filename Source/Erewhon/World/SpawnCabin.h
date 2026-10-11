@@ -3,13 +3,15 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Player/Interactable.h"
+#include "World/SectorTypes.h"
 #include "SpawnCabin.generated.h"
 
 class UCapsuleComponent;
 class UPointLightComponent;
 
 /**
- * Le marchand de la cabane : achète les récoltes, vend outils, vêtements et secteurs.
+ * Le marchand d'un commerce : au General Store, il achète les récoltes et vend outils et
+ * vêtements ; au Sector Manager, il vend et reprend les secteurs.
  * Le dialogue s'ouvre côté client ; le serveur revalide la distance à chaque transaction.
  */
 UCLASS()
@@ -25,6 +27,10 @@ public:
 	virtual FText GetInteractionLabel() const override;
 	virtual void Interact(AErewhonPlayerController* Controller) override;
 
+	/** À régler avant BeginPlay (SpawnActorDeferred). */
+	UPROPERTY(EditAnywhere)
+	EShopKind Kind = EShopKind::GeneralStore;
+
 private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UCapsuleComponent> Capsule;
@@ -35,8 +41,9 @@ private:
 };
 
 /**
- * Cabane du secteur 0:0 : structure procédurale (pour garder un intérieur où se tient
- * le marchand), habillée des textures peintes générées, plus quelques accessoires Meshy.
+ * Une cabane de la place du village (General Store ou Sector Manager) : structure procédurale
+ * (pour garder un intérieur où se tient le marchand), habillée des textures peintes générées,
+ * plus des accessoires Meshy. Le General Store plante aussi les panneaux de la place.
  * Acteur local (non répliqué) : chaque machine la construit à l'identique.
  */
 UCLASS()
@@ -49,8 +56,25 @@ public:
 
 	virtual void BeginPlay() override;
 
+	/** À régler avant BeginPlay (SpawnActorDeferred). */
+	UPROPERTY(EditAnywhere)
+	EShopKind Kind = EShopKind::GeneralStore;
+
 private:
+	/** Ce que porte une étagère. */
+	enum class EShelfGoods : uint8 { Pantry, Office, Fabric };
+
 	void BuildCabin();
+	void BuildWindow(float Side, float Y0, float Y1);
+	void BuildTimberFrame();
+	void BuildStoreInterior();
+	void BuildManagerInterior();
+	void BuildTailorInterior();
+	void BuildPlazaSignposts();
+	FVector AddCounter();
+	void AddShelf(const FVector& Location, float Yaw, int32 Variant, EShelfGoods Goods);
+	class UStaticMeshComponent* AddBox(USceneComponent* Parent, const FVector& Min, const FVector& Max, const FLinearColor& Color,
+		const TCHAR* Texture, float Tile, bool bCollision = true);
 	void AddFitted(class UStaticMesh* Mesh, const FTransform& Fit, const FVector& Location, float Yaw, bool bCollision);
 
 	UPROPERTY(VisibleAnywhere)
@@ -62,4 +86,8 @@ private:
 	/** Rotation du comptoir généré pour que sa façade regarde la porte. */
 	UPROPERTY(EditAnywhere)
 	float CounterMeshYaw = 0.f;
+
+	/** Rotation du bureau aux cartes généré, même règle. */
+	UPROPERTY(EditAnywhere)
+	float DeskMeshYaw = 0.f;
 };

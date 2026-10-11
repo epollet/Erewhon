@@ -18,6 +18,7 @@
 #include "Widgets/SToolTip.h"
 #include "Widgets/Text/STextBlock.h"
 #include "World/SectorTypes.h"
+#include "World/SpawnLayout.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonStorePanel"
 
@@ -35,18 +36,17 @@ namespace
 		return FText::Format(LOCTEXT("CoinsFmt", "{0} C"), FText::AsNumber(Amount));
 	}
 
-	/** État d'un secteur vu par le joueur. */
-	enum class ESectorState : uint8 { Merchant, Road, Free, Mine, Taken };
+	/** État d'un secteur vu par le joueur : public (commerces, routes), libre, à lui, privé (à un autre). */
+	enum class ESectorState : uint8 { Public, Free, Mine, Private };
 
 	FLinearColor StateColor(ESectorState State)
 	{
 		switch (State)
 		{
-		case ESectorState::Merchant: return Clay;
-		case ESectorState::Road:     return RoadColor;
-		case ESectorState::Mine:     return Sky;
-		case ESectorState::Taken:    return Mix(Danger, Card, 0.35f);
-		default:                     return Mix(Leaf, Card, 0.25f);
+		case ESectorState::Public:  return RoadColor;
+		case ESectorState::Mine:    return Sky;
+		case ESectorState::Private: return Mix(Danger, Card, 0.35f);
+		default:                    return Mix(Leaf, Card, 0.25f);
 		}
 	}
 }
@@ -54,6 +54,7 @@ namespace
 void SStorePanel::Construct(const FArguments& InArgs)
 {
 	Controller = InArgs._Controller;
+	Kind = InArgs._Kind;
 	AErewhonPlayerState* State = Controller.IsValid() ? Controller->GetPlayerState<AErewhonPlayerState>() : nullptr;
 	AErewhonGameState* World = AErewhonGameState::Get(Controller.Get());
 	if (State)
@@ -65,18 +66,31 @@ void SStorePanel::Construct(const FArguments& InArgs)
 	{
 		World->OnSectorOwnerChanged.AddSP(this, &SStorePanel::OnSectorOwnerChanged);
 	}
-	// Sans secteur, rien à récolter : on ouvre d'abord sur la carte.
-	if (State && World && World->GetSectorsOwnedBy(State->GetPlayerKey()).IsEmpty())
+	// Le gérant ne parle que de secteurs ; ailleurs, rien à vendre ici ? On ouvre sur les achats.
+	const bool bManager = Kind == EShopKind::SectorManager;
+	if (bManager)
 	{
 		Tab = ETab::Sectors;
+	}
+	else if (State && !State->GetInventory()->GetSlots().ContainsByPredicate([this, State](const FInventorySlot& Slot)
+	{
+		const FItemDef* Def = Slot.Kind == ESlotKind::Inventory && !Slot.IsEmpty() ? UItemDatabase::Get(Controller.Get())->Find(Slot.ItemId) : nullptr;
+		return Def && Def->ShopFor() == Kind && Def->ResalePrice(UErewhonSettings::Get().ResaleRatio) > 0;
+	}))
+	{
+		Tab = ETab::Buy;
 	}
 
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	ChildSlot
 	[
-		Window(LOCTEXT("Title", "Le marchand"), SAssignNew(Body, SBox),
+		Window(FText::FromString(ErewhonSpawn::ShopName(Kind)), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
-			GPanelWidth, LOCTEXT("Subtitle", "« Bonjour ! Qu'est-ce qui vous ferait plaisir ? »"))
+			GPanelWidth, bManager
+				? LOCTEXT("ManagerSubtitle", "« Un coin de prairie à vous ? Regardons la carte ensemble. »")
+				: Kind == EShopKind::Tailor
+				? LOCTEXT("TailorSubtitle", "« Entrez donc ! Un peu d'étoffe, quelques poches de plus ? »")
+				: LOCTEXT("Subtitle", "« Bonjour ! Qu'est-ce qui vous ferait plaisir ? »"))
 	];
 	Rebuild();
 }
@@ -120,6 +134,11 @@ TSharedRef<SWidget> SStorePanel::BuildTabs()
 	};
 	for (const TPair<ETab, FText>& Entry : Entries)
 	{
+		// Chaque commerce son métier : la carte chez le gérant, le reste au General Store.
+		if ((Entry.Key == ETab::Sectors) != (Kind == EShopKind::SectorManager))
+		{
+			continue;
+		}
 		const ETab Value = Entry.Key;
 		Tabs->AddSlot().AutoWidth().Padding(0, 0, 8, 0)
 		[
@@ -150,15 +169,14 @@ TSharedRef<SWidget> SStorePanel::BuildSectors()
 			const FIntPoint Sector(X, Y);
 			const ESectorType Type = ErewhonSector::TypeAt(Sector, World->GetWorldSeed());
 			const FString* Owner = World->FindSectorOwnerKey(Sector);
-			const ESectorState TileState = Type == ESectorType::Spawn ? ESectorState::Merchant
-				: Type == ESectorType::Road ? ESectorState::Road
+			const ESectorState TileState = !ErewhonSector::IsPurchasable(Sector) ? ESectorState::Public
 				: !Owner ? ESectorState::Free
-				: *Owner == State->GetPlayerKey() ? ESectorState::Mine : ESectorState::Taken;
+				: *Owner == State->GetPlayerKey() ? ESectorState::Mine : ESectorState::Private;
 			const bool bSelected = Sector == Selected;
 			const FLinearColor Fill = StateColor(TileState);
 
 			FText Glyph;
-			if (TileState == ESectorState::Merchant)
+			if (Type == ESectorType::Spawn)
 			{
 				Glyph = FText::FromString(TEXT("⌂"));   // maisonnette
 			}
@@ -214,8 +232,8 @@ TSharedRef<SWidget> SStorePanel::BuildSectors()
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[Legend(ESectorState::Free, LOCTEXT("LegendFree", "Libre"))]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[Legend(ESectorState::Mine, LOCTEXT("LegendMine", "À vous"))]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[Legend(ESectorState::Taken, LOCTEXT("LegendTaken", "Pris"))]
-					+ SHorizontalBox::Slot().AutoWidth()[Legend(ESectorState::Road, LOCTEXT("LegendRoad", "Route"))]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[Legend(ESectorState::Private, LOCTEXT("LegendPrivate", "Privé"))]
+					+ SHorizontalBox::Slot().AutoWidth()[Legend(ESectorState::Public, LOCTEXT("LegendPublic", "Public"))]
 				],
 				10.f)
 		]
@@ -237,21 +255,21 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	if (Type == ESectorType::Spawn)
 	{
-		Status = LOCTEXT("StatusMerchant", "Ma cabane et sa place. Pas à vendre, désolé !");
+		Status = LOCTEXT("StatusMerchant", "La place du village, avec le General Store et mon bureau. C'est public : pas à vendre !");
 	}
 	else if (Type == ESectorType::Road)
 	{
-		Status = LOCTEXT("StatusRoad", "Une route, à tout le monde. Achetez un secteur qui la borde : un chemin vous y mènera.");
+		Status = LOCTEXT("StatusRoad", "Une route : c'est public. Achetez un secteur qui la borde, un chemin vous y mènera.");
 	}
 	else if (bMine)
 	{
-		Status = LOCTEXT("StatusMine", "C'est chez vous. Je vous le reprends à moitié prix si vous voulez.");
+		Status = LOCTEXT("StatusMine", "C'est chez vous. Je peux l'aménager, ou vous le reprendre à moitié prix.");
 		Action = Button(FText::Format(LOCTEXT("Resell", "Revendre · {0}"), CoinsText(Settings.SectorSellPrice)),
 			[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerSellSector(Sector); } }, EButton::Secondary, true, 200.f);
 	}
 	else if (Owner)
 	{
-		Status = FText::Format(LOCTEXT("StatusTaken", "Ce secteur appartient à {0}."), FText::FromString(World->GetSectorOwnerName(Sector)));
+		Status = FText::Format(LOCTEXT("StatusTaken", "Secteur privé : il appartient à {0}."), FText::FromString(World->GetSectorOwnerName(Sector)));
 	}
 	else
 	{
@@ -261,7 +279,7 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 			bNearRoad |= ErewhonSector::IsRoad(Sector + Side);
 		}
 		Status = bNearRoad
-			? LOCTEXT("StatusFreeRoad", "Une belle prairie au bord de la route. Un chemin y sera tracé.")
+			? LOCTEXT("StatusFreeRoad", "Une belle prairie au bord de la route. Je pourrai vous y tracer un chemin d'accès.")
 			: LOCTEXT("StatusFree", "Une prairie libre, rien que pour vous.");
 		const bool bAfford = State->GetCoins() >= Settings.SectorBuyPrice;
 		Action = Button(FText::Format(LOCTEXT("Buy", "Acheter · {0}"), CoinsText(Settings.SectorBuyPrice)),
@@ -273,6 +291,51 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 	for (const FIntPoint& Mine : Owned)
 	{
 		OwnedList += (OwnedList.IsEmpty() ? TEXT("") : TEXT(", ")) + ErewhonSector::ToString(Mine);
+	}
+
+	// Améliorations d'un secteur à soi : un chemin vers chaque route qui le borde.
+	TSharedRef<SVerticalBox> Upgrades = SNew(SVerticalBox);
+	if (bMine)
+	{
+		Upgrades->AddSlot().AutoHeight().Padding(0, 0, 0, 8)
+		[
+			SNew(STextBlock).Text(LOCTEXT("UpgradesTitle", "Améliorations")).Font(Font(13, true)).ColorAndOpacity(Ink)
+		];
+		const uint8 Links = World->GetRoadLinks(Sector);
+		for (int32 Side = 0; Side < 4; ++Side)
+		{
+			if (!ErewhonSector::IsRoad(Sector + ErewhonSector::Sides[Side]))
+			{
+				continue;
+			}
+			const bool bBuilt = (Links & (1 << Side)) != 0;
+			const bool bAfford = State->GetCoins() >= Settings.RoadLinkPrice;
+			const uint8 SideByte = static_cast<uint8>(Side);
+			TSharedRef<SWidget> UpgradeAction = bBuilt
+				? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("Built", "✓ Construit")).Font(Font(11, true)).ColorAndOpacity(Leaf))
+				: Button(FText::Format(LOCTEXT("BuildLink", "Construire · {0}"), CoinsText(Settings.RoadLinkPrice)),
+					[WeakController, Sector, SideByte]() { if (WeakController.IsValid()) { WeakController->ServerBuyRoadLink(Sector, SideByte); } },
+					EButton::Primary, bAfford, 150.f);
+			Upgrades->AddSlot().AutoHeight().Padding(0, 0, 0, 6)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(FText::Format(LOCTEXT("LinkUpgrade", "Accès à la route {0}"), ErewhonSector::SideLabel(Side)))
+					.Font(Font(11)).ColorAndOpacity(Ink).AutoWrapText(true)
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[UpgradeAction]
+			];
+		}
+		if (Upgrades->NumSlots() == 1)
+		{
+			Upgrades->AddSlot().AutoHeight()
+			[
+				SNew(STextBlock).Text(LOCTEXT("NoUpgrade", "Aucune route ne borde ce secteur : rien à améliorer pour l'instant."))
+				.Font(Font(10)).ColorAndOpacity(MutedInk).AutoWrapText(true)
+			];
+		}
 	}
 
 	return SNew(SVerticalBox)
@@ -295,6 +358,10 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 				]
 				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left)[Action],
 				16.f)
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+		[
+			bMine ? CardBox(Upgrades, 14.f) : StaticCastSharedRef<SWidget>(SNew(SBox))
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(4, 14, 0, 0)
 		[
@@ -322,6 +389,10 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 	int32 Index = 0;
 	for (const FItemDef* Def : Items->GetPurchasable())
 	{
+		if (Def->ShopFor() != Kind)
+		{
+			continue;   // chaque commerce ne vend que sa marchandise
+		}
 		const bool bOwned = Def->IsUnique() && State->GetInventory()->Owns(Def->Id);
 		const bool bAfford = State->GetCoins() >= Def->BuyPrice;
 		const FName Id = Def->Id;
@@ -375,7 +446,7 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 	for (const FName Id : Seen)
 	{
 		const FItemDef* Def = Items->Find(Id);
-		const int32 Price = Def ? Def->ResalePrice(ResaleRatio) : 0;
+		const int32 Price = Def && Def->ShopFor() == Kind ? Def->ResalePrice(ResaleRatio) : 0;
 		if (Price <= 0)
 		{
 			continue;

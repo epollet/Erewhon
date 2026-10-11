@@ -4,8 +4,12 @@
 #include "Components/PointLightComponent.h"
 #include "Core/ErewhonPlayerController.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/World.h"
+#include "Core/ErewhonSettings.h"
 #include "World/ErewhonVisuals.h"
+#include "World/Signpost.h"
 #include "World/ShopCat.h"
 #include "World/SectorTypes.h"
 #include "World/SpawnLayout.h"
@@ -23,8 +27,45 @@ namespace
 	constexpr float GWindowHalfWidth = 100.f;
 	constexpr float GWindowSill = 100.f;
 	constexpr float GWindowTop = 200.f;
-	constexpr float GRoofSlope = 30.f;    // degrés
 	constexpr float GRoofOverhang = 50.f;
+
+	/** Habillage d'une cabane : chaque commerce a le sien, pour éviter la répétition. */
+	struct FCabinStyle
+	{
+		const TCHAR* Wall = TEXT("wood_planks");
+		float WallTile = 220.f;
+		FLinearColor WallColor = Palette::WoodLight;
+		const TCHAR* Roof = TEXT("roof_tiles");
+		float RoofTile = 240.f;
+		FLinearColor RoofColor = Palette::Roof;
+		float RoofSlope = 30.f;   // degrés
+		const TCHAR* Floor = TEXT("stone_slabs");
+		float FloorTile = 220.f;
+		bool bTimberFrame = false;   // colombages sombres sur un enduit clair
+	};
+
+	FCabinStyle StyleFor(EShopKind Kind)
+	{
+		FCabinStyle Style;
+		if (Kind == EShopKind::Tailor)
+		{
+			// Maisonnette enduite à colombages, toit d'ardoise plus pentu, plancher de chêne.
+			Style.Wall = TEXT("plaster");
+			Style.WallTile = 260.f;
+			Style.WallColor = FLinearColor::FromSRGBColor(FColor(236, 226, 204));
+			Style.Roof = TEXT("roof_slate");
+			Style.RoofTile = 200.f;
+			Style.RoofColor = FLinearColor::FromSRGBColor(FColor(110, 128, 140));
+			Style.RoofSlope = 38.f;
+			Style.Floor = TEXT("floor_boards");
+			Style.FloorTile = 200.f;
+			Style.bTimberFrame = true;
+		}
+		return Style;
+	}
+
+	const FLinearColor GParchment = FLinearColor::FromSRGBColor(FColor(232, 214, 170));
+	const FLinearColor GBrass = FLinearColor::FromSRGBColor(FColor(196, 156, 72));
 }
 
 // ── Marchand ─────────────────────────────────────────────────────────────────
@@ -40,10 +81,13 @@ AMerchant::AMerchant()
 void AMerchant::BeginPlay()
 {
 	Super::BeginPlay();
-	if (UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_merchant")))
+	const TCHAR* MeshName = Kind == EShopKind::SectorManager ? TEXT("SM_sector_manager")
+		: Kind == EShopKind::Tailor ? TEXT("SM_tailor") : TEXT("SM_merchant");
+	if (UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), MeshName))
 	{
 		// Modèle Meshy, posé sur le plancher (bas de la capsule).
-		AddGeneratedMesh(this, Capsule, Mesh, FVector(0, 0, -Capsule->GetScaledCapsuleHalfHeight()), 175.f, MerchantMeshYaw, false);
+		AddGeneratedMesh(this, Capsule, Mesh, FVector(0, 0, -Capsule->GetScaledCapsuleHalfHeight()), Kind == EShopKind::Tailor ? 165.f : 175.f,
+			MerchantMeshYaw, false);
 		return;
 	}
 	// Silhouette provisoire : tablier vert, tête, chapeau de paille.
@@ -57,14 +101,19 @@ void AMerchant::BeginPlay()
 
 FText AMerchant::GetInteractionLabel() const
 {
-	return LOCTEXT("TalkToMerchant", "Parler au marchand");
+	switch (Kind)
+	{
+	case EShopKind::SectorManager: return LOCTEXT("TalkToManager", "Parler au gérant des secteurs");
+	case EShopKind::Tailor:        return LOCTEXT("TalkToTailor", "Parler à la couturière");
+	default:                       return LOCTEXT("TalkToMerchant", "Parler au marchand");
+	}
 }
 
 void AMerchant::Interact(AErewhonPlayerController* Controller)
 {
 	if (Controller)
 	{
-		Controller->OpenStore();
+		Controller->OpenStore(Kind);
 	}
 }
 
@@ -88,15 +137,18 @@ ASpawnCabin::ASpawnCabin()
 void ASpawnCabin::BeginPlay()
 {
 	Super::BeginPlay();
-	SetActorLocation(ErewhonSector::Center(FIntPoint::ZeroValue));
+	SetActorTransform(ErewhonSpawn::CabinTransform(Kind));
 	BuildCabin();
 
-	FActorSpawnParameters Params;
-	Params.Owner = this;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	const FVector MerchantLocation = ErewhonSector::MerchantLocation() + FVector(0, 0, GFloorTop + 90.f);
-	// Le marchand fait face à la porte (sud, −X).
-	GetWorld()->SpawnActor<AMerchant>(MerchantLocation, FRotator(0, 180, 0), Params);
+	// Le marchand se tient derrière son comptoir, face à la porte (−X de la cabane).
+	const FVector MerchantLocation = ErewhonSpawn::MerchantLocation(Kind) + FVector(0, 0, GFloorTop + 90.f);
+	const FTransform Spawn(GetActorRotation() + FRotator(0, 180, 0), MerchantLocation);
+	if (AMerchant* Merchant = GetWorld()->SpawnActorDeferred<AMerchant>(AMerchant::StaticClass(), Spawn, this, nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+	{
+		Merchant->Kind = Kind;
+		Merchant->FinishSpawning(Spawn);
+	}
 }
 
 void ASpawnCabin::AddFitted(UStaticMesh* Mesh, const FTransform& Fit, const FVector& Location, float Yaw, bool bCollision)
@@ -110,6 +162,17 @@ void ASpawnCabin::AddFitted(UStaticMesh* Mesh, const FTransform& Fit, const FVec
 	AddInstanceComponent(Part);
 }
 
+UStaticMeshComponent* ASpawnCabin::AddBox(USceneComponent* Parent, const FVector& Min, const FVector& Max, const FLinearColor& Color,
+	const TCHAR* Texture, float Tile, bool bCollision)
+{
+	UStaticMeshComponent* Part = AddShape(this, Parent, EShape::Cube, (Min + Max) * 0.5f, Max - Min, Color, FRotator::ZeroRotator, bCollision);
+	if (Texture)
+	{
+		Part->SetMaterial(0, MakePaintedMaterial(Part, Texture, Tile, Color));
+	}
+	return Part;
+}
+
 void ASpawnCabin::BuildCabin()
 {
 	using namespace ErewhonSpawn;
@@ -117,29 +180,33 @@ void ASpawnCabin::BuildCabin()
 	const float HW = CabinHalfWidth;
 	const float H = CabinWallHeight;
 	const float T = GWallThickness;
+	const FCabinStyle Style = StyleFor(Kind);
 
-	// Matériaux peints générés, avec la couleur unie en repli.
-	const auto Paint = [](UStaticMeshComponent* Part, const FLinearColor& Color)
+	// Matériaux peints générés selon le style de la maison, avec la couleur unie en repli.
+	const auto Paint = [&Style](UStaticMeshComponent* Part, const FLinearColor& Color)
 	{
-		const TCHAR* Texture = TEXT("wood_planks");
-		float Tile = 220.f;
-		FLinearColor Tint = FLinearColor::White;
+		const TCHAR* Texture = Style.Wall;
+		float Tile = Style.WallTile;
+		FLinearColor Fallback = Style.WallColor;
 		if (Color == Palette::Stone)
 		{
 			Texture = TEXT("stone");
 			Tile = 160.f;
+			Fallback = Color;
 		}
 		else if (Color == Palette::Roof)
 		{
-			Texture = TEXT("roof_tiles");
-			Tile = 240.f;
+			Texture = Style.Roof;
+			Tile = Style.RoofTile;
+			Fallback = Style.RoofColor;
 		}
 		else if (Color == Palette::WoodDark)
 		{
 			Texture = TEXT("wood_trim");
 			Tile = 160.f;
+			Fallback = Color;
 		}
-		Part->SetMaterial(0, MakePaintedMaterial(Part, Texture, Tile, Color, Tint));
+		Part->SetMaterial(0, MakePaintedMaterial(Part, Texture, Tile, Fallback));
 		return Part;
 	};
 
@@ -168,9 +235,9 @@ void ASpawnCabin::BuildCabin()
 		AddLoft(this, Root, Bottom, -20.f, Top, GFloorTop, MakePaintedMaterial(this, TEXT("stone"), 160.f, Palette::Stone));
 	}
 
-	// Sol intérieur en dalles de pierre.
+	// Sol intérieur : dalles de pierre, ou plancher selon la maison.
 	UStaticMeshComponent* Floor = AddShape(this, Root, EShape::Cube, FVector(0, 0, GFloorTop + 1.f), FVector(2 * (HL - T), 2 * (HW - T), 2.f), Palette::Stone);
-	Floor->SetMaterial(0, MakePaintedMaterial(Floor, TEXT("stone_slabs"), 220.f, Palette::Stone));
+	Floor->SetMaterial(0, MakePaintedMaterial(Floor, Style.Floor, Style.FloorTile, Palette::Stone));
 
 	// Perron d'entrée en bois : un palier qui recouvre tout le talus, puis deux marches
 	// posées au-delà du pied du remblai. Limons de chaque côté.
@@ -199,16 +266,15 @@ void ASpawnCabin::BuildCabin()
 		}
 	}
 
-	// Mur nord, plein.
+	// Mur du fond (+X), plein.
 	Box(FVector(HL - T, -HW, 0), FVector(HL, HW, H), Palette::WoodLight);
 
-	// Mur sud avec la porte.
+	// Mur de la porte (−X).
 	Box(FVector(-HL, -HW, 0), FVector(-HL + T, -GDoorHalfWidth, H), Palette::WoodLight);
 	Box(FVector(-HL, GDoorHalfWidth, 0), FVector(-HL + T, HW, H), Palette::WoodLight);
 	Box(FVector(-HL, -GDoorHalfWidth, GDoorHeight), FVector(-HL + T, GDoorHalfWidth, H), Palette::WoodLight);
 
-	// Murs est et ouest, chacun percé d'une fenêtre centrée.
-	const FLinearColor Shutter = FLinearColor::FromSRGBColor(FColor(86, 138, 146));
+	// Murs latéraux, chacun percé d'une fenêtre centrée.
 	for (const float Side : { -1.f, 1.f })
 	{
 		const float Y0 = Side > 0 ? HW - T : -HW;
@@ -217,55 +283,7 @@ void ASpawnCabin::BuildCabin()
 		Box(FVector(GWindowHalfWidth, Y0, 0), FVector(HL, Y1, H), Palette::WoodLight);
 		Box(FVector(-GWindowHalfWidth, Y0, 0), FVector(GWindowHalfWidth, Y1, GWindowSill), Palette::WoodLight);
 		Box(FVector(-GWindowHalfWidth, Y0, GWindowTop), FVector(GWindowHalfWidth, Y1, H), Palette::WoodLight);
-
-		// Encadrement débordant de chaque côté du mur, et croisillons.
-		const float F0 = Y0 - 6.f;
-		const float F1 = Y1 + 6.f;
-		Box(FVector(-GWindowHalfWidth - 10, F0, GWindowSill - 10), FVector(GWindowHalfWidth + 10, F1, GWindowSill), Palette::WoodDark);
-		Box(FVector(-GWindowHalfWidth - 10, F0, GWindowTop), FVector(GWindowHalfWidth + 10, F1, GWindowTop + 10), Palette::WoodDark);
-		Box(FVector(-GWindowHalfWidth - 10, F0, GWindowSill), FVector(-GWindowHalfWidth, F1, GWindowTop), Palette::WoodDark);
-		Box(FVector(GWindowHalfWidth, F0, GWindowSill), FVector(GWindowHalfWidth + 10, F1, GWindowTop), Palette::WoodDark);
-		const float MidY = (Y0 + Y1) * 0.5f;
-		Box(FVector(-3, MidY - 3, GWindowSill), FVector(3, MidY + 3, GWindowTop), Palette::WoodDark);
-		Box(FVector(-GWindowHalfWidth, MidY - 3, (GWindowSill + GWindowTop) * 0.5f - 3), FVector(GWindowHalfWidth, MidY + 3, (GWindowSill + GWindowTop) * 0.5f + 3), Palette::WoodDark);
-
-		// Volets ouverts à plat contre le mur extérieur : modèle dédié, sinon planches peintes.
-		const float Outer = Side > 0 ? Y1 + 7.f : Y0 - 11.f;
-		UStaticMesh* ShutterMesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_shutter"));
-		for (const float SX : { -1.f, 1.f })
-		{
-			const float X0 = SX > 0 ? GWindowHalfWidth + 12 : -GWindowHalfWidth - 12 - GWindowHalfWidth;
-			const FVector Center(X0 + GWindowHalfWidth * 0.5f, Outer + 2.f, GFloorTop + (GWindowSill + GWindowTop) * 0.5f);
-			if (ShutterMesh)
-			{
-				// FitToLength met la largeur sur Y, façade vers −X : un quart de tour la tourne vers l'extérieur.
-				const FVector Base(Center.X, Center.Y, GFloorTop + GWindowSill - 5.f);
-				AddFitted(ShutterMesh, FitToLength(ShutterMesh, GWindowHalfWidth, GWindowTop - GWindowSill + 10.f), Base, Side > 0 ? -90.f : 90.f, false);
-				continue;
-			}
-			UStaticMeshComponent* Panel = AddShape(this, Root, EShape::Cube, Center,
-				FVector(GWindowHalfWidth, 4.f, GWindowTop - GWindowSill + 10.f), Shutter);
-			Panel->SetMaterial(0, MakePaintedMaterial(Panel, TEXT("wood_planks"), 120.f, Shutter, Shutter * 1.6f));
-		}
-
-		// Jardinière fleurie sous la fenêtre : modèle dédié, sinon caisse et fleurs.
-		const float BoxY = Side > 0 ? Y1 + 14.f : Y0 - 14.f;
-		if (UStaticMesh* Planter = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_window_box")))
-		{
-			AddFitted(Planter, FitToLength(Planter, 2 * GWindowHalfWidth + 20.f, 50.f), FVector(0.f, BoxY + Side * 4.f, GFloorTop + GWindowSill - 40.f), Side > 0 ? -90.f : 90.f, false);
-			continue;
-		}
-		Box(FVector(-GWindowHalfWidth, BoxY - 12, GWindowSill - 34), FVector(GWindowHalfWidth, BoxY + 12, GWindowSill - 12), Palette::WoodDark);
-		int32 FlowerIndex = 0;
-		for (const TCHAR* Name : { TEXT("SM_flower_white"), TEXT("SM_flower_blue"), TEXT("SM_flower_purple"), TEXT("SM_flower_white"), TEXT("SM_flower_blue") })
-		{
-			if (UStaticMesh* Flower = LoadGenerated<UStaticMesh>(TEXT("Meshes"), Name))
-			{
-				const float X = -GWindowHalfWidth + 25.f + FlowerIndex * 37.5f;
-				AddGeneratedMesh(this, Root, Flower, FVector(X, BoxY, GFloorTop + GWindowSill - 14.f), 38.f, FlowerIndex * 67.f, false);
-			}
-			++FlowerIndex;
-		}
+		BuildWindow(Side, Y0, Y1);
 	}
 
 	// Chambranle de la porte, côté extérieur.
@@ -282,17 +300,21 @@ void ASpawnCabin::BuildCabin()
 			Box(Corner - FVector(T, T, 0), Corner + FVector(T, T, H + 10), Palette::WoodDark);
 		}
 	}
+	if (Style.bTimberFrame)
+	{
+		BuildTimberFrame();
+	}
 
-	// Toit à deux pans, faîtage nord-sud.
+	// Toit à deux pans, faîtage dans l'axe de la cabane.
 	const float HalfSpan = HW + GRoofOverhang;
-	const float SlopeRad = FMath::DegreesToRadians(GRoofSlope);
+	const float SlopeRad = FMath::DegreesToRadians(Style.RoofSlope);
 	const float SlabWidth = HalfSpan / FMath::Cos(SlopeRad);
 	const float RidgeRise = HalfSpan * FMath::Tan(SlopeRad);
 	for (const float Side : { -1.f, 1.f })
 	{
 		const FVector Center(0, Side * HalfSpan * 0.5f, GFloorTop + H + RidgeRise * 0.5f + 8.f);
 		Paint(AddShape(this, Root, EShape::Cube, Center, FVector(2 * HL + 2 * GRoofOverhang, SlabWidth, 16), Palette::Roof,
-			FRotator(0, 0, Side * GRoofSlope)), Palette::Roof);
+			FRotator(0, 0, Side * Style.RoofSlope)), Palette::Roof);
 	}
 
 	// Hauteur du dessous du toit à l'aplomb des murs longs : la sablière comble ce jour.
@@ -303,8 +325,8 @@ void ASpawnCabin::BuildCabin()
 		Box(FVector(-HL, Y0, H), FVector(HL, Y0 + T, H + EaveGap + 6.f), Palette::WoodDark);
 	}
 
-	// Pignons pleins au nord et au sud : un pentagone qui épouse le dessous du toit.
-	UMaterialInterface* GableMaterial = MakePaintedMaterial(this, TEXT("wood_planks"), 220.f, Palette::WoodLight);
+	// Pignons pleins aux deux bouts : un pentagone qui épouse le dessous du toit.
+	UMaterialInterface* GableMaterial = MakePaintedMaterial(this, Style.Wall, Style.WallTile, Style.WallColor);
 	const TArray<FVector2D> Gable = {
 		FVector2D(-HW, GFloorTop + H),
 		FVector2D(HW, GFloorTop + H),
@@ -315,32 +337,201 @@ void ASpawnCabin::BuildCabin()
 	AddPrism(this, Root, Gable, HL - T, HL, GableMaterial);
 	AddPrism(this, Root, Gable, -HL, -HL + T, GableMaterial);
 
-	// Plafond de planches (plancher du grenier) : de l'intérieur, on ne voit plus les tuiles.
-	Box(FVector(-HL + T, -HW + T, H - 10.f), FVector(HL - T, HW - T, H), Palette::WoodLight);
+	// Plafond de planches (plancher du grenier) : de l'intérieur, on ne voit plus le toit.
+	AddBox(Root, FVector(-HL + T, -HW + T, GFloorTop + H - 10.f), FVector(HL - T, HW - T, GFloorTop + H), Palette::WoodLight, TEXT("wood_planks"), 220.f);
 	// Poutres apparentes sous le plafond.
 	for (const float X : { -HL * 0.5f, 0.f, HL * 0.5f })
 	{
 		Box(FVector(X - 10.f, -HW + T, H - 32.f), FVector(X + 10.f, HW - T, H - 10.f), Palette::WoodDark);
 	}
 
+	// Enseigne peinte au-dessus de la porte, sur un fond de bois sombre.
+	{
+		const FVector Sign(-HL - 4.4f, 0.f, GFloorTop + 280.f);
+		const TCHAR* Texture = Kind == EShopKind::SectorManager ? TEXT("T_sign_sector_manager")
+			: Kind == EShopKind::Tailor ? TEXT("T_sign_tailor") : TEXT("T_sign_general_store");
+		if (AddPicture(this, Root, Sign, 200.f, 84.f, 0.f, Texture))
+		{
+			Box(FVector(-HL - 3.8f, -106.f, 280.f - 48.f), FVector(-HL, 106.f, 280.f + 48.f), Palette::WoodDark);
+		}
+	}
+
+	switch (Kind)
+	{
+	case EShopKind::SectorManager:
+		BuildManagerInterior();
+		break;
+	case EShopKind::Tailor:
+		BuildTailorInterior();
+		break;
+	default:
+		BuildStoreInterior();
+		BuildPlazaSignposts();
+		break;
+	}
+}
+
+void ASpawnCabin::BuildWindow(float Side, float Y0, float Y1)
+{
+	// Une vraie fenêtre de cottage : appui saillant, linteau, encadrement, croisillons et carreaux,
+	// volets ouverts à plat contre le mur et jardinière fleurie.
+	const float W = GWindowHalfWidth;
+	const float Outer = Side > 0 ? Y1 : Y0;          // face extérieure du mur
+	const float Out = Side;                          // vers l'extérieur
+	const auto Wood = [this](const FVector& A, const FVector& B)
+	{
+		const FVector Min(FMath::Min(A.X, B.X), FMath::Min(A.Y, B.Y), FMath::Min(A.Z, B.Z) + GFloorTop);
+		const FVector Max(FMath::Max(A.X, B.X), FMath::Max(A.Y, B.Y), FMath::Max(A.Z, B.Z) + GFloorTop);
+		AddBox(Root, Min, Max, Palette::WoodDark, TEXT("wood_trim"), 120.f, false);
+	};
+
+	// Encadrement qui déborde de part et d'autre du mur.
+	const float F0 = Y0 - 4.f;
+	const float F1 = Y1 + 4.f;
+	Wood(FVector(-W - 10, F0, GWindowTop), FVector(W + 10, F1, GWindowTop + 10));
+	Wood(FVector(-W - 10, F0, GWindowSill), FVector(-W, F1, GWindowTop));
+	Wood(FVector(W, F0, GWindowSill), FVector(W + 10, F1, GWindowTop));
+	// Appui : une planche épaisse qui avance dehors, et le linteau au-dessus.
+	Wood(FVector(-W - 16, Y0 - 2.f, GWindowSill - 8), FVector(W + 16, Y1 + 2.f, GWindowSill));
+	Wood(FVector(-W - 16, Outer, GWindowSill - 12), FVector(W + 16, Outer + Out * 14.f, GWindowSill - 2));
+	Wood(FVector(-W - 20, Outer, GWindowTop + 10), FVector(W + 20, Outer + Out * 6.f, GWindowTop + 24));
+
+	// Châssis à petits carreaux, au milieu de l'épaisseur du mur.
+	const float MidY = (Y0 + Y1) * 0.5f;
+	const float MidZ = (GWindowSill + GWindowTop) * 0.5f;
+	Wood(FVector(-2.5f, MidY - 3, GWindowSill), FVector(2.5f, MidY + 3, GWindowTop));
+	Wood(FVector(-W, MidY - 3, MidZ - 2.5f), FVector(W, MidY + 3, MidZ + 2.5f));
+	for (const float X : { -W * 0.5f, W * 0.5f })
+	{
+		Wood(FVector(X - 1.5f, MidY - 2, GWindowSill), FVector(X + 1.5f, MidY + 2, GWindowTop));
+	}
+	if (UMaterialInterface* Glass = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_Glass")))
+	{
+		UStaticMeshComponent* Pane = AddShape(this, Root, EShape::Cube, FVector(0, MidY, GFloorTop + MidZ),
+			FVector(2 * W, 1.f, GWindowTop - GWindowSill), FLinearColor::White, FRotator::ZeroRotator, false);
+		Pane->SetMaterial(0, Glass);
+		Pane->SetCastShadow(false);
+	}
+
+	// Volets : modèle dédié, l'un en miroir de l'autre pour que les deux poignées soient côté extérieur.
+	const float ShutterY = Side > 0 ? Y1 + 7.f : Y0 - 11.f;
+	UStaticMesh* ShutterMesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_shutter"));
+	const FLinearColor ShutterColor = FLinearColor::FromSRGBColor(FColor(86, 138, 146));
+	for (const float SX : { -1.f, 1.f })
+	{
+		const float X0 = SX > 0 ? W + 12 : -W - 12 - W;
+		const FVector Center(X0 + W * 0.5f, ShutterY + 2.f, GFloorTop + MidZ);
+		if (ShutterMesh)
+		{
+			// FitToLength met la largeur sur Y, façade vers −X : un quart de tour la tourne vers l'extérieur.
+			FTransform Fit = FitToLength(ShutterMesh, W, GWindowTop - GWindowSill + 10.f);
+			if (SX * Side > 0.f)
+			{
+				Fit = Fit * FTransform(FQuat::Identity, FVector::ZeroVector, FVector(1.f, -1.f, 1.f));
+			}
+			AddFitted(ShutterMesh, Fit, FVector(Center.X, Center.Y, GFloorTop + GWindowSill - 5.f), Side > 0 ? -90.f : 90.f, false);
+			continue;
+		}
+		UStaticMeshComponent* Panel = AddShape(this, Root, EShape::Cube, Center, FVector(W, 4.f, GWindowTop - GWindowSill + 10.f), ShutterColor);
+		Panel->SetMaterial(0, MakePaintedMaterial(Panel, TEXT("wood_planks"), 120.f, ShutterColor, ShutterColor * 1.6f));
+	}
+
+	// Jardinière fleurie sous la fenêtre : modèle dédié, sinon caisse et fleurs.
+	const float BoxY = Side > 0 ? Y1 + 14.f : Y0 - 14.f;
+	if (UStaticMesh* Planter = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_window_box")))
+	{
+		AddFitted(Planter, FitToLength(Planter, 2 * W + 20.f, 50.f), FVector(0.f, BoxY + Side * 4.f, GFloorTop + GWindowSill - 52.f), Side > 0 ? -90.f : 90.f, false);
+		return;
+	}
+	Wood(FVector(-W, BoxY - 12, GWindowSill - 46), FVector(W, BoxY + 12, GWindowSill - 24));
+}
+
+void ASpawnCabin::BuildTimberFrame()
+{
+	// Colombages : sablières, lisses et poteaux de chêne sombre posés sur l'enduit, croix de Saint-André
+	// dans les panneaux pleins. Tout est légèrement en saillie (3 cm) de la face extérieure.
+	using namespace ErewhonSpawn;
+	const float HL = CabinHalfLength;
+	const float HW = CabinHalfWidth;
+	const float H = CabinWallHeight;
+	constexpr float Beam = 12.f;
+	constexpr float Proud = 3.f;
+	constexpr float MidRail = 150.f;
+
+	// Repère d'une façade : U le long du mur, la normale sortante, la demi-longueur.
+	struct FFacade { FVector Normal; FVector Along; float Half; float Offset; float GapHalf; float GapTop; };
+	const FFacade Facades[] = {
+		{ FVector(0, 1, 0), FVector(1, 0, 0), HL, HW, GWindowHalfWidth + 10.f, GWindowTop + 10.f },     // fenêtre
+		{ FVector(0, -1, 0), FVector(1, 0, 0), HL, HW, GWindowHalfWidth + 10.f, GWindowTop + 10.f },    // fenêtre
+		{ FVector(1, 0, 0), FVector(0, 1, 0), HW, HL, 0.f, 0.f },                                        // mur du fond
+		{ FVector(-1, 0, 0), FVector(0, 1, 0), HW, HL, GDoorHalfWidth + 12.f, GDoorHeight + 12.f },      // porte
+	};
+	UMaterialInterface* Oak = MakePaintedMaterial(this, TEXT("wood_trim"), 120.f, Palette::WoodDark);
+	for (const FFacade& F : Facades)
+	{
+		const auto Piece = [&](float U0, float U1, float Z0, float Z1)
+		{
+			const FVector Center = F.Normal * (F.Offset + Proud * 0.5f) + F.Along * ((U0 + U1) * 0.5f) + FVector(0, 0, GFloorTop + (Z0 + Z1) * 0.5f);
+			const FVector Size = F.Along.GetAbs() * (U1 - U0) + F.Normal.GetAbs() * Proud + FVector(0, 0, Z1 - Z0);
+			UStaticMeshComponent* Part = AddShape(this, Root, EShape::Cube, Center, Size, Palette::WoodDark, FRotator::ZeroRotator, false);
+			Part->SetMaterial(0, Oak);
+		};
+		const float Edge = F.Half - GWallThickness;
+		// Lisse basse et sablière haute, sur toute la façade (sauf la porte).
+		if (F.GapHalf > 0.f && F.GapTop >= GDoorHeight)
+		{
+			Piece(-Edge, -F.GapHalf, 0.f, Beam);
+			Piece(F.GapHalf, Edge, 0.f, Beam);
+		}
+		else
+		{
+			Piece(-Edge, Edge, 0.f, Beam);
+		}
+		Piece(-Edge, Edge, H - Beam, H);
+		// Lisse intermédiaire, interrompue par l'ouverture.
+		if (F.GapHalf > 0.f)
+		{
+			Piece(-Edge, -F.GapHalf, MidRail - Beam * 0.5f, MidRail + Beam * 0.5f);
+			Piece(F.GapHalf, Edge, MidRail - Beam * 0.5f, MidRail + Beam * 0.5f);
+		}
+		else
+		{
+			Piece(-Edge, Edge, MidRail - Beam * 0.5f, MidRail + Beam * 0.5f);
+		}
+		// Poteaux à mi-chemin entre l'ouverture et l'angle, et croix dans les panneaux bas.
+		const float Inner = FMath::Max(F.GapHalf, 0.f);
+		const float Stud = (Inner + Edge) * 0.5f;
+		for (const float S : { -1.f, 1.f })
+		{
+			Piece(S * Stud - Beam * 0.5f, S * Stud + Beam * 0.5f, Beam, H - Beam);
+			const float A = S > 0 ? Stud + Beam * 0.5f : -Edge;
+			const float B = S > 0 ? Edge : -Stud - Beam * 0.5f;
+			const float Width = B - A;
+			const float Height = MidRail - Beam * 1.5f;
+			const float Length = FMath::Sqrt(Width * Width + Height * Height);
+			const float Angle = FMath::RadiansToDegrees(FMath::Atan2(Height, Width));
+			for (const float Dir : { -1.f, 1.f })
+			{
+				const FVector Center = F.Normal * (F.Offset + Proud * 0.5f) + F.Along * ((A + B) * 0.5f) + FVector(0, 0, GFloorTop + Beam + Height * 0.5f);
+				// Le long de la façade, incliné dans son plan : tangage si la façade suit X, roulis si elle suit Y.
+				const FRotator Tilt = F.Along.X != 0.f ? FRotator(Dir * Angle, 0.f, 0.f) : FRotator(0.f, 0.f, -Dir * Angle);
+				const FVector Size = F.Along.GetAbs() * Length + F.Normal.GetAbs() * Proud + FVector(0, 0, Beam * 0.8f);
+				UStaticMeshComponent* Brace = AddShape(this, Root, EShape::Cube, Center, Size, Palette::WoodDark, Tilt, false);
+				Brace->SetMaterial(0, Oak);
+			}
+		}
+	}
+}
+
+void ASpawnCabin::BuildStoreInterior()
+{
+	using namespace ErewhonSpawn;
+	const float HL = CabinHalfLength;
+	const float HW = CabinHalfWidth;
+	const float T = GWallThickness;
+
 	// Comptoir entre l'entrée et le marchand.
-	const FVector CounterCenter = ErewhonSector::MerchantLocation() - GetActorLocation() - FVector(120, 0, 0);
-	if (UStaticMesh* Counter = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_counter")))
-	{
-		// Modèle Meshy, grand côté en travers de la pièce, façade vers la porte.
-		UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
-		Part->SetStaticMesh(Counter);
-		Part->SetupAttachment(Root);
-		Part->SetRelativeTransform(FitToLength(Counter, 300.f, 105.f) * FTransform(FRotator(0.f, CounterMeshYaw, 0.f), FVector(CounterCenter.X, 0.f, GFloorTop)));
-		Part->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
-		Part->RegisterComponent();
-		AddInstanceComponent(Part);
-	}
-	else
-	{
-		Box(FVector(CounterCenter.X - 30, -150, 0), FVector(CounterCenter.X + 30, 150, 100), Palette::WoodDark);
-		Box(FVector(CounterCenter.X - 40, -160, 100), FVector(CounterCenter.X + 40, 160, 108), Palette::WoodLight);
-	}
+	const FVector CounterCenter = AddCounter();
 
 	// Accessoires générés autour de la porte et contre les murs.
 	if (UStaticMesh* Barrel = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_barrel")))
@@ -354,60 +545,6 @@ void ASpawnCabin::BuildCabin()
 		AddGeneratedMesh(this, Root, Crates, FVector(CounterCenter.X + 120, HW - 70, GFloorTop), 100.f, 90.f);
 	}
 
-	// Étagères construites en planches, garnies d'objets générés : bocaux, bouteilles, sacs de grain.
-	// Repère d'une étagère : façade vers −X, largeur sur Y, pied à Z = 0.
-	UStaticMesh* Jars = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_props_jars"));
-	UStaticMesh* Bottles = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_props_bottles"));
-	UStaticMesh* Sacks = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_props_sacks"));
-	const auto Shelf = [&](const FVector& Location, float Yaw, int32 Variant)
-	{
-		USceneComponent* Frame = NewObject<USceneComponent>(this);
-		Frame->SetupAttachment(Root);
-		Frame->SetRelativeLocationAndRotation(Location, FRotator(0.f, Yaw, 0.f));
-		Frame->RegisterComponent();
-		AddInstanceComponent(Frame);
-
-		constexpr float Width = 120.f, Depth = 36.f, Height = 190.f, Board = 4.f;
-		const auto Plank = [this, Frame](const FVector& Center, const FVector& Size)
-		{
-			UStaticMeshComponent* Part = AddShape(this, Frame, EShape::Cube, Center, Size, Palette::WoodLight);
-			Part->SetMaterial(0, MakePaintedMaterial(Part, TEXT("wood_planks"), 90.f, Palette::WoodLight, FLinearColor(0.85f, 0.75f, 0.62f)));
-		};
-		for (const float SideY : { -1.f, 1.f })
-		{
-			Plank(FVector(0.f, SideY * (Width * 0.5f - Board * 0.5f), Height * 0.5f), FVector(Depth, Board, Height));
-		}
-		Plank(FVector(Depth * 0.5f - 1.f, 0.f, Height * 0.5f), FVector(2.f, Width, Height));   // fond, côté mur
-		const float Levels[] = { 6.f, 52.f, 98.f, 144.f, Height - Board * 0.5f };
-		for (const float Z : Levels)
-		{
-			Plank(FVector(0.f, 0.f, Z), FVector(Depth, Width - 2 * Board, Board));
-		}
-
-		// Garniture : sacs en bas, puis bocaux et bouteilles en alternance ; quelques trous.
-		for (int32 Level = 0; Level < 4; ++Level)
-		{
-			const uint32 Pick = HashCombine(GetTypeHash(Variant), GetTypeHash(Level));
-			if (Pick % 5 == 0 && Level > 0)
-			{
-				continue;   // étagère à demi vide, plus naturel
-			}
-			UStaticMesh* Prop = Level == 0 ? Sacks : (Pick % 2 == 0 ? Jars : Bottles);
-			if (!Prop)
-			{
-				continue;
-			}
-			const float PropHeight = Level == 0 ? 40.f : 34.f;
-			const float Top = Levels[Level] + Board * 0.5f;
-			UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
-			Part->SetStaticMesh(Prop);
-			Part->SetupAttachment(Frame);
-			Part->SetRelativeTransform(FitToLength(Prop, Width - 20.f, PropHeight) * FTransform(FVector(-2.f, 0.f, Top)));
-			Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			Part->RegisterComponent();
-			AddInstanceComponent(Part);
-		}
-	};
 	// La chatte de la boutique et ses endroits favoris (repère monde, lacet : 0 = vers la porte).
 	{
 		FActorSpawnParameters Params;
@@ -427,10 +564,339 @@ void ASpawnCabin::BuildCabin()
 	}
 
 	const float Back = HL - T - 20.f;
-	Shelf(FVector(Back, -150.f, GFloorTop), 0.f, 1);
-	Shelf(FVector(Back, 150.f, GFloorTop), 0.f, 2);
-	Shelf(FVector(-HL * 0.5f, HW - T - 20.f, GFloorTop), 90.f, 3);
-	Shelf(FVector(-HL * 0.5f, -HW + T + 20.f, GFloorTop), -90.f, 4);
+	AddShelf(FVector(Back, -150.f, GFloorTop), 0.f, 1, EShelfGoods::Pantry);
+	AddShelf(FVector(Back, 150.f, GFloorTop), 0.f, 2, EShelfGoods::Pantry);
+	AddShelf(FVector(-HL * 0.5f, HW - T - 20.f, GFloorTop), 90.f, 3, EShelfGoods::Pantry);
+	AddShelf(FVector(-HL * 0.5f, -HW + T + 20.f, GFloorTop), -90.f, 4, EShelfGoods::Pantry);
+}
+
+FVector ASpawnCabin::AddCounter()
+{
+	const FVector CounterCenter = GetActorTransform().InverseTransformPosition(ErewhonSpawn::MerchantLocation(Kind)) - FVector(120, 0, 0);
+	if (UStaticMesh* Counter = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_counter")))
+	{
+		// Modèle Meshy, grand côté en travers de la pièce, façade vers la porte.
+		AddFitted(Counter, FitToLength(Counter, 300.f, 105.f), FVector(CounterCenter.X, 0.f, GFloorTop), CounterMeshYaw, true);
+	}
+	else
+	{
+		AddBox(Root, FVector(CounterCenter.X - 30, -150, GFloorTop), FVector(CounterCenter.X + 30, 150, GFloorTop + 100), Palette::WoodDark, TEXT("wood_trim"), 160.f);
+		AddBox(Root, FVector(CounterCenter.X - 40, -160, GFloorTop + 100), FVector(CounterCenter.X + 40, 160, GFloorTop + 108), Palette::WoodLight, TEXT("wood_planks"), 220.f);
+	}
+	return CounterCenter;
+}
+
+void ASpawnCabin::AddShelf(const FVector& Location, float Yaw, int32 Variant, EShelfGoods Goods)
+{
+	// Étagère construite en planches, garnie selon le commerce.
+	// Repère d'une étagère : façade vers −X, largeur sur Y, pied à Z = 0.
+	USceneComponent* Frame = NewObject<USceneComponent>(this);
+	Frame->SetupAttachment(Root);
+	Frame->SetRelativeLocationAndRotation(Location, FRotator(0.f, Yaw, 0.f));
+	Frame->RegisterComponent();
+	AddInstanceComponent(Frame);
+
+	constexpr float Width = 120.f, Depth = 36.f, Height = 190.f, Board = 4.f;
+	const auto Plank = [this, Frame](const FVector& Center, const FVector& Size)
+	{
+		UStaticMeshComponent* Part = AddShape(this, Frame, EShape::Cube, Center, Size, Palette::WoodLight);
+		Part->SetMaterial(0, MakePaintedMaterial(Part, TEXT("wood_planks"), 90.f, Palette::WoodLight, FLinearColor(0.85f, 0.75f, 0.62f)));
+	};
+	for (const float SideY : { -1.f, 1.f })
+	{
+		Plank(FVector(0.f, SideY * (Width * 0.5f - Board * 0.5f), Height * 0.5f), FVector(Depth, Board, Height));
+	}
+	Plank(FVector(Depth * 0.5f - 1.f, 0.f, Height * 0.5f), FVector(2.f, Width, Height));   // fond, côté mur
+	const float Levels[] = { 6.f, 52.f, 98.f, 144.f, Height - Board * 0.5f };
+	for (const float Z : Levels)
+	{
+		Plank(FVector(0.f, 0.f, Z), FVector(Depth, Width - 2 * Board, Board));
+	}
+
+	FRandomStream Rand(Variant * 7919 + static_cast<int32>(Goods) * 104729);
+	const float Inner = Width - 2 * Board - 6.f;   // largeur utile d'un rayon
+	const auto Prop = [this, Frame](EShape Shape, const FVector& Center, const FVector& Size, const FLinearColor& Color, const FRotator& Rotation = FRotator::ZeroRotator)
+	{
+		return AddShape(this, Frame, Shape, Center, Size, Color, Rotation, false);
+	};
+
+	for (int32 Level = 0; Level < 4; ++Level)
+	{
+		const float Top = Levels[Level] + Board * 0.5f;
+		if (Goods == EShelfGoods::Pantry)
+		{
+			// Sacs en bas, puis bocaux et bouteilles en alternance ; quelques trous.
+			UStaticMesh* Jars = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_props_jars"));
+			UStaticMesh* Bottles = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_props_bottles"));
+			UStaticMesh* Sacks = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_props_sacks"));
+			const uint32 Pick = HashCombine(GetTypeHash(Variant), GetTypeHash(Level));
+			if (Pick % 5 == 0 && Level > 0)
+			{
+				continue;   // étagère à demi vide, plus naturel
+			}
+			UStaticMesh* Mesh = Level == 0 ? Sacks : (Pick % 2 == 0 ? Jars : Bottles);
+			if (!Mesh)
+			{
+				continue;
+			}
+			UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
+			Part->SetStaticMesh(Mesh);
+			Part->SetupAttachment(Frame);
+			Part->SetRelativeTransform(FitToLength(Mesh, Width - 20.f, Level == 0 ? 40.f : 34.f) * FTransform(FVector(-2.f, 0.f, Top)));
+			Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Part->RegisterComponent();
+			AddInstanceComponent(Part);
+		}
+		else if (Goods == EShelfGoods::Office)
+		{
+			// Bureau du gérant : rouleaux de plans, livres reliés, cartes pliées, instruments de laiton.
+			const int32 Arrangement = (Level + Variant) % 4;
+			if (Arrangement == 0)
+			{
+				// Rouleaux empilés en pyramide, nœud de ruban rouge au milieu.
+				int32 Index = 0;
+				for (int32 Row = 0; Row < 3; ++Row)
+				{
+					for (int32 i = 0; i < 4 - Row; ++i)
+					{
+						const float Y = -Inner * 0.5f + 18.f + (i + Row * 0.5f) * 19.f + Rand.FRandRange(-1.f, 1.f);
+						const FVector Center(-2.f, Y, Top + 4.5f + Row * 8.f);
+						Prop(EShape::Cylinder, Center, FVector(9.f, 9.f, 30.f), GParchment * Rand.FRandRange(0.85f, 1.05f), FRotator(90.f, 0.f, 0.f));
+						if (++Index % 2 == 0)
+						{
+							Prop(EShape::Cylinder, Center, FVector(9.6f, 9.6f, 3.f), FLinearColor(0.55f, 0.08f, 0.06f), FRotator(90.f, 0.f, 0.f));
+						}
+					}
+				}
+				// Une longue-vue en laiton couchée à côté.
+				Prop(EShape::Cylinder, FVector(-6.f, Inner * 0.5f - 14.f, Top + 3.5f), FVector(6.f, 6.f, 34.f), GBrass, FRotator(90.f, 0.f, 0.f));
+			}
+			else if (Arrangement == 1 || Arrangement == 3)
+			{
+				// Une rangée de livres reliés, de hauteurs variées, le dernier penché.
+				const FLinearColor Leathers[] = {
+					FLinearColor::FromSRGBColor(FColor(110, 40, 32)), FLinearColor::FromSRGBColor(FColor(46, 70, 52)),
+					FLinearColor::FromSRGBColor(FColor(52, 60, 96)), FLinearColor::FromSRGBColor(FColor(120, 86, 44)),
+					FLinearColor::FromSRGBColor(FColor(86, 52, 80)),
+				};
+				float Y = -Inner * 0.5f + 2.f;
+				const float End = Arrangement == 1 ? Inner * 0.5f - 4.f : Inner * 0.15f;
+				while (Y < End - 6.f)
+				{
+					const float Thick = Rand.FRandRange(3.f, 6.5f);
+					const float Tall = Rand.FRandRange(24.f, 34.f);
+					Prop(EShape::Cube, FVector(-2.f, Y + Thick * 0.5f, Top + Tall * 0.5f), FVector(22.f, Thick, Tall), Leathers[Rand.RandHelper(5)]);
+					Y += Thick + 0.4f;
+				}
+				Prop(EShape::Cube, FVector(-2.f, Y + 9.f, Top + 13.f), FVector(22.f, 5.f, 28.f), Leathers[Rand.RandHelper(5)], FRotator(0.f, 0.f, -24.f));
+				if (Arrangement == 3)
+				{
+					// Un compas de marine en laiton, posé à plat.
+					Prop(EShape::Cylinder, FVector(-4.f, Inner * 0.32f, Top + 1.5f), FVector(16.f, 16.f, 3.f), GBrass);
+					Prop(EShape::Cylinder, FVector(-4.f, Inner * 0.32f, Top + 3.2f), FVector(13.f, 13.f, 0.6f), GParchment);
+				}
+			}
+			else
+			{
+				// Cartes pliées en piles, et un petit globe sur son pied.
+				for (int32 Stack = 0; Stack < 2; ++Stack)
+				{
+					const float Y = -Inner * 0.5f + 20.f + Stack * 34.f;
+					const int32 Count = Rand.RandRange(3, 6);
+					for (int32 i = 0; i < Count; ++i)
+					{
+						Prop(EShape::Cube, FVector(-3.f + Rand.FRandRange(-1.f, 1.f), Y + Rand.FRandRange(-1.5f, 1.5f), Top + 1.f + i * 2.f),
+							FVector(24.f, 30.f, 1.8f), GParchment * Rand.FRandRange(0.82f, 1.05f), FRotator(0.f, Rand.FRandRange(-6.f, 6.f), 0.f));
+					}
+				}
+				const FVector Globe(-4.f, Inner * 0.5f - 22.f, Top);
+				Prop(EShape::Cylinder, Globe + FVector(0, 0, 1.f), FVector(12.f, 12.f, 2.f), Palette::WoodDark);
+				Prop(EShape::Cylinder, Globe + FVector(0, 0, 8.f), FVector(1.6f, 1.6f, 14.f), GBrass);
+				UStaticMeshComponent* Ball = Prop(EShape::Sphere, Globe + FVector(0, 0, 25.f), FVector(22.f), FLinearColor(0.35f, 0.55f, 0.6f), FRotator(0.f, 0.f, 23.f));
+				if (UTexture* Map = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_map_wall")))
+				{
+					if (UMaterialInterface* Master = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_GeneratedMesh")))
+					{
+						UMaterialInstanceDynamic* Painted = UMaterialInstanceDynamic::Create(Master, Ball);
+						Painted->SetTextureParameterValue(TEXT("BaseColor"), Map);
+						Ball->SetMaterial(0, Painted);
+					}
+				}
+			}
+		}
+		else
+		{
+			// Mercerie : rouleaux d'étoffe couchés côte à côte, piles de tissus pliés en bas.
+			const FLinearColor Fabrics[] = {
+				FLinearColor::FromSRGBColor(FColor(196, 92, 72)), FLinearColor::FromSRGBColor(FColor(82, 128, 160)),
+				FLinearColor::FromSRGBColor(FColor(222, 196, 120)), FLinearColor::FromSRGBColor(FColor(110, 150, 96)),
+				FLinearColor::FromSRGBColor(FColor(232, 222, 206)), FLinearColor::FromSRGBColor(FColor(150, 96, 140)),
+				FLinearColor::FromSRGBColor(FColor(70, 70, 96)),
+			};
+			if (Level == 0)
+			{
+				for (int32 Stack = 0; Stack < 3; ++Stack)
+				{
+					const int32 Count = Rand.RandRange(3, 5);
+					for (int32 i = 0; i < Count; ++i)
+					{
+						Prop(EShape::Cube, FVector(-3.f, -Inner * 0.5f + 18.f + Stack * 36.f, Top + 2.5f + i * 5.f),
+							FVector(26.f, 30.f, 4.6f), Fabrics[Rand.RandHelper(7)], FRotator(0.f, Rand.FRandRange(-4.f, 4.f), 0.f));
+					}
+				}
+				continue;
+			}
+			const int32 Count = 6;
+			for (int32 i = 0; i < Count; ++i)
+			{
+				const float Y = -Inner * 0.5f + 9.5f + i * (Inner - 19.f) / (Count - 1);
+				Prop(EShape::Cylinder, FVector(-2.f, Y, Top + 9.f), FVector(17.f, 17.f, 32.f), Fabrics[Rand.RandHelper(7)], FRotator(90.f, 0.f, 0.f));
+			}
+		}
+	}
+}
+
+void ASpawnCabin::BuildManagerInterior()
+{
+	using namespace ErewhonSpawn;
+	const float HL = CabinHalfLength;
+	const float HW = CabinHalfWidth;
+	const float T = GWallThickness;
+	const FVector Merchant = GetActorTransform().InverseTransformPosition(MerchantLocation(Kind));
+
+	// Le bureau aux cartes, entre l'entrée et le gérant.
+	const FVector DeskCenter(Merchant.X - 105.f, 0.f, GFloorTop);
+	if (UStaticMesh* Desk = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_desk_maps")))
+	{
+		AddFitted(Desk, FitToLength(Desk, 190.f, 95.f), DeskCenter, DeskMeshYaw, true);
+	}
+	else
+	{
+		AddBox(Root, DeskCenter + FVector(-40, -90, 76), DeskCenter + FVector(40, 90, 84), Palette::WoodLight, TEXT("wood_planks"), 120.f);
+		for (const float SY : { -1.f, 1.f })
+		{
+			AddShape(this, Root, EShape::Cube, DeskCenter + FVector(0, SY * 80.f, 38), FVector(70, 10, 76), Palette::WoodDark);
+		}
+	}
+
+	// La carte du pays, encadrée au mur du fond, derrière le gérant.
+	const FVector MapCenter(HL - T - 4.f, 0.f, GFloorTop + 170.f);
+	if (AddPicture(this, Root, MapCenter, 190.f, 142.f, 0.f, TEXT("T_map_wall")))
+	{
+		AddBox(Root, MapCenter + FVector(1.f, -102, -78), MapCenter + FVector(4.f, 102, 78), Palette::WoodDark, TEXT("wood_trim"), 140.f, false);
+	}
+
+	// Une étagère de chaque côté (rouleaux, livres, cartes, instruments), un tonneau dehors, des caisses au fond.
+	AddShelf(FVector(-HL * 0.5f, HW - T - 20.f, GFloorTop), 90.f, 5, EShelfGoods::Office);
+	AddShelf(FVector(HL * 0.5f, -HW + T + 20.f, GFloorTop), -90.f, 6, EShelfGoods::Office);
+	if (UStaticMesh* Barrel = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_barrel")))
+	{
+		AddGeneratedMesh(this, Root, Barrel, FVector(-HL - 150, -HW + 30, 0), 95.f, 50.f);
+	}
+	if (UStaticMesh* Crates = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_crates")))
+	{
+		AddGeneratedMesh(this, Root, Crates, FVector(HL - 90, HW - 80, GFloorTop), 90.f, 15.f);
+	}
+}
+
+void ASpawnCabin::BuildTailorInterior()
+{
+	using namespace ErewhonSpawn;
+	const float HL = CabinHalfLength;
+	const float HW = CabinHalfWidth;
+	const float T = GWallThickness;
+
+	const FVector CounterCenter = AddCounter();
+	// Pelotes de laine dans une corbeille, sur le comptoir.
+	{
+		const FVector Basket(CounterCenter.X, -95.f, GFloorTop + 105.f);
+		AddShape(this, Root, EShape::Cylinder, Basket + FVector(0, 0, 6), FVector(34, 34, 12), FLinearColor::FromSRGBColor(FColor(176, 136, 84)), FRotator::ZeroRotator, false);
+		const FLinearColor Yarns[] = { FLinearColor::FromSRGBColor(FColor(200, 70, 60)), FLinearColor::FromSRGBColor(FColor(80, 130, 180)), FLinearColor::FromSRGBColor(FColor(230, 200, 90)) };
+		for (int32 i = 0; i < 3; ++i)
+		{
+			const float Angle = i * UE_TWO_PI / 3.f;
+			AddShape(this, Root, EShape::Sphere, Basket + FVector(FMath::Cos(Angle) * 7.f, FMath::Sin(Angle) * 7.f, 15.f), FVector(13.f), Yarns[i], FRotator::ZeroRotator, false);
+		}
+	}
+
+	// Rouleaux d'étoffe au mur du fond.
+	const float Back = HL - T - 20.f;
+	AddShelf(FVector(Back, -150.f, GFloorTop), 0.f, 7, EShelfGoods::Fabric);
+	AddShelf(FVector(Back, 150.f, GFloorTop), 0.f, 8, EShelfGoods::Fabric);
+
+	// Un mannequin de couturière près de l'entrée, une robe en cours sur le buste.
+	{
+		const FVector Foot(-HL * 0.45f, HW - 80.f, GFloorTop);
+		const FLinearColor Dress = FLinearColor::FromSRGBColor(FColor(110, 150, 120));
+		AddShape(this, Root, EShape::Cylinder, Foot + FVector(0, 0, 2), FVector(40, 40, 4), Palette::WoodDark, FRotator::ZeroRotator, false);
+		AddShape(this, Root, EShape::Cylinder, Foot + FVector(0, 0, 50), FVector(4, 4, 96), Palette::WoodDark, FRotator::ZeroRotator, false);
+		AddShape(this, Root, EShape::Cone, Foot + FVector(0, 0, 72), FVector(56, 56, 52), Dress, FRotator::ZeroRotator, false);
+		AddShape(this, Root, EShape::Sphere, Foot + FVector(0, 0, 128), FVector(36, 28, 50), Dress, FRotator::ZeroRotator, false);
+		AddShape(this, Root, EShape::Cylinder, Foot + FVector(0, 0, 156), FVector(8, 8, 10), FLinearColor::FromSRGBColor(FColor(222, 206, 178)), FRotator::ZeroRotator, false);
+	}
+
+	// Un portant de vêtements contre l'autre mur : chemises et vestes aux couleurs de la boutique.
+	{
+		const float X0 = -HL * 0.6f, X1 = HL * 0.15f;
+		const float Y = -HW + T + 40.f;
+		for (const float X : { X0, X1 })
+		{
+			AddShape(this, Root, EShape::Cylinder, FVector(X, Y, GFloorTop + 85.f), FVector(5, 5, 170), Palette::WoodDark, FRotator::ZeroRotator, true);
+			AddShape(this, Root, EShape::Cube, FVector(X, Y, GFloorTop + 2.f), FVector(8, 46, 4), Palette::WoodDark, FRotator::ZeroRotator, false);
+		}
+		AddShape(this, Root, EShape::Cylinder, FVector((X0 + X1) * 0.5f, Y, GFloorTop + 166.f), FVector(3, 3, X1 - X0), GBrass, FRotator(90.f, 0.f, 0.f), false);
+		const FLinearColor Clothes[] = {
+			FLinearColor::FromSRGBColor(FColor(230, 120, 40)), FLinearColor::FromSRGBColor(FColor(50, 100, 200)),
+			FLinearColor::FromSRGBColor(FColor(30, 60, 130)), FLinearColor::FromSRGBColor(FColor(100, 60, 30)),
+			FLinearColor::FromSRGBColor(FColor(200, 40, 40)), FLinearColor::FromSRGBColor(FColor(232, 222, 206)),
+		};
+		for (int32 i = 0; i < 6; ++i)
+		{
+			const float X = X0 + 22.f + i * (X1 - X0 - 44.f) / 5.f;
+			AddShape(this, Root, EShape::Cube, FVector(X, Y, GFloorTop + 128.f), FVector(4, 44, 60), Clothes[i], FRotator(0.f, 0.f, 0.f), false);
+			AddShape(this, Root, EShape::Cube, FVector(X, Y, GFloorTop + 160.f), FVector(1.5f, 36, 2), Palette::WoodDark, FRotator::ZeroRotator, false);
+		}
+	}
+}
+
+void ASpawnCabin::BuildPlazaSignposts()
+{
+	using namespace ErewhonSpawn;
+	// À chaque sortie de la place, un panneau aux points cardinaux (nord = +X).
+	const float Plaza = UErewhonSettings::Get().PlazaRadiusMeters * 100.f;
+	struct FExit { FVector2D Dir; const TCHAR* Name; };
+	const FExit Exits[] = {
+		{ FVector2D(1, 0), TEXT("North") }, { FVector2D(0, 1), TEXT("East") },
+		{ FVector2D(-1, 0), TEXT("South") }, { FVector2D(0, -1), TEXT("West") },
+	};
+	for (const FExit& Exit : Exits)
+	{
+		// Sur le bord droit du chemin quand on quitte la place.
+		const FVector2D Right(-Exit.Dir.Y, Exit.Dir.X);
+		const FVector2D Foot = Exit.Dir * (Plaza + 80.f) + Right * (PathWidth * 0.5f + 60.f);
+		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Exit.Dir.Y, Exit.Dir.X));
+		TArray<ErewhonSigns::FArm> Arms = { { Exit.Name, Yaw } };
+		if (Exit.Dir.Y != 0.f)
+		{
+			// Les deux cabanes du bord des routes : à l'est le gérant, à l'ouest le tailleur.
+			const EShopKind Shop = Exit.Dir.Y > 0.f ? EShopKind::SectorManager : EShopKind::Tailor;
+			Arms.Add(ErewhonSigns::ShopArm(Shop, GetActorLocation() + FVector(Foot, 0.f), Yaw));
+		}
+		ErewhonSigns::AddSignpost(this, Root, FVector(Foot, 0.f), Arms);
+	}
+
+	// Au carrefour de chaque cabane du bord des routes : son perron d'un côté, la place de l'autre.
+	for (const EShopKind Shop : { EShopKind::SectorManager, EShopKind::Tailor })
+	{
+		const FVector Doorstep = GetActorTransform().InverseTransformPosition(DoorstepLocation(Shop));
+		const float SideX = FMath::Sign(Doorstep.X);
+		const float TowardPlaza = -FMath::Sign(Doorstep.Y);
+		const FVector Foot(SideX * (PathWidth * 0.5f + 60.f), Doorstep.Y + TowardPlaza * 420.f, 0.f);
+		ErewhonSigns::AddSignpost(this, Root, Foot, {
+			{ ShopName(Shop), SideX > 0.f ? 0.f : 180.f },
+			ErewhonSigns::ShopArm(EShopKind::GeneralStore, GetActorLocation() + Foot, TowardPlaza > 0.f ? 90.f : -90.f),
+		});
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

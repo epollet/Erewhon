@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "World/SectorTypes.h"
 #include "ErewhonPlayerController.generated.h"
 
 class UInputAction;
@@ -50,7 +51,7 @@ public:
 	/** Vrai aussi pendant l'image où un menu est en train de s'ouvrir. */
 	bool IsMenuOpen() const { return OpenMenu.IsValid() || PendingMenu.IsValid(); }
 	void ToggleInventory();
-	void OpenStore();
+	void OpenStore(EShopKind Kind);
 	void CloseMenu();
 
 	/** Échap : ferme le menu ouvert, sinon ouvre le menu de jeu. */
@@ -74,6 +75,9 @@ public:
 
 	UFUNCTION(Server, Reliable)
 	void ServerSellSector(FIntPoint Sector);
+
+	UFUNCTION(Server, Reliable)
+	void ServerBuyRoadLink(FIntPoint Sector, uint8 Side);
 
 	UFUNCTION(Server, Reliable)
 	void ServerBuyItem(FName ItemId);
@@ -110,5 +114,6 @@ private:
 	TSharedPtr<SWidget> OpenMenu;
 	TSharedPtr<SWidget> PendingMenu;
 	bool bStoreOpen = false;
+	EShopKind StoreKind = EShopKind::GeneralStore;
 	TArray<FErewhonToast> Toasts;
 };

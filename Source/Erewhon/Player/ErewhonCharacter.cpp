@@ -364,7 +364,8 @@ void AErewhonCharacter::Tick(float DeltaSeconds)
 
 void AErewhonCharacter::UpdateFootsteps(float DeltaSeconds)
 {
-	// Un pas tous les ~70 cm parcourus au sol (plus courts accroupi), son selon la surface.
+	// Un son par pas, à une cadence réaliste : ~1,8 pas/s en flânant, ~2,2 en marchant, ~2,8 en courant.
+	// La foulée s'en déduit, si bien que ralentir dans l'herbe espace aussi les pas. Son selon la surface.
 	const UCharacterMovementComponent* Movement = GetCharacterMovement();
 	const float Speed = GetVelocity().Size2D();
 	if (!Movement->IsMovingOnGround() || Speed < 40.f)
@@ -373,7 +374,8 @@ void AErewhonCharacter::UpdateFootsteps(float DeltaSeconds)
 		return;
 	}
 	StrideDistance += Speed * DeltaSeconds;
-	const float Stride = bIsCrouched ? 50.f : (Speed > 500.f ? 95.f : 70.f);
+	const float Cadence = FMath::Clamp(1.4f + Speed / 500.f, 1.5f, 2.9f);   // pas par seconde
+	const float Stride = Speed / Cadence;
 	if (StrideDistance < Stride)
 	{
 		return;

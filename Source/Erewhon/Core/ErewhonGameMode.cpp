@@ -85,7 +85,7 @@ void AErewhonGameMode::InitGameState()
 			UE_LOG(LogErewhonGame, Log, TEXT("Secteur %s devenu non achetable : %s remboursé"), *ErewhonSector::ToString(Saved.Sector), *Saved.OwnerName);
 			continue;
 		}
-		State->SetSectorOwner(Saved.Sector, Saved.OwnerKey, Saved.OwnerName);
+		State->SetSectorOwner(Saved.Sector, Saved.OwnerKey, Saved.OwnerName, Saved.RoadLinks);
 	}
 	const double Now = State->GetWorldClock();
 	for (const FSavedHarvest& Harvest : WorldSave->Harvests)
@@ -101,10 +101,14 @@ void AErewhonGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// La porte de la cabane est un acteur répliqué : son état est partagé par tous.
+	// Les portes des cabanes sont des acteurs répliqués : leur état est partagé par tous.
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	GetWorld()->SpawnActor<ADoor>(ErewhonSpawn::DoorHingeLocation(), FRotator::ZeroRotator, Params);
+	for (const EShopKind Kind : ErewhonSpawn::ShopKinds)
+	{
+		const FTransform Hinge = ErewhonSpawn::DoorHingeTransform(Kind);
+		GetWorld()->SpawnActor<ADoor>(Hinge.GetLocation(), Hinge.Rotator(), Params);
+	}
 	GetWorldTimerManager().SetTimer(AutosaveTimer, this, &AErewhonGameMode::SaveWorld,
 		UErewhonSettings::Get().AutosaveIntervalSeconds, true);
 }
@@ -127,7 +131,7 @@ void AErewhonGameMode::SaveWorld()
 	WorldSave->SectorOwners.Reset();
 	for (const FSectorOwnerEntry& Entry : State->GetOwnerEntries())
 	{
-		WorldSave->SectorOwners.Add({ Entry.Sector, Entry.OwnerKey, Entry.OwnerName });
+		WorldSave->SectorOwners.Add({ Entry.Sector, Entry.OwnerKey, Entry.OwnerName, Entry.RoadLinks });
 	}
 	WorldSave->Harvests.Reset();
 	for (const FHarvestEntry& Entry : State->GetHarvestEntries())
@@ -303,10 +307,10 @@ FText AErewhonGameMode::TryHarvest(AErewhonPlayerController* Controller, const F
 
 // ── Commerce ─────────────────────────────────────────────────────────────────
 
-bool AErewhonGameMode::IsNearMerchant(const AController* Controller) const
+bool AErewhonGameMode::IsNearMerchant(const AController* Controller, EShopKind Kind) const
 {
 	const APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
-	return Pawn && FVector::Dist2D(Pawn->GetActorLocation(), ErewhonSector::MerchantLocation())
+	return Pawn && FVector::Dist2D(Pawn->GetActorLocation(), ErewhonSpawn::MerchantLocation(Kind))
 		<= UErewhonSettings::Get().MerchantReach() + 200.f;
 }
 
@@ -315,9 +319,9 @@ FText AErewhonGameMode::TryBuySector(AErewhonPlayerController* Controller, const
 	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
 	AErewhonGameState* State = GetGameState<AErewhonGameState>();
 	const UErewhonSettings& Settings = UErewhonSettings::Get();
-	if (!PlayerState || !PlayerState->IsRegistered() || !IsNearMerchant(Controller))
+	if (!PlayerState || !PlayerState->IsRegistered() || !IsNearMerchant(Controller, EShopKind::SectorManager))
 	{
-		return LOCTEXT("TooFar", "Le marchand est trop loin.");
+		return LOCTEXT("ManagerTooFar", "Le gérant des secteurs est trop loin.");
 	}
 	if (!ErewhonSector::IsPurchasable(Sector)
 		|| FMath::Max(FMath::Abs(Sector.X), FMath::Abs(Sector.Y)) > Settings.StoreSectorRadius)
@@ -336,13 +340,42 @@ FText AErewhonGameMode::TryBuySector(AErewhonPlayerController* Controller, const
 	return FText::GetEmpty();
 }
 
+FText AErewhonGameMode::TryBuyRoadLink(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 Side)
+{
+	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
+	AErewhonGameState* State = GetGameState<AErewhonGameState>();
+	if (!PlayerState || !PlayerState->IsRegistered() || !IsNearMerchant(Controller, EShopKind::SectorManager))
+	{
+		return LOCTEXT("ManagerTooFar", "Le gérant des secteurs est trop loin.");
+	}
+	const FString* OwnerKey = State->FindSectorOwnerKey(Sector);
+	if (!OwnerKey || *OwnerKey != PlayerState->GetPlayerKey())
+	{
+		return LOCTEXT("NotYours", "Ce secteur ne vous appartient pas.");
+	}
+	if (Side < 0 || Side >= 4 || !ErewhonSector::IsRoad(Sector + ErewhonSector::Sides[Side]))
+	{
+		return LOCTEXT("NoRoad", "Il n'y a pas de route de ce côté.");
+	}
+	if (State->GetRoadLinks(Sector) & (1 << Side))
+	{
+		return LOCTEXT("AlreadyLinked", "Ce chemin existe déjà.");
+	}
+	if (!PlayerState->SpendCoins(UErewhonSettings::Get().RoadLinkPrice))
+	{
+		return LOCTEXT("NotEnoughCoins", "Pas assez de pièces.");
+	}
+	State->AddRoadLink(Sector, Side);
+	return FText::GetEmpty();
+}
+
 FText AErewhonGameMode::TrySellSector(AErewhonPlayerController* Controller, const FIntPoint& Sector)
 {
 	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
 	AErewhonGameState* State = GetGameState<AErewhonGameState>();
-	if (!PlayerState || !PlayerState->IsRegistered() || !IsNearMerchant(Controller))
+	if (!PlayerState || !PlayerState->IsRegistered() || !IsNearMerchant(Controller, EShopKind::SectorManager))
 	{
-		return LOCTEXT("TooFar", "Le marchand est trop loin.");
+		return LOCTEXT("ManagerTooFar", "Le gérant des secteurs est trop loin.");
 	}
 	const FString* OwnerKey = State->FindSectorOwnerKey(Sector);
 	if (!OwnerKey || *OwnerKey != PlayerState->GetPlayerKey())
@@ -358,7 +391,7 @@ FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName I
 {
 	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
 	const FItemDef* Def = UItemDatabase::Get(this)->Find(ItemId);
-	if (!PlayerState || !PlayerState->IsRegistered() || !IsNearMerchant(Controller))
+	if (!PlayerState || !PlayerState->IsRegistered() || !Def || !IsNearMerchant(Controller, Def->ShopFor()))
 	{
 		return LOCTEXT("TooFar", "Le marchand est trop loin.");
 	}
@@ -387,7 +420,7 @@ FText AErewhonGameMode::TrySellItem(AErewhonPlayerController* Controller, FName 
 {
 	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
 	const FItemDef* Def = UItemDatabase::Get(this)->Find(ItemId);
-	if (!PlayerState || !PlayerState->IsRegistered() || !IsNearMerchant(Controller))
+	if (!PlayerState || !PlayerState->IsRegistered() || !Def || !IsNearMerchant(Controller, Def->ShopFor()))
 	{
 		return LOCTEXT("TooFar", "Le marchand est trop loin.");
 	}

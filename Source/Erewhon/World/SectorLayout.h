@@ -28,6 +28,20 @@ struct FBushInstance
 	int32 Kind = 0;       // index dans UErewhonSettings::DecorPlants
 };
 
+/** Une place ou une clairière de terre, au bord irrégulier. */
+struct FClearing
+{
+	FVector2D Center = FVector2D::ZeroVector;
+	float Radius = 0.f;
+};
+
+/** Un carrefour où planter un panneau indicateur (chemin d'accès qui rejoint la route). */
+struct FSignpostSpot
+{
+	FVector Location = FVector::ZeroVector;   // pied du poteau, au coin du carrefour
+	FVector2D TowardShops = FVector2D::ZeroVector;   // le long de la route, vers la place du village
+};
+
 /**
  * Contenu déterministe d'un secteur : type, plantes et zones exclues (chemins,
  * cabane). Identique sur le serveur et sur chaque client pour un même seed —
@@ -51,9 +65,11 @@ struct EREWHON_API FSectorLayout
 	 */
 	TSet<int32> CoveredPlants;
 
-	/** Place de terre ronde autour de la cabane (rayon 0 : pas de place). */
-	FVector2D PlazaCenter = FVector2D::ZeroVector;
-	float PlazaRadius = 0.f;
+	/** Places de terre : autour des cabanes, au bout d'un chemin d'accès. */
+	TArray<FClearing> Clearings;
+
+	/** Panneaux indicateurs aux carrefours de la route (rendu seulement). */
+	TArray<FSignpostSpot> Signposts;
 
 	/**
 	 * Part de terre en un point monde : 1 sur un chemin, 0 dans la prairie, fondu

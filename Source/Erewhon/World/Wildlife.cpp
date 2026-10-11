@@ -33,7 +33,7 @@ namespace
 	constexpr float GBirdSpan = 70.f;
 
 	/** Le modèle généré regarde vers −Y une fois mis à la longueur : un quart de tour l'aligne sur +X. */
-	constexpr float GBirdMeshYaw = 90.f;
+	constexpr float GBirdMeshYaw = 180.f;   // FitToLength met l'envergure sur Y : le bec doit pointer vers +X
 
 	/** Rayons d'apparition des papillons autour du joueur (cm). */
 	constexpr float GButterflyMin = 300.f;
@@ -250,8 +250,8 @@ void AWildlife::Tick(float DeltaSeconds)
 
 	// La nuit, tout le monde se repose.
 	const double Clock = State->GetWorldClock();
-	const ACelestialSystem* Sky = ACelestialSystem::Find(this);
-	const bool bDay = !Sky || Sky->GetSunOrbit().Direction(Clock).Z > 0.05f;
+	const ACelestialSystem* Celestial = ACelestialSystem::Find(this);
+	const bool bDay = !Celestial || Celestial->GetSunOrbit().Direction(Clock).Z > 0.05f;
 	if (bDay != bVisible)
 	{
 		bVisible = bDay;

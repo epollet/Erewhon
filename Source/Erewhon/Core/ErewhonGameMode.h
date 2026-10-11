@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
+#include "World/SectorTypes.h"
 #include "ErewhonGameMode.generated.h"
 
 class AErewhonPlayerController;
@@ -32,13 +33,14 @@ public:
 	FText TryHarvest(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 PlantIndex);
 	FText TryBuySector(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 	FText TrySellSector(AErewhonPlayerController* Controller, const FIntPoint& Sector);
+	FText TryBuyRoadLink(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 Side);
 	FText TryBuyItem(AErewhonPlayerController* Controller, FName ItemId);
 	FText TrySellItem(AErewhonPlayerController* Controller, FName ItemId, int32 Count);
 
 	void SaveWorld();
 
 private:
-	bool IsNearMerchant(const AController* Controller) const;
+	bool IsNearMerchant(const AController* Controller, EShopKind Kind) const;
 	void CapturePlayer(const AErewhonPlayerState* PlayerState);
 
 	UPROPERTY()

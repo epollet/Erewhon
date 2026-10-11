@@ -7,6 +7,7 @@
 #include "TimerManager.h"
 #include "World/SectorManager.h"
 #include "World/SpawnCabin.h"
+#include "World/SpawnLayout.h"
 #include "World/Wildlife.h"
 
 // ── Fast array callbacks (clients) ───────────────────────────────────────────
@@ -99,7 +100,14 @@ void AErewhonGameState::SpawnLocalWorldActors()
 
 	// Le serveur dédié a besoin du sol (collisions) mais pas du ciel.
 	World->SpawnActor<ASectorManager>(Params);
-	World->SpawnActor<ASpawnCabin>(Params);
+	for (const EShopKind Kind : ErewhonSpawn::ShopKinds)
+	{
+		// Les deux commerces de la place : le General Store et le Sector Manager.
+		ASpawnCabin* Cabin = World->SpawnActorDeferred<ASpawnCabin>(ASpawnCabin::StaticClass(), ErewhonSpawn::CabinTransform(Kind),
+			nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		Cabin->Kind = Kind;
+		Cabin->FinishSpawning(ErewhonSpawn::CabinTransform(Kind));
+	}
 	if (GetNetMode() != NM_DedicatedServer)
 	{
 		World->SpawnActor<ACelestialSystem>(Params);
@@ -184,7 +192,25 @@ void AErewhonGameState::PruneHarvests()
 	}
 }
 
-void AErewhonGameState::SetSectorOwner(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName)
+uint8 AErewhonGameState::GetRoadLinks(const FIntPoint& Sector) const
+{
+	const FSectorOwnerEntry* Entry = OwnerBySector.Find(Sector);
+	return Entry ? Entry->RoadLinks : 0;
+}
+
+void AErewhonGameState::AddRoadLink(const FIntPoint& Sector, int32 Side)
+{
+	check(HasAuthority());
+	FSectorOwnerEntry* Entry = SectorOwners.Items.FindByPredicate([&](const FSectorOwnerEntry& E) { return E.Sector == Sector; });
+	if (Entry && Side >= 0 && Side < 4)
+	{
+		Entry->RoadLinks |= 1 << Side;
+		SectorOwners.MarkItemDirty(*Entry);
+		NotifyOwner(*Entry, true);
+	}
+}
+
+void AErewhonGameState::SetSectorOwner(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName, uint8 RoadLinks)
 {
 	check(HasAuthority());
 	FSectorOwnerEntry* Entry = SectorOwners.Items.FindByPredicate([&](const FSectorOwnerEntry& E) { return E.Sector == Sector; });
@@ -195,6 +221,7 @@ void AErewhonGameState::SetSectorOwner(const FIntPoint& Sector, const FString& O
 	}
 	Entry->OwnerKey = OwnerKey;
 	Entry->OwnerName = OwnerName;
+	Entry->RoadLinks = RoadLinks;
 	SectorOwners.MarkItemDirty(*Entry);
 	NotifyOwner(*Entry, true);
 }

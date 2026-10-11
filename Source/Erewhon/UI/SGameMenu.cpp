@@ -180,7 +180,6 @@ TSharedRef<SWidget> SGameMenu::BuildOptions()
 	const auto ApplyWorld = [Weak]() { if (Weak.IsValid()) { Weak->NotifyWorldDetailChanged(); } };
 
 	static const TArray<int32> FrameLimits = { 0, 30, 60, 120, 144 };
-	static const TArray<float> Densities = { 0.f, 0.25f, 0.5f, 0.75f, 1.f, 1.5f };
 	static const TArray<float> Distances = { 0.5f, 0.75f, 1.f, 1.25f, 1.5f };
 	static const TArray<EWindowMode::Type> WindowModes = { EWindowMode::WindowedFullscreen, EWindowMode::Windowed, EWindowMode::Fullscreen };
 
@@ -278,10 +277,7 @@ TSharedRef<SWidget> SGameMenu::BuildOptions()
 		Add(OptionRow(LOCTEXT("ViewDistance", "Distance de vue"), LOCTEXT("ViewDistanceHelp", "Secteurs affichés autour de vous."),
 			[Weak]() { return FText::Format(LOCTEXT("SectorsFmt", "{0} secteur(s)"), FText::AsNumber(Weak->ViewDistanceSectors)); },
 			[Weak, ApplyWorld](int32 Dir) { Weak->ViewDistanceSectors = FMath::Clamp(Weak->ViewDistanceSectors + Dir, 1, 3); ApplyWorld(); }));
-		Add(OptionRow(LOCTEXT("Density", "Plantes décoratives"), LOCTEXT("DensityHelp", "Fougères et feuillages (l'herbe récoltable reste)."),
-			[Weak]() { return Percent(Weak->VegetationDensity); },
-			[Weak, ApplyWorld](int32 Dir) { Weak->VegetationDensity = Cycle(Densities, Weak->VegetationDensity, Dir); ApplyWorld(); }));
-		Add(OptionRow(LOCTEXT("VegDistance", "Distance de la végétation"), LOCTEXT("VegDistanceHelp", "Jusqu'où l'herbe et les fleurs s'affichent."),
+		Add(OptionRow(LOCTEXT("VegDistance", "Distance de la végétation"), LOCTEXT("VegDistanceHelp", "Jusqu'où l'herbe, les fleurs et les fougères s'affichent."),
 			[Weak]() { return Percent(Weak->VegetationDistance); },
 			[Weak, ApplyWorld](int32 Dir) { Weak->VegetationDistance = Cycle(Distances, Weak->VegetationDistance, Dir); ApplyWorld(); }));
 		Add(OptionRow(LOCTEXT("VegShadows", "Ombres de la végétation"), LOCTEXT("VegShadowsHelp", "Plus joli, plus coûteux."),

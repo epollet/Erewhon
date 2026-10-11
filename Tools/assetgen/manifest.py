@@ -20,6 +20,9 @@ TEXTURES: dict[str, str] = {
     "stone": "rough rounded fieldstone foundation blocks with mortar, warm grey with hints of green moss",
     "wood_trim": "a single dark stained wooden plank surface with long straight parallel grain lines running horizontally, chocolate brown with warm highlights, no joints, no weave",
     "stone_slabs": "a floor of large irregular flat flagstone slabs fitted together with thin dark joints, warm grey and beige stone, slightly worn",
+    "plaster": "a smooth lime plaster cottage wall, warm off-white cream with very subtle soft patches and faint brush marks, no bricks, no cracks",
+    "roof_slate": "overlapping rounded slate roof shingles in rows, soft blue-grey with a few lighter and greener shingles",
+    "floor_boards": "a wooden floor of long parallel planks running vertically, warm golden oak with darker thin joints and small knots",
 }
 
 TEXTURE_PROMPT = (
@@ -30,8 +33,9 @@ TEXTURE_PROMPT = (
 # ── Images peintes non tuilables (Gemini) : panneaux, carte murale ──────────
 # nom → (description, format). Importées comme textures T_<nom>.
 PAINTINGS: dict[str, tuple[str, str]] = {
-    "sign_general_store": ("a rustic hand-painted wooden shop sign board, the words \"General Store\" painted in large cream and dark brown hand-lettered serif letters, small painted flowers and leaves in the corners, warm weathered planks, the sign fills the entire frame edge to edge, flat front view", "21:9"),
-    "sign_sector_manager": ("a rustic hand-painted wooden shop sign board, the words \"Sector Manager\" painted in large cream and dark green hand-lettered serif letters, a small painted compass rose and map motif in the corners, warm weathered planks, the sign fills the entire frame edge to edge, flat front view", "21:9"),
+    "sign_general_store": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the words \"General Store\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
+    "sign_sector_manager": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the words \"Sector Manager\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
+    "sign_tailor": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the words \"Tailor\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
     "map_wall": ("a hand-painted parchment map of a countryside divided into a grid of square plots, meadows, a crossroads of dirt roads and a small cottage at the center, compass rose, no readable text, the parchment fills the entire frame", "4:3"),
 }
 
@@ -67,6 +71,10 @@ ICON_PROMPT = (
 # ── Modèles 3D (Gemini → Meshy) ─────────────────────────────────────────────
 # Une image de concept est générée d'abord, puis convertie en modèle par Meshy.
 MODELS: dict[str, dict] = {
+    "tailor": {
+        "subject": "a cheerful middle-aged countryside tailor woman standing upright, yellow measuring tape draped around her neck, rolled-up sleeves on a white blouse, a teal patterned headscarf, a long rust-red skirt with a small apron holding pins, kind smile, arms relaxed along the body, full body",
+        "polycount": 12000,
+    },
     "merchant": {
         "subject": "a friendly old countryside merchant standing upright, round straw hat, green apron over a cream shirt, brown trousers, kind smile, arms relaxed along the body, full body",
         "polycount": 12000,
@@ -185,21 +193,22 @@ CONCEPT_PROMPT = (
 
 # ── Sons (ElevenLabs) ───────────────────────────────────────────────────────
 # nom → (description, durée en s ou None, boucle). Fichiers : SourceArt/Generated/sounds/<nom>.wav
-SOUNDS: dict[str, tuple[str, float | None, bool]] = {
+# Un 4e élément facultatif ne garde qu'un seul impact (durée en s) : un son de pas = un pas.
+SOUNDS: dict[str, tuple] = {
     "amb_wind": ("gentle steady wind blowing across a wide open countryside meadow, soft airy whoosh, no birds, no voices", 20.0, True),
     "amb_grass": ("continuous soft rustling of tall dry grass brushing against legs while walking through a meadow", 8.0, True),
-    "step_grass_1": ("a single soft footstep on thick grass", 0.6, False),
-    "step_grass_2": ("one quiet footstep in a grassy meadow, soft crunch", 0.6, False),
-    "step_grass_3": ("a single light footstep on soft grass and earth", 0.6, False),
-    "step_dirt_1": ("a single footstep on a packed dirt path with light gravel", 0.6, False),
-    "step_dirt_2": ("one footstep on a dry dusty country path", 0.6, False),
-    "step_dirt_3": ("a single shoe step on firm dirt with small pebbles", 0.6, False),
-    "step_stone_1": ("a single footstep with leather shoes on a stone flagstone floor indoors", 0.6, False),
-    "step_stone_2": ("one footstep on a hard stone tile floor in a small room", 0.6, False),
-    "step_wood_1": ("a single footstep on old wooden porch planks, slight creak", 0.6, False),
-    "step_wood_2": ("one footstep on a wooden stair step, hollow thud", 0.6, False),
-    "door_open": ("an old wooden cottage door opening slowly with a soft creak of iron hinges", 1.6, False),
-    "door_close": ("an old wooden cottage door closing with a gentle thud and latch click", 1.2, False),
+    "step_grass_1": ("one single soft footstep of a walking person on thick meadow grass, one step only", 0.5, False, 0.32),
+    "step_grass_2": ("one single footstep in tall soft grass, gentle swish, one step only", 0.5, False, 0.32),
+    "step_grass_3": ("one single light footstep on grass over soft earth, one step only", 0.5, False, 0.32),
+    "step_dirt_1": ("one single footstep of a leather boot on a packed dirt path, slight gravel crunch, one step only", 0.5, False, 0.3),
+    "step_dirt_2": ("one single footstep on a dry dusty country path, one step only", 0.5, False, 0.3),
+    "step_dirt_3": ("one single boot step on firm earth with small pebbles, one step only", 0.5, False, 0.3),
+    "step_stone_1": ("one single footstep of a soft leather boot on a stone slab floor inside a small cottage, short and dry, one step only", 0.5, False, 0.28),
+    "step_stone_2": ("one single quiet heel step on a flagstone floor indoors, one step only", 0.5, False, 0.28),
+    "step_wood_1": ("one single footstep of a leather boot on solid old wooden floorboards, warm muted knock, one step only", 0.5, False, 0.3),
+    "step_wood_2": ("one single footstep on a wooden porch plank, soft hollow knock, one step only", 0.5, False, 0.3),
+    "door_open": ("a short creak of old iron hinges as a wooden door swings open, one creak", 1.0, False, 0.75),
+    "door_close": ("a wooden cottage door shutting with a soft wooden thump and a small latch click", 0.6, False, 0.5),
     "bird_chirp_1": ("a small songbird chirping twice, short and bright, outdoors", 1.0, False),
     "bird_chirp_2": ("a swallow twittering quickly in flight", 1.2, False),
     "bird_chirp_3": ("a single sparrow chirp, clear, distant countryside", 0.8, False),

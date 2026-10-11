@@ -11,6 +11,8 @@
 #include "World/ErewhonMaterials.h"
 #include "World/ErewhonVisuals.h"
 #include "World/SectorLayout.h"
+#include "World/Signpost.h"
+#include "World/SpawnLayout.h"
 #include "World/Terrain.h"
 
 using namespace ErewhonVisuals;
@@ -91,6 +93,22 @@ void ASector::Initialize(const TSharedRef<const FSectorLayout>& InLayout, bool b
 		BuildDecor();
 		BuildBushes();
 		BuildPlants();
+		BuildSignposts();
+	}
+}
+
+void ASector::BuildSignposts()
+{
+	// Aux carrefours de la route : la direction et la distance de chaque commerce.
+	for (const FSignpostSpot& Spot : Layout->Signposts)
+	{
+		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Spot.TowardShops.Y, Spot.TowardShops.X));
+		TArray<ErewhonSigns::FArm> Arms;
+		for (const EShopKind Kind : ErewhonSpawn::ShopKinds)
+		{
+			Arms.Add(ErewhonSigns::ShopArm(Kind, Spot.Location, Yaw));
+		}
+		ErewhonSigns::AddSignpost(this, Root, Spot.Location - GetActorLocation(), Arms);
 	}
 }
 
@@ -147,7 +165,7 @@ void ASector::BuildGround(bool bVisual)
 	UMaterialInterface* Blend = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_GroundBlend"));
 	UTexture* GrassTexture = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_ground_grass"));
 	UTexture* DirtTexture = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_ground_dirt"));
-	if ((!Layout->Paths.IsEmpty() || Layout->PlazaRadius > 0.f) && Blend && GrassTexture && DirtTexture)
+	if ((!Layout->Paths.IsEmpty() || !Layout->Clearings.IsEmpty()) && Blend && GrassTexture && DirtTexture)
 	{
 		DirtMask = BuildDirtMask();
 		UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(Blend, Ground);

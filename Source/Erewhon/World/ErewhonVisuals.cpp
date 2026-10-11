@@ -113,6 +113,40 @@ namespace ErewhonVisuals
 		return Centered * FTransform(FRotator(0.f, bLongAlongX ? 90.f : 0.f, 0.f));
 	}
 
+	UProceduralMeshComponent* AddPicture(AActor* Owner, USceneComponent* Parent, const FVector& Center,
+		float Width, float Height, float Yaw, const FString& TextureName)
+	{
+		return AddPicture(Owner, Parent, Center, Width, Height, Yaw, LoadGenerated<UTexture>(TEXT("Textures"), TextureName));
+	}
+
+	UProceduralMeshComponent* AddPicture(AActor* Owner, USceneComponent* Parent, const FVector& Center,
+		float Width, float Height, float Yaw, UTexture* Texture)
+	{
+		UMaterialInterface* Master = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_GeneratedMesh"));
+		if (!Owner || !Texture || !Master)
+		{
+			return nullptr;
+		}
+		// Face vers −X : vu de face, +Y est à droite, la texture se lit donc de gauche (−Y) à droite.
+		const float W = Width * 0.5f, H = Height * 0.5f;
+		const TArray<FVector> Vertices = { FVector(0, -W, H), FVector(0, W, H), FVector(0, W, -H), FVector(0, -W, -H) };
+		const TArray<FVector2D> UVs = { FVector2D(0, 0), FVector2D(1, 0), FVector2D(1, 1), FVector2D(0, 1) };
+		const TArray<FVector> Normals = { -FVector::XAxisVector, -FVector::XAxisVector, -FVector::XAxisVector, -FVector::XAxisVector };
+		const TArray<int32> Triangles = { 0, 2, 1, 0, 3, 2 };
+
+		UProceduralMeshComponent* Picture = NewObject<UProceduralMeshComponent>(Owner);
+		Picture->SetupAttachment(Parent);
+		Picture->SetRelativeLocationAndRotation(Center, FRotator(0.f, Yaw, 0.f));
+		Picture->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, {}, {}, false);
+		Picture->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(Master, Picture);
+		Material->SetTextureParameterValue(TEXT("BaseColor"), Texture);
+		Picture->SetMaterial(0, Material);
+		Picture->RegisterComponent();
+		Owner->AddInstanceComponent(Picture);
+		return Picture;
+	}
+
 	UProceduralMeshComponent* AddPrism(AActor* Owner, USceneComponent* Parent,
 		const TArray<FVector2D>& PolygonYZ, float X0, float X1, UMaterialInterface* Material)
 	{

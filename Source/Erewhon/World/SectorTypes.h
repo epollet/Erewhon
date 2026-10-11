@@ -8,9 +8,18 @@ UENUM(BlueprintType)
 enum class ESectorType : uint8
 {
 	Undefined,
-	Spawn,    // secteur 0:0 — cabane du marchand, n'appartient à aucun joueur
+	Spawn,    // secteur 0:0 — place du village et ses commerces, n'appartient à aucun joueur
 	Prairie,
 	Road,     // prolonge les chemins du marchand vers les quatre horizons ; jamais à vendre
+};
+
+/** Les commerces de la place du village. */
+UENUM()
+enum class EShopKind : uint8
+{
+	GeneralStore,    // vend outils et vêtements, rachète les récoltes
+	SectorManager,   // vend et reprend les secteurs, les aménage
+	Tailor,          // vend et rachète les vêtements
 };
 
 /**
@@ -35,6 +44,9 @@ namespace ErewhonSector
 	/** Secteur traversé par une route : sur l'un des deux axes du marchand, hors spawn. */
 	inline bool IsRoad(const FIntPoint& Sector) { return (Sector.X == 0) != (Sector.Y == 0); }
 
-	/** Position du marchand (centre du secteur de spawn). */
-	EREWHON_API FVector MerchantLocation();
+	/** Les quatre côtés d'un secteur, dans l'ordre des bits des améliorations : nord, sud, est, ouest. */
+	inline const FIntPoint Sides[4] = { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) };
+
+	/** Nom du côté, ex. « nord ». */
+	EREWHON_API FText SideLabel(int32 Side);
 }

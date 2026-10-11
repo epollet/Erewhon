@@ -43,21 +43,26 @@ namespace ErewhonSector
 		return TypeAt(Sector, 0) == ESectorType::Prairie;
 	}
 
+	FText SideLabel(int32 Side)
+	{
+		switch (Side)
+		{
+		case 0:  return LOCTEXT("North", "nord");
+		case 1:  return LOCTEXT("South", "sud");
+		case 2:  return LOCTEXT("East", "est");
+		default: return LOCTEXT("West", "ouest");
+		}
+	}
+
 	FText TypeLabel(ESectorType Type)
 	{
 		switch (Type)
 		{
-		case ESectorType::Spawn:   return LOCTEXT("Spawn", "Cabane du marchand");
+		case ESectorType::Spawn:   return LOCTEXT("Spawn", "Place du village");
 		case ESectorType::Prairie: return LOCTEXT("Prairie", "Prairie");
 		case ESectorType::Road:    return LOCTEXT("Road", "Route");
 		default:                   return LOCTEXT("Undefined", "Inconnu");
 		}
-	}
-
-	FVector MerchantLocation()
-	{
-		// Au fond de la cabane, derrière le comptoir (la porte est au sud, côté −X).
-		return Center(FIntPoint::ZeroValue) + FVector(220.0, 0.0, 0.0);
 	}
 }
 

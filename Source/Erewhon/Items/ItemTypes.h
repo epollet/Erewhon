@@ -69,6 +69,13 @@ struct FPlantSpawnDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	float ClusterRadiusMeters = 0.25f;
 
+	/** Semis par bosquets : rayon d'un bosquet (m) et nombre d'exemplaires ; 1 = semis uniforme. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	float PatchRadiusMeters = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	int32 PatchSize = 1;
+
 	/** Sel du générateur : changer la valeur redistribue les positions. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	int32 SeedSalt = 0;
@@ -158,6 +165,9 @@ struct FItemDef
 	bool IsValid() const { return !Id.IsNone(); }
 	bool IsEquipable() const { return Category == EItemCategory::Tool; }
 	bool IsClothing() const { return Category == EItemCategory::Clothing; }
+
+	/** Le commerce qui vend et rachète cet objet : les vêtements chez le tailleur, le reste au General Store. */
+	EShopKind ShopFor() const { return IsClothing() ? EShopKind::Tailor : EShopKind::GeneralStore; }
 	bool IsUnique() const { return Category == EItemCategory::Tool; }
 
 	/** Prix payé par le marchand pour un exemplaire. */

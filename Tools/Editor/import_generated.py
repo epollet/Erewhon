@@ -52,6 +52,12 @@ def import_textures():
     for path in source_files("textures", (".jpg", ".png")):
         name = "T_" + os.path.splitext(os.path.basename(path))[0]
         import_file(path, GEN + "/Textures", name)
+        if name == "T_font_hand":
+            # Atlas de la police des panneaux : toujours en pleine résolution.
+            texture = assets.load_asset(GEN + "/Textures/" + name)
+            texture.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
+            texture.set_editor_property("never_stream", True)
+            assets.save_loaded_asset(texture)
         log("texture " + name)
 
     for path in source_files("icons", (".jpg", ".png")):
@@ -323,6 +329,25 @@ def create_vertex_color():
     log("matériau M_VertexColor")
 
 
+def create_glass():
+    """Vitre des fenêtres : translucide, légèrement teintée, brillante."""
+    material = recreate("M_Glass", "Materials", unreal.Material, unreal.MaterialFactoryNew())
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    material.set_editor_property("translucency_lighting_mode", unreal.TranslucencyLightingMode.TLM_SURFACE)
+    material.set_editor_property("two_sided", True)
+    color = node(material, unreal.MaterialExpressionConstant3Vector, -500, 0)
+    color.set_editor_property("constant", unreal.LinearColor(0.72, 0.86, 0.9, 1.0))
+    mel.connect_material_property(color, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    opacity = scalar(material, "Opacity", 0.22, -500, 200)
+    mel.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
+    roughness = node(material, unreal.MaterialExpressionConstant, -500, 350)
+    roughness.set_editor_property("r", 0.05)
+    mel.connect_material_property(roughness, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    mel.recompile_material(material)
+    assets.save_loaded_asset(material)
+    log("matériau M_Glass")
+
+
 def create_highlight():
     """Halo de ciblage : lueur chaude translucide, plus vive sur les contours, qui pulse doucement."""
     material = recreate("M_Highlight", "Materials", unreal.Material, unreal.MaterialFactoryNew())
@@ -499,6 +524,7 @@ create_foliage()
 create_ground_blend()
 create_vertex_color()
 create_highlight()
+create_glass()
 if assets.does_asset_exist(GEN + "/Materials/M_PathBlend"):
     assets.delete_asset(GEN + "/Materials/M_PathBlend")   # remplacé par M_GroundBlend
 rebind_generated_materials(create_generated_mesh_master(), {"bird": create_bird_flap()})
