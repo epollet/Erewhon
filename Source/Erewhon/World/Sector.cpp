@@ -2,15 +2,27 @@
 
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Core/ErewhonSettings.h"
+#include "Core/ErewhonUserSettings.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture2D.h"
 #include "Items/ItemDatabase.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "ProceduralMeshComponent.h"
+#include "World/ErewhonMaterials.h"
 #include "World/ErewhonVisuals.h"
 #include "World/SectorLayout.h"
+#include "World/Terrain.h"
 
 using namespace ErewhonVisuals;
 
 namespace
 {
+	/** Résolution du masque terre/herbe : 512 texels pour 100 m, soit ~20 cm. */
+	constexpr int32 GMaskResolution = 512;
+
+	/** Grille du sol : 64 × 64 quads, soit un sommet tous les ~1,6 m. */
+	constexpr int32 GGroundResolution = 64;
+
 	/** Une partie de placeholder, dimensionnée pour une plante de 1 m de haut (cm). */
 	struct FPartSpec
 	{
@@ -46,6 +58,12 @@ namespace
 			};
 		}
 	}
+
+	const UErewhonUserSettings* UserSettings()
+	{
+		const UErewhonUserSettings* Settings = UErewhonUserSettings::Get();
+		return Settings ? Settings : GetDefault<UErewhonUserSettings>();
+	}
 }
 
 ASector::ASector()
@@ -67,88 +85,310 @@ void ASector::Initialize(const TSharedRef<const FSectorLayout>& InLayout, bool b
 #if WITH_EDITOR
 	SetActorLabel(FString::Printf(TEXT("Sector_%s"), *ErewhonSector::ToString(InLayout->Coord)));
 #endif
-	BuildGround();
+	BuildGround(GetNetMode() != NM_DedicatedServer);
 	if (bWithPlants)
 	{
+		BuildDecor();
+		BuildBushes();
 		BuildPlants();
 	}
 }
 
-void ASector::BuildGround()
+// ── Sol ──────────────────────────────────────────────────────────────────────
+
+void ASector::BuildGround(bool bVisual)
 {
 	const float Size = UErewhonSettings::Get().SectorSize();
 	const FLinearColor Grass = Layout->Type == ESectorType::Spawn ? Palette::MeadowSpawn : Palette::Meadow;
+	const FVector2D Origin(GetActorLocation());
 
-	// Dalle d'un mètre d'épaisseur dont le dessus affleure Z = 0.
-	UStaticMeshComponent* Ground = AddShape(this, Root, EShape::Cube, FVector(Size * 0.5f, Size * 0.5f, -50.f), FVector(Size, Size, 100.f), Grass);
-	Ground->SetCastShadow(false);
-
-	const FVector Origin = GetActorLocation();
-	for (const FBox2D& Path : Layout->Paths)
+	// Sol en relief : une grille dont les bords suivent exactement la fonction de hauteur,
+	// si bien qu'elle se raccorde sans couture à celle des secteurs voisins.
+	TArray<FVector> Vertices;
+	TArray<FVector> Normals;
+	TArray<FVector2D> UVs;
+	TArray<int32> Triangles;
+	const int32 N = GGroundResolution;
+	Vertices.Reserve((N + 1) * (N + 1));
+	for (int32 Y = 0; Y <= N; ++Y)
 	{
-		const FVector2D Center = Path.GetCenter() - FVector2D(Origin);
-		const FVector2D Extent = Path.GetSize();
-		UStaticMeshComponent* Dirt = AddShape(this, Root, EShape::Cube, FVector(Center.X, Center.Y, 0.5f), FVector(Extent.X, Extent.Y, 2.f), Palette::Dirt);
-		Dirt->SetCastShadow(false);
+		for (int32 X = 0; X <= N; ++X)
+		{
+			const FVector2D Local(X * Size / N, Y * Size / N);
+			const FVector2D World = Origin + Local;
+			Vertices.Add(FVector(Local.X, Local.Y, ErewhonTerrain::Height(World, Layout->WorldSeed)));
+			Normals.Add(ErewhonTerrain::Normal(World, Layout->WorldSeed));
+			UVs.Add(Local / Size);   // 0 → 1 sur le secteur : le masque terre/herbe s'y lit
+		}
+	}
+	for (int32 Y = 0; Y < N; ++Y)
+	{
+		for (int32 X = 0; X < N; ++X)
+		{
+			const int32 A = Y * (N + 1) + X;
+			Triangles.Append({ A, A + N + 1, A + 1, A + 1, A + N + 1, A + N + 2 });
+		}
+	}
+
+	UProceduralMeshComponent* Ground = NewObject<UProceduralMeshComponent>(this, TEXT("Ground"));
+	Ground->SetupAttachment(Root);
+	Ground->bUseAsyncCooking = false;   // le joueur doit pouvoir marcher dessus dès son apparition
+	Ground->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, {}, {}, true);
+	Ground->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+	Ground->SetCastShadow(false);
+	Ground->RegisterComponent();
+	AddInstanceComponent(Ground);
+	if (!bVisual)
+	{
+		return;
+	}
+
+	// Le sol mêle herbe et terre selon le masque du secteur : chemins, place et bords fondus d'un seul tenant.
+	UMaterialInterface* Blend = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_GroundBlend"));
+	UTexture* GrassTexture = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_ground_grass"));
+	UTexture* DirtTexture = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_ground_dirt"));
+	if ((!Layout->Paths.IsEmpty() || Layout->PlazaRadius > 0.f) && Blend && GrassTexture && DirtTexture)
+	{
+		DirtMask = BuildDirtMask();
+		UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(Blend, Ground);
+		Material->SetTextureParameterValue(TEXT("Albedo"), GrassTexture);
+		Material->SetScalarParameterValue(TEXT("TileSize"), GroundTileSize);
+		Material->SetTextureParameterValue(TEXT("AlbedoDirt"), DirtTexture);
+		Material->SetScalarParameterValue(TEXT("DirtTileSize"), DirtTileSize);
+		Material->SetTextureParameterValue(TEXT("DirtMask"), DirtMask);
+		Ground->SetMaterial(0, Material);
+		return;
+	}
+	Ground->SetMaterial(0, MakePaintedMaterial(Ground, TEXT("ground_grass"), GroundTileSize, Grass));
+}
+
+UTexture2D* ASector::BuildDirtMask() const
+{
+	UTexture2D* Texture = UTexture2D::CreateTransient(GMaskResolution, GMaskResolution, PF_G8);
+	Texture->SRGB = false;
+	Texture->Filter = TF_Bilinear;
+	Texture->AddressX = TA_Clamp;
+	Texture->AddressY = TA_Clamp;
+
+	const float Size = UErewhonSettings::Get().SectorSize();
+	const FVector2D Origin(GetActorLocation());
+	FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+	uint8* Texels = static_cast<uint8*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
+	for (int32 Y = 0; Y < GMaskResolution; ++Y)
+	{
+		for (int32 X = 0; X < GMaskResolution; ++X)
+		{
+			// Texel (X, Y) ↔ monde (X, Y) : le matériau échantillonne avec les mêmes axes.
+			const FVector2D World = Origin + FVector2D(X + 0.5f, Y + 0.5f) * (Size / GMaskResolution);
+			Texels[Y * GMaskResolution + X] = static_cast<uint8>(FMath::RoundToInt32(Layout->DirtAmount(World) * 255.f));
+		}
+	}
+	Mip.BulkData.Unlock();
+	Texture->UpdateResource();
+	return Texture;
+}
+
+// ── Végétation décorative ────────────────────────────────────────────────────
+
+bool ASector::IsSoftlyExcluded(const FVector2D& World, float Roll) const
+{
+	// Sur les bords de la terre, la végétation se raréfie progressivement.
+	return Layout->DirtAmount(World) > 0.05f + 0.25f * Roll;
+}
+
+void ASector::BuildDecor()
+{
+#if !UE_BUILD_SHIPPING
+	if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonNoDecor")))
+	{
+		return;   // debug : ne montrer que les plantes récoltables
+	}
+#endif
+	const UErewhonSettings& Settings = UErewhonSettings::Get();
+	const UErewhonUserSettings* User = UserSettings();
+	const float Size = Settings.SectorSize();
+	const FVector Origin = GetActorLocation();
+	UMaterialInterface* Foliage = GetWorld()->GetSubsystem<UErewhonMaterials>()->GetFoliage();
+
+	for (int32 PlantIndex = 0; PlantIndex < Settings.DecorPlants.Num(); ++PlantIndex)
+	{
+		const FDecorPlant& Plant = Settings.DecorPlants[PlantIndex];
+		const int32 BaseCount = Layout->Type == ESectorType::Spawn ? Plant.CountSpawn : Plant.CountPrairie;
+		const int32 Count = FMath::RoundToInt32(BaseCount * User->VegetationDensity);
+		UStaticMesh* Mesh = LoadDecorMesh(Plant);
+		if (Count <= 0 || Plant.bSolid || !Mesh || (Plant.bFoliageMaterial && !Foliage))
+		{
+			continue;   // les buissons (bSolid) viennent du FSectorLayout, voir BuildBushes
+		}
+
+		// Un flux par espèce et par secteur : régler une espèce ne déplace pas les autres.
+		FRandomStream Rand(static_cast<int32>(HashCombine(GetTypeHash(Layout->Coord), GetTypeHash(PlantIndex) * 0x9E3779B9u)));
+		const FTransform Fit = FitToHeight(Mesh, 100.f);
+		const float PatchRadius = Plant.PatchRadius * 100.f;
+		const int32 PatchSize = FMath::Max(1, Plant.PatchSize);
+
+		TArray<FTransform> Instances;
+		Instances.Reserve(Count);
+		FVector2D PatchCenter = FVector2D::ZeroVector;
+		for (int32 i = 0; i < Count; ++i)
+		{
+			if (i % PatchSize == 0)
+			{
+				PatchCenter = FVector2D(Rand.FRand() * Size, Rand.FRand() * Size);
+			}
+			// Dans un bosquet, les exemplaires se resserrent vers le centre.
+			const float Distance = PatchRadius * FMath::Sqrt(Rand.FRand());
+			const float Angle = Rand.FRandRange(0.f, UE_TWO_PI);
+			const FVector2D Local = PatchRadius > 0.f
+				? PatchCenter + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Distance
+				: FVector2D(Rand.FRand() * Size, Rand.FRand() * Size);
+			const float Height = Rand.FRandRange(Plant.HeightMin, Plant.HeightMax);
+			const float Yaw = Rand.FRandRange(0.f, 360.f);
+			const float Roll = Rand.FRand();
+			if (Local.X < 0.f || Local.Y < 0.f || Local.X >= Size || Local.Y >= Size
+				|| IsSoftlyExcluded(Local + FVector2D(Origin), Roll))
+			{
+				continue;
+			}
+			const float Ground = ErewhonTerrain::Height(Local + FVector2D(Origin), Layout->WorldSeed);
+			Instances.Add(Fit * FTransform(FRotator(0.f, Yaw, 0.f), FVector(Local.X, Local.Y, Ground), FVector(Height)));
+		}
+
+		UHierarchicalInstancedStaticMeshComponent* Part = MakeInstancedPart(Mesh, Plant.bFoliageMaterial ? Foliage : nullptr, Plant.CullMeters);
+		Part->SetCastShadow(Plant.bCastShadows && User->bVegetationShadows);
+		Part->AddInstances(Instances, false, false);
 	}
 }
 
-ASector::FPlantKind& ASector::FindOrCreateKind(FName ItemId)
+UStaticMesh* ASector::LoadDecorMesh(const FDecorPlant& Plant)
 {
-	for (FPlantKind& Kind : Kinds)
+	FString Folder, Name;
+	return Plant.Mesh.Split(TEXT("/"), &Folder, &Name) ? LoadGenerated<UStaticMesh>(*Folder, Name) : nullptr;
+}
+
+void ASector::BuildBushes()
+{
+	// Les buissons sont des données partagées (ils ralentissent le joueur) : on rend la liste du layout.
+	const UErewhonSettings& Settings = UErewhonSettings::Get();
+	const bool bShadows = UserSettings()->bVegetationShadows;
+	TMap<int32, TArray<FTransform>> Batches;
+	TMap<int32, FTransform> Fits;
+	for (const FBushInstance& Bush : Layout->Bushes)
 	{
-		if (Kind.ItemId == ItemId)
+		if (!Fits.Contains(Bush.Kind))
 		{
-			return Kind;
+			UStaticMesh* Mesh = Settings.DecorPlants.IsValidIndex(Bush.Kind) ? LoadDecorMesh(Settings.DecorPlants[Bush.Kind]) : nullptr;
+			if (!Mesh)
+			{
+				continue;
+			}
+			Fits.Add(Bush.Kind, FitToHeight(Mesh, 100.f));
 		}
+		Batches.FindOrAdd(Bush.Kind).Add(Fits[Bush.Kind] * FTransform(FRotator(0.f, Bush.Yaw, 0.f), Bush.Location - GetActorLocation(), FVector(Bush.Height)));
+	}
+	for (const auto& Pair : Batches)
+	{
+		const FDecorPlant& Plant = Settings.DecorPlants[Pair.Key];
+		UHierarchicalInstancedStaticMeshComponent* Part = MakeInstancedPart(LoadDecorMesh(Plant), nullptr, Plant.CullMeters);
+		Part->SetCastShadow(Plant.bCastShadows && bShadows);
+		Part->AddInstances(Pair.Value, false, false);
+	}
+}
+
+// ── Plantes récoltables ──────────────────────────────────────────────────────
+
+int32 ASector::FindOrCreateKind(FName ItemId, uint8 Variant)
+{
+	const int32 Existing = Kinds.IndexOfByPredicate([ItemId, Variant](const FPlantKind& K) { return K.ItemId == ItemId && K.Variant == Variant; });
+	if (Existing != INDEX_NONE)
+	{
+		return Existing;
 	}
 
-	FPlantKind& Kind = Kinds.AddDefaulted_GetRef();
-	Kind.ItemId = ItemId;
+	const int32 Index = Kinds.AddDefaulted();
+	Kinds[Index].ItemId = ItemId;
+	Kinds[Index].Variant = Variant;
 
 	const FItemDef* Def = UItemDatabase::Get(this)->Find(ItemId);
-	const auto MakePart = [this, Def](UStaticMesh* Mesh, UMaterialInterface* Material) -> UHierarchicalInstancedStaticMeshComponent*
+	const bool bShadows = UserSettings()->bVegetationShadows;
+	const auto MakePart = [this, Def, bShadows](UStaticMesh* Mesh, UMaterialInterface* Material)
 	{
-		UHierarchicalInstancedStaticMeshComponent* Part = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
-		Part->SetStaticMesh(Mesh);
-		if (Material)
-		{
-			Part->SetMaterial(0, Material);
-		}
-		Part->SetupAttachment(Root);
-		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Part->SetCanEverAffectNavigation(false);
-		Part->bAffectDistanceFieldLighting = false;
-		const int32 CullEnd = FMath::RoundToInt32(Def->Plant.CullDistanceMeters * 100.f);
-		Part->SetCullDistances(CullEnd * 3 / 4, CullEnd);
-		Part->RegisterComponent();
-		AddInstanceComponent(Part);
+		UHierarchicalInstancedStaticMeshComponent* Part = MakeInstancedPart(Mesh, Material, Def->Plant.CullDistanceMeters);
+		Part->SetCastShadow(bShadows);
 		return Part;
 	};
 
-	if (UStaticMesh* Generated = Cast<UStaticMesh>(Def->Mesh.TryLoad()))
+	const FSoftObjectPath& MeshPath = Def->MeshVariants.IsValidIndex(Variant) ? Def->MeshVariants[Variant] : Def->Mesh;
+	if (UStaticMesh* Generated = Cast<UStaticMesh>(MeshPath.TryLoad()))
 	{
-		// Mesh généré : supposé normalisé à 1 m de haut, pivot à la base.
-		Kind.Parts.Add(MakePart(Generated, nullptr));
-		Kind.PartLocal.Add(FTransform::Identity);
-		return Kind;
+		// Mesh généré : ramené au gabarit de 1 m, pivot à la base.
+		UMaterialInterface* Override = Cast<UMaterialInterface>(Def->Material.TryLoad());
+		if (Override && Override->GetName() == TEXT("M_Foliage"))
+		{
+			Override = GetWorld()->GetSubsystem<UErewhonMaterials>()->GetFoliage();
+		}
+		Kinds[Index].Parts.Add(MakePart(Generated, Override));
+		Kinds[Index].PartLocal.Add(FitToHeight(Generated, 100.f));
+		return Index;
 	}
 
 	for (const FPartSpec& Spec : PlaceholderParts(*Def))
 	{
 		UHierarchicalInstancedStaticMeshComponent* Part = MakePart(GetShape(Spec.Shape), nullptr);
 		Part->SetMaterial(0, MakeColorMaterial(Part, Spec.Color));
-		Kind.Parts.Add(Part);
-		Kind.PartLocal.Add(FTransform(Spec.Rotation, Spec.Center, Spec.Size / 100.f));
+		Kinds[Index].Parts.Add(Part);
+		Kinds[Index].PartLocal.Add(FTransform(Spec.Rotation, Spec.Center, Spec.Size / 100.f));
 	}
-	return Kind;
+	return Index;
 }
 
-FTransform ASector::PlantTransform(int32 PlantIndex) const
+UHierarchicalInstancedStaticMeshComponent* ASector::MakeInstancedPart(UStaticMesh* Mesh, UMaterialInterface* Material, float CullDistanceMeters)
+{
+	UHierarchicalInstancedStaticMeshComponent* Part = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
+	Part->SetStaticMesh(Mesh);
+	if (Material)
+	{
+		Part->SetMaterial(0, Material);
+	}
+	Part->SetupAttachment(Root);
+	Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Part->SetCanEverAffectNavigation(false);
+	Part->bAffectDistanceFieldLighting = false;
+	// Performances de la végétation, qui se compte par dizaines de milliers d'instances :
+	// - l'ondulation au vent n'invalide pas le cache des ombres virtuelles à chaque image ;
+	// - le vent s'arrête au-delà de 25 m, où il ne se voit plus ;
+	// - la végétation reste hors du ray tracing matériel de Lumen.
+	Part->ShadowCacheInvalidationBehavior = EShadowCacheInvalidationBehavior::Rigid;
+	Part->WorldPositionOffsetDisableDistance = 2500;
+	Part->bVisibleInRayTracing = false;
+	const int32 CullEnd = FMath::RoundToInt32(CullDistanceMeters * 100.f * UserSettings()->VegetationDistance);
+	Part->SetCullDistances(CullEnd * 3 / 4, CullEnd);
+	Part->RegisterComponent();
+	AddInstanceComponent(Part);
+	return Part;
+}
+
+void ASector::PlantTransforms(int32 PlantIndex, TArray<FTransform>& Out) const
 {
 	const FPlantInstance& Plant = Layout->Plants[PlantIndex];
-	// Relatif à l'acteur ; le gabarit fait 1 m, la hauteur en mètres sert donc d'échelle.
-	return FTransform(FRotator(0, Plant.Yaw, 0), Plant.Location - GetActorLocation(), FVector(Plant.Height));
+	const FItemDef* Def = UItemDatabase::Get(this)->Find(Plant.ItemId);
+	const int32 ClusterMin = Def ? FMath::Max(1, Def->Plant.ClusterMin) : 1;
+	const int32 ClusterMax = Def ? FMath::Max(ClusterMin, Def->Plant.ClusterMax) : 1;
+	const float Radius = Def ? Def->Plant.ClusterRadiusMeters * 100.f : 0.f;
+
+	// Le premier exemplaire est au point d'apparition (celui qu'on vise) ; les autres l'entourent.
+	FRandomStream Rand(static_cast<int32>(HashCombine(GetTypeHash(Layout->Coord), GetTypeHash(PlantIndex))));
+	const int32 Count = Rand.RandRange(ClusterMin, ClusterMax);
+	const FVector Base = Plant.Location - GetActorLocation();
+	Out.Reset(Count);
+	Out.Add(FTransform(FRotator(0, Plant.Yaw, 0), Base, FVector(Plant.Height)));
+	for (int32 i = 1; i < Count; ++i)
+	{
+		const float Angle = Rand.FRandRange(0.f, UE_TWO_PI);
+		const float Distance = Radius * FMath::Sqrt(Rand.FRandRange(0.15f, 1.f));
+		const FVector Offset(FMath::Cos(Angle) * Distance, FMath::Sin(Angle) * Distance, 0.f);
+		Out.Add(FTransform(FRotator(0, Rand.FRandRange(0.f, 360.f), 0), Base + Offset, FVector(Plant.Height * Rand.FRandRange(0.75f, 1.05f))));
+	}
 }
 
 void ASector::BuildPlants()
@@ -157,26 +397,29 @@ void ASector::BuildPlants()
 	KindOfPlant.SetNumUninitialized(Count);
 	InstanceOfPlant.SetNumUninitialized(Count);
 
-	// Regroupe les transformations par espèce pour un ajout en lot.
+	// Regroupe les transformations par espèce et variante pour un ajout en lot.
 	TArray<TArray<TArray<FTransform>>> Batches;
+	TArray<FTransform> Members;
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
-		const FName ItemId = Layout->Plants[Index].ItemId;
-		FindOrCreateKind(ItemId);
-		const int32 KindIndex = Kinds.IndexOfByPredicate([ItemId](const FPlantKind& K) { return K.ItemId == ItemId; });
+		const FPlantInstance& Plant = Layout->Plants[Index];
+		const int32 KindIndex = FindOrCreateKind(Plant.ItemId, Plant.Variant);
 		if (Batches.Num() <= KindIndex)
 		{
 			Batches.SetNum(KindIndex + 1);
 		}
-		FPlantKind& Kind = Kinds[KindIndex];
+		const FPlantKind& Kind = Kinds[KindIndex];
 		Batches[KindIndex].SetNum(Kind.Parts.Num());
 
-		const FTransform Plant = PlantTransform(Index);
+		PlantTransforms(Index, Members);
 		KindOfPlant[Index] = KindIndex;
 		InstanceOfPlant[Index] = Batches[KindIndex][0].Num();
-		for (int32 PartIndex = 0; PartIndex < Kind.Parts.Num(); ++PartIndex)
+		for (const FTransform& Member : Members)
 		{
-			Batches[KindIndex][PartIndex].Add(Kind.PartLocal[PartIndex] * Plant);
+			for (int32 PartIndex = 0; PartIndex < Kind.Parts.Num(); ++PartIndex)
+			{
+				Batches[KindIndex][PartIndex].Add(Kind.PartLocal[PartIndex] * Member);
+			}
 		}
 	}
 
@@ -197,16 +440,22 @@ void ASector::SetPlantHarvested(int32 PlantIndex, bool bHarvested)
 		return;
 	}
 	FPlantKind& Kind = Kinds[KindOfPlant[PlantIndex]];
-	const int32 Instance = InstanceOfPlant[PlantIndex];
+	const int32 FirstInstance = InstanceOfPlant[PlantIndex];
 
 	// Une plante récoltée est réduite à rien plutôt que retirée : les index restent stables.
-	FTransform Plant = PlantTransform(PlantIndex);
-	if (bHarvested)
+	// Toute la touffe part avec elle.
+	TArray<FTransform> Members;
+	PlantTransforms(PlantIndex, Members);
+	for (int32 m = 0; m < Members.Num(); ++m)
 	{
-		Plant.SetScale3D(FVector(KINDA_SMALL_NUMBER));
-	}
-	for (int32 PartIndex = 0; PartIndex < Kind.Parts.Num(); ++PartIndex)
-	{
-		Kind.Parts[PartIndex]->UpdateInstanceTransform(Instance, Kind.PartLocal[PartIndex] * Plant, false, true, false);
+		FTransform Member = Members[m];
+		if (bHarvested)
+		{
+			Member.SetScale3D(FVector(KINDA_SMALL_NUMBER));
+		}
+		for (int32 PartIndex = 0; PartIndex < Kind.Parts.Num(); ++PartIndex)
+		{
+			Kind.Parts[PartIndex]->UpdateInstanceTransform(FirstInstance + m, Kind.PartLocal[PartIndex] * Member, false, true, false);
+		}
 	}
 }

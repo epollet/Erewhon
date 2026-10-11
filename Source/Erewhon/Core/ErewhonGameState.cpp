@@ -7,6 +7,7 @@
 #include "TimerManager.h"
 #include "World/SectorManager.h"
 #include "World/SpawnCabin.h"
+#include "World/Wildlife.h"
 
 // ── Fast array callbacks (clients) ───────────────────────────────────────────
 
@@ -102,6 +103,7 @@ void AErewhonGameState::SpawnLocalWorldActors()
 	if (GetNetMode() != NM_DedicatedServer)
 	{
 		World->SpawnActor<ACelestialSystem>(Params);
+		World->SpawnActor<AWildlife>(Params);
 	}
 }
 

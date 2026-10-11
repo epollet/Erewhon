@@ -17,7 +17,7 @@ public class Erewhon : ModuleRules
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
-			"Slate", "SlateCore", "UMG", "Json",
+			"Slate", "SlateCore", "UMG", "Json", "ProceduralMeshComponent",
 		});
 	}
 }

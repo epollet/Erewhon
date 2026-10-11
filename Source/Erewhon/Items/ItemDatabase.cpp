@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/PackageName.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -86,6 +87,34 @@ namespace
 		{
 			Def.Icon = FSoftObjectPath(Text);
 		}
+		const TArray<TSharedPtr<FJsonValue>>* Variants = nullptr;
+		if (Obj->TryGetArrayField(TEXT("meshes"), Variants))
+		{
+			for (const TSharedPtr<FJsonValue>& Variant : *Variants)
+			{
+				Def.MeshVariants.Add(FSoftObjectPath(Variant->AsString()));
+			}
+		}
+		if (Obj->TryGetStringField(TEXT("material"), Text))
+		{
+			Def.Material = FSoftObjectPath(Text);
+		}
+
+		// Conventions de Tools/Editor/import_generated.py : T_Icon_<id>, SM_<id>.
+		const auto Generated = [](const TCHAR* Folder, const FString& Name)
+		{
+			const FString Package = FString::Printf(TEXT("/Game/Generated/%s/%s"), Folder, *Name);
+			return FPackageName::DoesPackageExist(Package) ? FSoftObjectPath(Package + TEXT(".") + Name) : FSoftObjectPath();
+		};
+		const FString IdString = Def.Id.ToString();
+		if (Def.Icon.IsNull())
+		{
+			Def.Icon = Generated(TEXT("Icons"), TEXT("T_Icon_") + IdString);
+		}
+		if (Def.Mesh.IsNull())
+		{
+			Def.Mesh = Generated(TEXT("Meshes"), TEXT("SM_") + IdString);
+		}
 
 		const TSharedPtr<FJsonObject>* PlantObj = nullptr;
 		if (Obj->TryGetObjectField(TEXT("plant"), PlantObj))
@@ -99,6 +128,13 @@ namespace
 			(*PlantObj)->TryGetNumberField(TEXT("height_max"), Plant.HeightMax);
 			(*PlantObj)->TryGetNumberField(TEXT("cull_distance"), Plant.CullDistanceMeters);
 			(*PlantObj)->TryGetNumberField(TEXT("seed_salt"), Plant.SeedSalt);
+			(*PlantObj)->TryGetNumberField(TEXT("cluster_radius"), Plant.ClusterRadiusMeters);
+			const TArray<TSharedPtr<FJsonValue>>* Cluster = nullptr;
+			if ((*PlantObj)->TryGetArrayField(TEXT("cluster"), Cluster) && Cluster->Num() == 2)
+			{
+				Plant.ClusterMin = FMath::Max(1, static_cast<int32>((*Cluster)[0]->AsNumber()));
+				Plant.ClusterMax = FMath::Max(Plant.ClusterMin, static_cast<int32>((*Cluster)[1]->AsNumber()));
+			}
 			Plant.AccentColor = ParseColor(*PlantObj, TEXT("accent_color"), FLinearColor::Yellow);
 
 			const TSharedPtr<FJsonObject>* Counts = nullptr;

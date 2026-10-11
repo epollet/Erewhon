@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "Items/ItemDatabase.h"
 #include "World/SpawnLayout.h"
+#include "World/Terrain.h"
 
 namespace
 {
@@ -12,17 +13,62 @@ namespace
 	constexpr int32 GMaxCachedLayouts = 64;
 	constexpr int32 GPlacementRetries = 4;
 
-	bool IsExcluded(const TArray<FBox2D>& Exclusions, const FVector2D& Point)
+	/** Distance signée au rectangle (cm) : négative à l'intérieur. */
+	float SignedDistance(const FBox2D& Box, const FVector2D& Point)
 	{
-		for (const FBox2D& Box : Exclusions)
-		{
-			if (Box.IsInside(Point))
-			{
-				return true;
-			}
-		}
-		return false;
+		const float DX = FMath::Max(Box.Min.X - Point.X, Point.X - Box.Max.X);
+		const float DY = FMath::Max(Box.Min.Y - Point.Y, Point.Y - Box.Max.Y);
+		const float Outside = FVector2D(FMath::Max(DX, 0.f), FMath::Max(DY, 0.f)).Size();
+		return Outside + FMath::Min(FMath::Max(DX, DY), 0.f);
 	}
+}
+
+float FSectorLayout::DirtAmount(const FVector2D& World) const
+{
+	if (Paths.IsEmpty() && PlazaRadius <= 0.f)
+	{
+		return 0.f;
+	}
+	const float Blend = UErewhonSettings::Get().PathBlendMeters * 100.f;
+	// Deux octaves de bruit : de larges ondulations du bord, et un liseré plus fin.
+	const float Wobble = FMath::PerlinNoise2D(World / 260.f) * Blend * 0.9f + FMath::PerlinNoise2D(World / 55.f) * Blend * 0.3f;
+	float Distance = TNumericLimits<float>::Max();
+	for (const FBox2D& Path : Paths)
+	{
+		Distance = FMath::Min(Distance, SignedDistance(Path, World));
+	}
+	if (PlazaRadius > 0.f)
+	{
+		// La place n'est pas un cercle parfait : son bord ondule largement.
+		const FVector2D Offset = World - PlazaCenter;
+		const float Angle = FMath::Atan2(Offset.Y, Offset.X);
+		const float Bulge = FMath::PerlinNoise1D(Angle * 1.7f + 11.3f) * PlazaRadius * 0.18f;
+		Distance = FMath::Min(Distance, Offset.Size() - (PlazaRadius + Bulge));
+	}
+	return 1.f - FMath::SmoothStep(-Blend * 0.5f, Blend * 0.5f, Distance + Wobble);
+}
+
+bool FSectorLayout::IsBare(const FVector2D& World, float DirtThreshold) const
+{
+	return DirtAmount(World) > DirtThreshold;
+}
+
+bool FSectorLayout::IsInBush(const FVector2D& World) const
+{
+	return Bushes.ContainsByPredicate([&World](const FBushInstance& Bush)
+	{
+		return FVector2D::DistSquared(FVector2D(Bush.Location), World) < FMath::Square(Bush.Radius);
+	});
+}
+
+float FSectorLayout::SpeedFactor(const FVector2D& World) const
+{
+	const UErewhonSettings& Settings = UErewhonSettings::Get();
+	if (DirtAmount(World) > 0.4f)
+	{
+		return 1.f;   // chemins, place, cabane
+	}
+	return IsInBush(World) ? Settings.BushSpeedFactor : Settings.GrassSpeedFactor;
 }
 
 void FSectorLayout::GatherNear(const FVector& Point, float Radius, TArray<int32>& Out) const
@@ -77,10 +123,54 @@ TSharedRef<const FSectorLayout> USectorLayoutSubsystem::GetLayout(const FIntPoin
 	return Layout;
 }
 
+void USectorLayoutSubsystem::BuildBushes(FSectorLayout& Layout, int32 WorldSeed) const
+{
+	// Massifs de buissons : un centre tiré au hasard, des exemplaires resserrés autour.
+	const UErewhonSettings& Settings = UErewhonSettings::Get();
+	const float Size = Settings.SectorSize();
+	const FVector2D Origin(ErewhonSector::Origin(Layout.Coord));
+	for (int32 Kind = 0; Kind < Settings.DecorPlants.Num(); ++Kind)
+	{
+		const FDecorPlant& Plant = Settings.DecorPlants[Kind];
+		const int32 Count = Layout.Type == ESectorType::Spawn ? Plant.CountSpawn : Plant.CountPrairie;
+		if (!Plant.bSolid || Count <= 0)
+		{
+			continue;
+		}
+		FRandomStream Rand(static_cast<int32>(HashCombine(HashCombine(GetTypeHash(WorldSeed), GetTypeHash(Layout.Coord)), GetTypeHash(Kind) * 0x85EBCA6Bu)));
+		const float PatchRadius = Plant.PatchRadius * 100.f;
+		const int32 PatchSize = FMath::Max(1, Plant.PatchSize);
+		FVector2D PatchCenter = FVector2D::ZeroVector;
+		for (int32 i = 0; i < Count; ++i)
+		{
+			if (i % PatchSize == 0)
+			{
+				PatchCenter = Origin + FVector2D(Rand.FRand() * Size, Rand.FRand() * Size);
+			}
+			const float Distance = PatchRadius * FMath::Sqrt(Rand.FRand());
+			const float Angle = Rand.FRandRange(0.f, UE_TWO_PI);
+			const FVector2D Point = PatchCenter + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Distance;
+			const float Height = Rand.FRandRange(Plant.HeightMin, Plant.HeightMax);
+			const float Yaw = Rand.FRandRange(0.f, 360.f);
+			if (Point.X < Origin.X || Point.Y < Origin.Y || Point.X >= Origin.X + Size || Point.Y >= Origin.Y + Size || Layout.IsBare(Point))
+			{
+				continue;
+			}
+			FBushInstance& Bush = Layout.Bushes.AddDefaulted_GetRef();
+			Bush.Location = FVector(Point.X, Point.Y, ErewhonTerrain::Height(Point, WorldSeed));
+			Bush.Height = Height;
+			Bush.Radius = Height * 100.f * Plant.FootprintRatio;
+			Bush.Yaw = Yaw;
+			Bush.Kind = Kind;
+		}
+	}
+}
+
 TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector, int32 WorldSeed) const
 {
 	TSharedRef<FSectorLayout> Layout = MakeShared<FSectorLayout>();
 	Layout->Coord = Sector;
+	Layout->WorldSeed = WorldSeed;
 	Layout->Type = ErewhonSector::TypeAt(Sector, WorldSeed);
 
 	const float Size = UErewhonSettings::Get().SectorSize();
@@ -88,7 +178,9 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 
 	if (Layout->Type == ESectorType::Spawn)
 	{
-		ErewhonSpawn::BuildExclusions(Sector, Layout->Paths, Layout->Exclusions);
+		ErewhonSpawn::BuildPaths(Sector, Layout->Paths);
+		Layout->PlazaCenter = FVector2D(ErewhonSector::Center(Sector));
+		Layout->PlazaRadius = UErewhonSettings::Get().PlazaRadiusMeters * 100.f;
 	}
 
 	Layout->CellSize = GCellSize;
@@ -122,11 +214,12 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 			for (int32 Attempt = 0; Attempt < GPlacementRetries && !bPlaced; ++Attempt)
 			{
 				Point = FVector2D(Origin.X + Rand.FRand() * Size, Origin.Y + Rand.FRand() * Size);
-				bPlaced = !IsExcluded(Layout->Exclusions, Point);
+				bPlaced = !Layout->IsBare(Point);
 			}
 			// Tirages consommés même en cas d'échec : la suite reste stable.
 			const float Height = Rand.FRandRange(Item->Plant.HeightMin, Item->Plant.HeightMax);
 			const float Yaw = Rand.FRandRange(0.f, 360.f);
+			const int32 Variant = Rand.RandHelper(FMath::Max(1, Item->MeshVariants.Num()));
 			if (!bPlaced)
 			{
 				continue;
@@ -134,11 +227,14 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 
 			FPlantInstance& Plant = Layout->Plants.AddDefaulted_GetRef();
 			Plant.ItemId = Item->Id;
-			Plant.Location = FVector(Point.X, Point.Y, 0.0);
+			Plant.Location = FVector(Point.X, Point.Y, ErewhonTerrain::Height(Point, WorldSeed));
 			Plant.Height = Height;
 			Plant.Yaw = Yaw;
+			Plant.Variant = static_cast<uint8>(Variant);
 		}
 	}
+
+	BuildBushes(*Layout, WorldSeed);
 
 	for (int32 Index = 0; Index < Layout->Plants.Num(); ++Index)
 	{

@@ -22,6 +22,8 @@ struct FErewhonInputActions
 	UPROPERTY() TObjectPtr<UInputAction> Primary;
 	UPROPERTY() TObjectPtr<UInputAction> Inventory;
 	UPROPERTY() TObjectPtr<UInputAction> CloseMenu;
+	UPROPERTY() TObjectPtr<UInputAction> Use;
+	UPROPERTY() TObjectPtr<UInputAction> Crouch;
 };
 
 struct FErewhonToast
@@ -51,6 +53,9 @@ public:
 	void OpenStore();
 	void CloseMenu();
 
+	/** Échap : ferme le menu ouvert, sinon ouvre le menu de jeu. */
+	void HandleEscape();
+
 	// ── Messages ──
 
 	void ShowToast(const FText& Text);
@@ -60,6 +65,9 @@ public:
 
 	UFUNCTION(Server, Reliable)
 	void ServerHarvest(FIntPoint Sector, int32 PlantIndex);
+
+	UFUNCTION(Server, Reliable)
+	void ServerUseDoor(class ADoor* Door);
 
 	UFUNCTION(Server, Reliable)
 	void ServerBuySector(FIntPoint Sector);
@@ -86,6 +94,17 @@ private:
 
 	UPROPERTY()
 	FErewhonInputActions Actions;
+
+#if !UE_BUILD_SHIPPING
+	void StartAutoShots();
+	void NextAutoShot();
+	TArray<float> ShotYaws;
+	float ShotPitch = -6.f;
+	FVector ShotLocation = FVector::ZeroVector;
+	bool bShotHasLocation = false;
+	int32 ShotIndex = 0;
+	FTimerHandle ShotTimer;
+#endif
 
 	TSharedPtr<SWidget> OpenMenu;
 	TSharedPtr<SWidget> PendingMenu;

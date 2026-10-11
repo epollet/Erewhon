@@ -1,40 +1,42 @@
 {
-  "_doc": "Catalogue des objets. Couleurs en sRGB 0-255. L'ordre des plantes fixe l'ordre de génération : ajouter une plante à la fin pour ne pas déplacer les autres. 'mesh' et 'icon' recevront les chemins des assets générés (ex. /Game/Generated/Items/SM_Cerpe.SM_Cerpe).",
+  "_doc": "Catalogue des objets. Couleurs en sRGB 0-255. L'ordre des plantes fixe l'ordre de génération : ajouter une plante à la fin pour ne pas déplacer les autres. Les assets générés sont trouvés par convention (/Game/Generated/Meshes/SM_<id>, /Game/Generated/Icons/T_Icon_<id>) ; 'mesh', 'icon' et 'material' ne servent qu'à imposer un autre asset.",
   "items": [
     {
       "id": "grass", "name": "Herbe", "category": "plant",
-      "description": "Brin d'herbe des prairies.",
+      "description": "Touffe d'herbe haute des prairies.",
       "sell_price": 1, "max_stack": 10, "color": [70, 170, 55],
-      "plant": { "shape": "grass", "height_min": 0.4, "height_max": 1.2, "cull_distance": 60, "seed_salt": 0,
-                 "count": { "prairie": 6000, "spawn": 3000 } }
+      "meshes": ["/Game/Generated/Foliage/SM_grass_tall_a.SM_grass_tall_a", "/Game/Generated/Foliage/SM_grass_tall_b.SM_grass_tall_b", "/Game/Generated/Foliage/SM_grass_seed.SM_grass_seed"],
+      "material": "/Game/Generated/Materials/M_Foliage.M_Foliage",
+      "plant": { "shape": "grass", "height_min": 0.75, "height_max": 1.5, "cull_distance": 70, "seed_salt": 0,
+                 "count": { "prairie": 18000, "spawn": 11000 } }
     },
     {
       "id": "flower_white", "name": "Fleur blanche", "category": "plant",
       "description": "Fleur délicate aux pétales nacrés.",
       "sell_price": 3, "max_stack": 10, "color": [242, 242, 235],
-      "plant": { "shape": "flower", "height_min": 0.22, "height_max": 0.44, "accent_color": [250, 217, 31], "seed_salt": 10,
-                 "count": { "prairie": 120, "spawn": 60 } }
+      "plant": { "shape": "flower", "height_min": 1.0, "height_max": 1.4, "accent_color": [250, 217, 31], "seed_salt": 10, "cluster": [3, 6], "cluster_radius": 0.3,
+                 "count": { "prairie": 260, "spawn": 120 } }
     },
     {
       "id": "flower_blue", "name": "Fleur bleue", "category": "plant",
       "description": "Petite fleur bleue des prairies.",
       "sell_price": 3, "max_stack": 10, "color": [72, 133, 235],
-      "plant": { "shape": "flower", "height_min": 0.22, "height_max": 0.44, "accent_color": [250, 230, 46], "seed_salt": 11,
-                 "count": { "prairie": 80, "spawn": 40 } }
+      "plant": { "shape": "flower", "height_min": 1.0, "height_max": 1.4, "accent_color": [250, 230, 46], "seed_salt": 11, "cluster": [3, 6], "cluster_radius": 0.3,
+                 "count": { "prairie": 180, "spawn": 80 } }
     },
     {
       "id": "flower_purple", "name": "Fleur violette", "category": "plant",
       "description": "Fleur rare aux teintes violacées.",
       "sell_price": 3, "max_stack": 10, "color": [158, 56, 199],
-      "plant": { "shape": "flower", "height_min": 0.22, "height_max": 0.44, "accent_color": [250, 217, 31], "seed_salt": 12,
-                 "count": { "prairie": 40, "spawn": 20 } }
+      "plant": { "shape": "flower", "height_min": 1.0, "height_max": 1.4, "accent_color": [250, 217, 31], "seed_salt": 12, "cluster": [3, 6], "cluster_radius": 0.3,
+                 "count": { "prairie": 90, "spawn": 40 } }
     },
     {
       "id": "herb", "name": "Herbe aromatique", "category": "plant",
       "description": "Herbe odorante aux vertus médicinales.",
       "sell_price": 1, "max_stack": 30, "color": [60, 155, 40],
-      "plant": { "shape": "herb", "height_min": 0.22, "height_max": 0.38, "accent_color": [40, 120, 30], "seed_salt": 91,
-                 "count": { "prairie": 25, "spawn": 15 } }
+      "plant": { "shape": "herb", "height_min": 0.45, "height_max": 0.7, "accent_color": [40, 120, 30], "seed_salt": 91, "cluster": [1, 3], "cluster_radius": 0.25,
+                 "count": { "prairie": 60, "spawn": 30 } }
     },
 
     {

@@ -58,6 +58,17 @@ struct FPlantSpawnDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	float CullDistanceMeters = 80.f;
 
+	/** Exemplaires par point d'apparition (touffe) ; récoltés ensemble. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	int32 ClusterMin = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	int32 ClusterMax = 1;
+
+	/** Rayon de la touffe (m). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	float ClusterRadiusMeters = 0.25f;
+
 	/** Sel du générateur : changer la valeur redistribue les positions. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	int32 SeedSalt = 0;
@@ -124,12 +135,21 @@ struct FItemDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	FPlantSpawnDef Plant;
 
-	// ── Assets générés (Meshy / Gemini) — vides tant qu'ils n'existent pas ──
+	// ── Assets générés (Meshy / Gemini) ──
+	// Laissés vides dans le JSON, ils sont déduits des conventions de nommage s'ils existent.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	FSoftObjectPath Mesh;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	FSoftObjectPath Icon;
+
+	/** Variantes de mesh tirées au hasard par exemplaire (prioritaires sur Mesh). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	TArray<FSoftObjectPath> MeshVariants;
+
+	/** Matériau imposé au mesh (ex. M_Foliage pour l'herbe procédurale). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	FSoftObjectPath Material;
 
 	bool IsValid() const { return !Id.IsNone(); }
 	bool IsEquipable() const { return Category == EItemCategory::Tool; }

@@ -41,12 +41,16 @@ private:
 	void StartRun();
 	void StopRun();
 	void Primary();
+	void Use();
+	void StartCrouch();
+	void StopCrouch();
 	void ToggleInventory();
 
 	UFUNCTION(Server, Reliable)
 	void ServerSetRunning(bool bRunning);
 
 	void ApplyRunning(bool bRunning);
+	void UpdateGroundSpeed();
 	void UpdateTarget();
 	void BindAppearance();
 	void ApplyAppearance();
@@ -74,4 +78,5 @@ private:
 	TMap<TPair<FIntPoint, int32>, double> PendingHarvests;
 
 	float SwingTime = 0.f;
+	bool bIsRunning = false;
 };

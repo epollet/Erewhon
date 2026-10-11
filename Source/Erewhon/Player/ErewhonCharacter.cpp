@@ -27,6 +27,7 @@ namespace
 	constexpr double GPendingHarvestSeconds = 1.0;
 	const FVector GHeldFirstPersonOffset(38.f, 24.f, -22.f);
 	const FRotator GHeldFirstPersonRotation(-20.f, 0.f, 10.f);
+	const FVector GHeldThirdPersonOffset(22.f, 28.f, 0.f);
 }
 
 AErewhonCharacter::AErewhonCharacter()
@@ -42,6 +43,8 @@ AErewhonCharacter::AErewhonCharacter()
 	Movement->JumpZVelocity = 450.f;   // ≈ 1 m de saut
 	Movement->AirControl = 0.3f;
 	Movement->bOrientRotationToMovement = false;
+	Movement->NavAgentProps.bCanCrouch = true;
+	Movement->SetCrouchedHalfHeight(55.f);
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(GetCapsuleComponent());
@@ -63,7 +66,7 @@ AErewhonCharacter::AErewhonCharacter()
 	HeldFirstPerson->SetCastShadow(false);
 
 	HeldThirdPerson = MakeHeld(TEXT("HeldThirdPerson"), GetCapsuleComponent());
-	HeldThirdPerson->SetRelativeLocation(FVector(22.f, 28.f, 0.f));
+	HeldThirdPerson->SetRelativeLocation(GHeldThirdPersonOffset);
 	HeldThirdPerson->SetOwnerNoSee(true);
 }
 
@@ -154,13 +157,19 @@ void AErewhonCharacter::ApplyAppearance()
 		}
 		if (UStaticMesh* HandMesh = Cast<UStaticMesh>(Hand->Mesh.TryLoad()))
 		{
+			// Modèle généré : ramené à ~45 cm, la base (le manche) au creux de la main.
+			const FTransform Fit = FitToHeight(HandMesh, 45.f);
+			const FVector Base = Held == HeldFirstPerson.Get() ? GHeldFirstPersonOffset : GHeldThirdPersonOffset;
 			Held->SetStaticMesh(HandMesh);
-			Held->SetRelativeScale3D(FVector::OneVector);
+			Held->SetRelativeLocation(Base + Held->GetRelativeRotation().RotateVector(Fit.GetLocation()));
+			Held->SetRelativeScale3D(Fit.GetScale3D());
+			Held->EmptyOverrideMaterials();
 		}
 		else
 		{
 			// Placeholder : un manche, de la couleur de l'outil.
 			Held->SetStaticMesh(GetShape(EShape::Cube));
+			Held->SetRelativeLocation(Held == HeldFirstPerson.Get() ? GHeldFirstPersonOffset : GHeldThirdPersonOffset);
 			Held->SetRelativeScale3D(FVector(0.04f, 0.04f, 0.45f));
 			Held->SetMaterial(0, MakeColorMaterial(Held, Hand->Color));
 		}
@@ -186,8 +195,11 @@ void AErewhonCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	Input->BindAction(Actions.Run, ETriggerEvent::Started, this, &AErewhonCharacter::StartRun);
 	Input->BindAction(Actions.Run, ETriggerEvent::Completed, this, &AErewhonCharacter::StopRun);
 	Input->BindAction(Actions.Primary, ETriggerEvent::Started, this, &AErewhonCharacter::Primary);
+	Input->BindAction(Actions.Use, ETriggerEvent::Started, this, &AErewhonCharacter::Use);
+	Input->BindAction(Actions.Crouch, ETriggerEvent::Started, this, &AErewhonCharacter::StartCrouch);
+	Input->BindAction(Actions.Crouch, ETriggerEvent::Completed, this, &AErewhonCharacter::StopCrouch);
 	Input->BindAction(Actions.Inventory, ETriggerEvent::Started, this, &AErewhonCharacter::ToggleInventory);
-	Input->BindAction(Actions.CloseMenu, ETriggerEvent::Started, PC, &AErewhonPlayerController::CloseMenu);
+	Input->BindAction(Actions.CloseMenu, ETriggerEvent::Started, PC, &AErewhonPlayerController::HandleEscape);
 }
 
 bool AErewhonCharacter::IsMenuOpen() const
@@ -229,8 +241,26 @@ void AErewhonCharacter::StopRun()
 
 void AErewhonCharacter::ApplyRunning(bool bRunning)
 {
+	bIsRunning = bRunning;
+	UpdateGroundSpeed();
+}
+
+void AErewhonCharacter::UpdateGroundSpeed()
+{
+	// Le terrain freine : hautes herbes, buissons. Calculé à l'identique par le serveur et
+	// par le client propriétaire, à partir des mêmes données déterministes du secteur.
 	const UErewhonSettings& Settings = UErewhonSettings::Get();
-	GetCharacterMovement()->MaxWalkSpeed = (bRunning ? Settings.RunSpeedMetersPerSecond : Settings.WalkSpeedMetersPerSecond) * 100.f;
+	float Factor = 1.f;
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	USectorLayoutSubsystem* Layouts = GetWorld()->GetSubsystem<USectorLayoutSubsystem>();
+	if (State && Layouts)
+	{
+		const FVector Location = GetActorLocation();
+		Factor = Layouts->GetLayout(ErewhonSector::FromWorld(Location), State->GetWorldSeed())->SpeedFactor(FVector2D(Location));
+	}
+	const float Base = bIsRunning ? Settings.RunSpeedMetersPerSecond : Settings.WalkSpeedMetersPerSecond;
+	GetCharacterMovement()->MaxWalkSpeed = Base * Factor * 100.f;
+	GetCharacterMovement()->MaxWalkSpeedCrouched = Settings.WalkSpeedMetersPerSecond * 0.5f * Factor * 100.f;
 }
 
 void AErewhonCharacter::ServerSetRunning_Implementation(bool bRunning)
@@ -243,6 +273,29 @@ void AErewhonCharacter::ToggleInventory()
 	if (AErewhonPlayerController* PC = GetController<AErewhonPlayerController>())
 	{
 		PC->ToggleInventory();
+	}
+}
+
+void AErewhonCharacter::StartCrouch()
+{
+	Crouch();
+}
+
+void AErewhonCharacter::StopCrouch()
+{
+	UnCrouch();
+}
+
+void AErewhonCharacter::Use()
+{
+	AErewhonPlayerController* PC = GetController<AErewhonPlayerController>();
+	if (!PC || PC->IsMenuOpen())
+	{
+		return;
+	}
+	if (IErewhonInteractable* Interactable = Cast<IErewhonInteractable>(Target.Interactable.Get()))
+	{
+		Interactable->Interact(PC);
 	}
 }
 
@@ -279,6 +332,10 @@ void AErewhonCharacter::Primary()
 void AErewhonCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (HasAuthority() || IsLocallyControlled())
+	{
+		UpdateGroundSpeed();
+	}
 	if (!IsLocallyControlled())
 	{
 		return;
@@ -320,7 +377,7 @@ void AErewhonCharacter::UpdateTarget()
 			if (Hit.Distance <= Settings.MerchantReach())
 			{
 				Target.Interactable = HitActor;
-				Target.Hint = FText::Format(LOCTEXT("InteractHint", "[Clic] {0}"), Interactable->GetInteractionLabel());
+				Target.Hint = FText::Format(LOCTEXT("InteractHint", "[E] {0}"), Interactable->GetInteractionLabel());
 				return;
 			}
 		}

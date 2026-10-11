@@ -13,9 +13,15 @@
 #include "Misc/Paths.h"
 #include "UI/SInventoryPanel.h"
 #include "UI/SStorePanel.h"
+#include "UI/SGameMenu.h"
+#include "Core/ErewhonUserSettings.h"
+#include "World/Door.h"
+#include "World/Terrain.h"
+#include "Core/ErewhonGameState.h"
 #include "Core/ErewhonSettings.h"
 #include "GameFramework/Pawn.h"
 #include "TimerManager.h"
+#include "UnrealClient.h"
 #include "World/SectorTypes.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonPlayerController"
@@ -62,6 +68,8 @@ const FErewhonInputActions& AErewhonPlayerController::GetInputActions()
 	Actions.Primary = MakeAction(this, TEXT("IA_Primary"), EInputActionValueType::Boolean);
 	Actions.Inventory = MakeAction(this, TEXT("IA_Inventory"), EInputActionValueType::Boolean);
 	Actions.CloseMenu = MakeAction(this, TEXT("IA_CloseMenu"), EInputActionValueType::Boolean);
+	Actions.Use = MakeAction(this, TEXT("IA_Use"), EInputActionValueType::Boolean);
+	Actions.Crouch = MakeAction(this, TEXT("IA_Crouch"), EInputActionValueType::Boolean);
 
 	// ZQSD (AZERTY) et WASD (QWERTY) coexistent sans conflit : Z/W avancent, Q/A vont à gauche.
 	for (const FKey& Key : { EKeys::Z, EKeys::W, EKeys::Up })
@@ -94,6 +102,8 @@ const FErewhonInputActions& AErewhonPlayerController::GetInputActions()
 	Context->MapKey(Actions.Inventory, EKeys::I);
 	Context->MapKey(Actions.Inventory, EKeys::Tab);
 	Context->MapKey(Actions.CloseMenu, EKeys::Escape);
+	Context->MapKey(Actions.Use, EKeys::E);
+	Context->MapKey(Actions.Crouch, EKeys::LeftControl);
 	return Actions;
 }
 
@@ -111,6 +121,20 @@ void AErewhonPlayerController::BeginPlay()
 	}
 	SetInputMode(FInputModeGameOnly());
 	SetShowMouseCursor(false);
+
+	// Premier lancement sur ce poste : un court test matériel choisit la qualité graphique,
+	// un cran en dessous de sa recommandation — la prairie dense pèse plus que sa mesure.
+	if (UErewhonUserSettings* User = UErewhonUserSettings::Get(); User && User->GetLastCPUBenchmarkResult() < 0.f)
+	{
+		User->RunHardwareBenchmark();
+		User->ApplyHardwareBenchmarkResults();
+		User->SetOverallScalabilityLevel(FMath::Max(0, User->GetOverallScalabilityLevel() - 1));
+		User->ApplySettings(false);
+		User->SaveSettings();
+	}
+#if !UE_BUILD_SHIPPING
+	StartAutoShots();
+#endif
 
 	FString Name = FPlatformProcess::UserName();
 	const int32 PieInstance = GetOutermost()->GetPIEInstanceID();
@@ -146,6 +170,77 @@ FString AErewhonPlayerController::LoadOrCreatePlayerKey() const
 	}
 	return Key;
 }
+
+// ── Captures automatiques (tests visuels sans clavier ni souris) ────────────
+
+#if !UE_BUILD_SHIPPING
+void AErewhonPlayerController::StartAutoShots()
+{
+	// -ErewhonShots=0,180    caps successifs (degrés, 0 = nord)
+	// -ErewhonShotPitch=-8   inclinaison du regard
+	// -ErewhonShotAt=50,40   position (m, monde) avant les captures
+	// -ErewhonShotDelay=35   attente du chargement (s)
+	FString Yaws;
+	if (!FParse::Value(FCommandLine::Get(), TEXT("ErewhonShots="), Yaws, false))
+	{
+		return;
+	}
+	TArray<FString> Parts;
+	Yaws.ParseIntoArray(Parts, TEXT(","));
+	for (const FString& Part : Parts)
+	{
+		ShotYaws.Add(FCString::Atof(*Part));
+	}
+	FParse::Value(FCommandLine::Get(), TEXT("ErewhonShotPitch="), ShotPitch);
+	FString At;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ErewhonShotAt="), At, false))
+	{
+		FString X, Y;
+		if (At.Split(TEXT(","), &X, &Y))
+		{
+			ShotLocation = FVector(FCString::Atof(*X) * 100.f, FCString::Atof(*Y) * 100.f, 0.f);
+			bShotHasLocation = true;
+		}
+	}
+	float Delay = 35.f;
+	FParse::Value(FCommandLine::Get(), TEXT("ErewhonShotDelay="), Delay);
+	GetWorldTimerManager().SetTimer(ShotTimer, this, &AErewhonPlayerController::NextAutoShot, Delay, false);
+}
+
+void AErewhonPlayerController::NextAutoShot()
+{
+	if (ShotIndex >= ShotYaws.Num() * 2)
+	{
+		// La dernière capture s'écrit sur disque à l'image suivante : on laisse un peu de marge.
+		FTimerHandle ExitTimer;
+		GetWorldTimerManager().SetTimer(ExitTimer, FTimerDelegate::CreateLambda([]() { FGenericPlatformMisc::RequestExit(false); }), 3.f, false);
+		return;
+	}
+	const int32 Shot = ShotIndex / 2;
+	if (ShotIndex % 2 == 0)
+	{
+		// Étape 1 : se placer et orienter le regard, puis laisser l'image se stabiliser.
+		if (APawn* MyPawn = GetPawn(); MyPawn && bShotHasLocation)
+		{
+			const AErewhonGameState* State = AErewhonGameState::Get(this);
+			const float Ground = State ? ErewhonTerrain::Height(FVector2D(ShotLocation), State->GetWorldSeed()) : 0.f;
+			MyPawn->TeleportTo(ShotLocation + FVector(0, 0, Ground + 120.f), FRotator(0, ShotYaws[Shot], 0));
+		}
+		SetControlRotation(FRotator(ShotPitch, ShotYaws[Shot], 0));
+	}
+	else
+	{
+		FScreenshotRequest::RequestScreenshot(FString::Printf(TEXT("ErewhonShot_%d"), Shot), true, false);
+		// -ErewhonProfile : détail du temps GPU de cette image, écrit dans le log.
+		if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonProfile")))
+		{
+			ConsoleCommand(TEXT("ProfileGPU"));
+		}
+	}
+	++ShotIndex;
+	GetWorldTimerManager().SetTimer(ShotTimer, this, &AErewhonPlayerController::NextAutoShot, ShotIndex % 2 == 1 ? 3.f : 1.f, false);
+}
+#endif
 
 // ── Menus ────────────────────────────────────────────────────────────────────
 
@@ -207,6 +302,16 @@ void AErewhonPlayerController::ToggleInventory()
 	ShowMenu(SNew(SInventoryPanel).Controller(this), false);
 }
 
+void AErewhonPlayerController::HandleEscape()
+{
+	if (IsMenuOpen())
+	{
+		CloseMenu();
+		return;
+	}
+	ShowMenu(SNew(SGameMenu).Controller(this), false);
+}
+
 void AErewhonPlayerController::OpenStore()
 {
 	ShowMenu(SNew(SStorePanel).Controller(this), true);
@@ -266,6 +371,16 @@ void AErewhonPlayerController::ServerHarvest_Implementation(FIntPoint Sector, in
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
 	{
 		ReportResult(Mode->TryHarvest(this, Sector, PlantIndex));
+	}
+}
+
+void AErewhonPlayerController::ServerUseDoor_Implementation(ADoor* Door)
+{
+	const APawn* MyPawn = GetPawn();
+	// Il faut être à portée de main (avec une marge pour la latence).
+	if (Door && MyPawn && FVector::Dist(MyPawn->GetActorLocation(), Door->GetActorLocation()) < 450.f)
+	{
+		Door->Toggle();
 	}
 }
 

@@ -2,10 +2,13 @@
 
 #include "Core/ErewhonGameState.h"
 #include "Core/ErewhonSettings.h"
+#include "Core/ErewhonUserSettings.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "World/ErewhonVisuals.h"
 #include "World/Sector.h"
+#include "Components/StaticMeshComponent.h"
 #include "World/SectorLayout.h"
 
 namespace
@@ -27,6 +30,21 @@ void ASectorManager::BeginPlay()
 	{
 		HarvestHandle = State->OnPlantHarvestChanged.AddUObject(this, &ASectorManager::OnPlantHarvestChanged);
 	}
+	if (UErewhonUserSettings* User = UErewhonUserSettings::Get())
+	{
+		DetailHandle = User->OnWorldDetailChanged.AddUObject(this, &ASectorManager::RebuildAll);
+	}
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		// Une dalle peinte de 1 000 km, quelques centimètres sous le sol réel : l'horizon
+		// reste une prairie au-delà des secteurs chargés. Sans collision ni ombre.
+		RootComponent = NewObject<USceneComponent>(this, TEXT("Root"));
+		RootComponent->RegisterComponent();
+		FarGround = ErewhonVisuals::AddShape(this, RootComponent, ErewhonVisuals::EShape::Plane, FVector(0, 0, -4.f),
+			FVector(100000000.f, 100000000.f, 1.f), ErewhonVisuals::Palette::Meadow, FRotator::ZeroRotator, false);
+		FarGround->SetMaterial(0, ErewhonVisuals::MakePaintedMaterial(FarGround, TEXT("ground_grass"), ASector::GroundTileSize, ErewhonVisuals::Palette::Meadow));
+		FarGround->SetCastShadow(false);
+	}
 	// Le premier pawn apparaît avant le premier Tick : son sol doit déjà exister.
 	Refresh();
 }
@@ -36,6 +54,10 @@ void ASectorManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (AErewhonGameState* State = AErewhonGameState::Get(this))
 	{
 		State->OnPlantHarvestChanged.Remove(HarvestHandle);
+	}
+	if (UErewhonUserSettings* User = UErewhonUserSettings::Get())
+	{
+		User->OnWorldDetailChanged.Remove(DetailHandle);
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -56,6 +78,8 @@ void ASectorManager::Refresh()
 	}
 	const UErewhonSettings& Settings = UErewhonSettings::Get();
 	const bool bCanRender = GetNetMode() != NM_DedicatedServer;
+	const UErewhonUserSettings* User = UErewhonUserSettings::Get();
+	const int32 ViewDistance = User ? User->ViewDistanceSectors : Settings.SectorRenderDistance;
 
 	// Secteur voulu → avec plantes ? (le rendu l'emporte sur le sol seul)
 	TMap<FIntPoint, bool> Wanted;
@@ -83,7 +107,7 @@ void ASectorManager::Refresh()
 		}
 		const bool bLocal = Controller->IsLocalController() && bCanRender;
 		bHasLocalView |= bLocal;
-		Want(Pawn->GetActorLocation(), bLocal ? Settings.SectorRenderDistance : 1, bLocal);
+		Want(Pawn->GetActorLocation(), bLocal ? ViewDistance : 1, bLocal);
 	}
 	if (!bHasLocalView)
 	{
@@ -106,6 +130,15 @@ void ASectorManager::Refresh()
 	const FVector Focus = LocalController && LocalController->GetPawn()
 		? LocalController->GetPawn()->GetActorLocation()
 		: ErewhonSector::Center(FIntPoint::ZeroValue);
+	if (FarGround)
+	{
+		// Recentrée par pas d'un secteur : la texture, projetée sur le monde, ne glisse pas.
+		const FVector Snap = ErewhonSector::Center(ErewhonSector::FromWorld(Focus));
+		if (!GetActorLocation().Equals(FVector(Snap.X, Snap.Y, 0.f)))
+		{
+			SetActorLocation(FVector(Snap.X, Snap.Y, 0.f));
+		}
+	}
 	TArray<FIntPoint> Pending;
 	for (const auto& Pair : Wanted)
 	{
@@ -161,6 +194,17 @@ void ASectorManager::Refresh()
 		}
 		Loaded.Add(Coord, Sector);
 	}
+}
+
+void ASectorManager::RebuildAll()
+{
+	// Réglages graphiques changés : on repart de zéro, les secteurs se reconstruisent au fil des images.
+	for (const auto& Pair : Loaded)
+	{
+		Pair.Value->Destroy();
+	}
+	Loaded.Reset();
+	Refresh();
 }
 
 void ASectorManager::OnPlantHarvestChanged(const FIntPoint& Sector, int32 PlantIndex, bool bHarvested)

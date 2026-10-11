@@ -25,10 +25,16 @@ public:
 
 private:
 	void Refresh();
+	void RebuildAll();
 	void OnPlantHarvestChanged(const FIntPoint& Sector, int32 PlantIndex, bool bHarvested);
 
 	UPROPERTY(Transient)
 	TMap<FIntPoint, TObjectPtr<ASector>> Loaded;
 
+	/** Prairie lointaine jusqu'à l'horizon, sous le sol des secteurs chargés. */
+	UPROPERTY(Transient)
+	TObjectPtr<class UStaticMeshComponent> FarGround;
+
 	FDelegateHandle HarvestHandle;
+	FDelegateHandle DetailHandle;
 };

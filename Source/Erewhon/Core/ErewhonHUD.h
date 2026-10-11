@@ -14,5 +14,7 @@ public:
 	virtual void DrawHUD() override;
 
 private:
+	float SmoothedFps = 0.f;
+
 	void DrawShadowedText(const FString& Text, float X, float Y, const FLinearColor& Color, float Scale = 1.f, bool bCentered = false);
 };

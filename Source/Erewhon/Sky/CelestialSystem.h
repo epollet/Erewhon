@@ -58,6 +58,7 @@ private:
 	void UpdateBody(UDirectionalLightComponent* Light, const FOrbit& Orbit, float MaxIntensity, double WorldClock) const;
 	void UpdateClouds(double WorldClock);
 	void SetupCloudMaterial();
+	void ApplyUserSettings();
 
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> Root;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USkyAtmosphereComponent> Atmosphere;

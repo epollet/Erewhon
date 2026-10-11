@@ -15,6 +15,17 @@ struct FPlantInstance
 	FVector Location = FVector::ZeroVector;
 	float Height = 0.f;   // m
 	float Yaw = 0.f;      // degrés
+	uint8 Variant = 0;    // mesh parmi les variantes de l'objet
+};
+
+/** Un buisson : il ralentit le joueur, donc le serveur le connaît aussi. */
+struct FBushInstance
+{
+	FVector Location = FVector::ZeroVector;
+	float Height = 0.f;   // m
+	float Radius = 0.f;   // cm, emprise au sol
+	float Yaw = 0.f;
+	int32 Kind = 0;       // index dans UErewhonSettings::DecorPlants
 };
 
 /**
@@ -25,14 +36,34 @@ struct FPlantInstance
 struct EREWHON_API FSectorLayout
 {
 	FIntPoint Coord = FIntPoint::ZeroValue;
+	int32 WorldSeed = 0;
 	ESectorType Type = ESectorType::Undefined;
 	TArray<FPlantInstance> Plants;
 
-	/** Rectangles monde sans végétation (chemins, parcelle de la cabane). */
-	TArray<FBox2D> Exclusions;
+	TArray<FBushInstance> Bushes;
 
-	/** Chemins de terre à dessiner, sous-ensemble des exclusions. */
+	/** Chemins de terre (cœur du chemin, avant le fondu des bords). */
 	TArray<FBox2D> Paths;
+
+	/** Place de terre ronde autour de la cabane (rayon 0 : pas de place). */
+	FVector2D PlazaCenter = FVector2D::ZeroVector;
+	float PlazaRadius = 0.f;
+
+	/**
+	 * Part de terre en un point monde : 1 sur un chemin, 0 dans la prairie, fondu
+	 * irrégulier sur les bords. Déterministe : sert au masque du sol (client) comme
+	 * à l'exclusion des plantes (serveur et client).
+	 */
+	float DirtAmount(const FVector2D& World) const;
+
+	/** Rien ne pousse ici : terre au-delà du seuil. */
+	bool IsBare(const FVector2D& World, float DirtThreshold = 0.05f) const;
+
+	/** Le point est dans un buisson. */
+	bool IsInBush(const FVector2D& World) const;
+
+	/** Multiplicateur de vitesse du joueur à cet endroit (terre, herbe, buisson). */
+	float SpeedFactor(const FVector2D& World) const;
 
 	/** Index des plantes par cellule de grille, pour le ciblage. */
 	TArray<TArray<int32>> Cells;
@@ -77,6 +108,7 @@ public:
 
 private:
 	TSharedRef<FSectorLayout> Build(const FIntPoint& Sector, int32 WorldSeed) const;
+	void BuildBushes(FSectorLayout& Layout, int32 WorldSeed) const;
 
 	TMap<FIntPoint, TSharedRef<FSectorLayout>> Cache;
 	TArray<FIntPoint> CacheOrder;

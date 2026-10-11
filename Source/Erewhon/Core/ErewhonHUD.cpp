@@ -3,6 +3,7 @@
 #include "Core/ErewhonGameState.h"
 #include "Core/ErewhonPlayerController.h"
 #include "Core/ErewhonPlayerState.h"
+#include "Core/ErewhonUserSettings.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
@@ -97,6 +98,22 @@ void AErewhonHUD::DrawHUD()
 		const FString Line = FString::Printf(TEXT("Soleil %s   Usha %s"),
 			*ACelestialSystem::ClockString(Sky->GetSunOrbit(), Clock), *ACelestialSystem::ClockString(Sky->GetUshaOrbit(), Clock));
 		DrawShadowedText(Line, 20.f, Y + 24.f, GTextColor, 0.9f);
+	}
+
+	// Images par seconde, lissées, en haut à droite.
+	const UErewhonUserSettings* User = UErewhonUserSettings::Get();
+	const float Delta = GetWorld()->GetDeltaSeconds();
+	if (Delta > 0.f)
+	{
+		SmoothedFps = SmoothedFps <= 0.f ? 1.f / Delta : FMath::Lerp(SmoothedFps, 1.f / Delta, 0.05f);
+	}
+	if (User && User->bShowFps)
+	{
+		const FString Fps = FString::Printf(TEXT("%d i/s"), FMath::RoundToInt32(SmoothedFps));
+		float Width = 0.f, Height = 0.f;
+		GetTextSize(Fps, Width, Height, GEngine->GetMediumFont(), 0.9f);
+		const FLinearColor FpsColor = SmoothedFps >= 50.f ? GTextColor : SmoothedFps >= 30.f ? GCoinColor : GWarnColor;
+		DrawShadowedText(Fps, Canvas->ClipX - Width - 20.f, 18.f, FpsColor, 0.9f);
 	}
 
 	// Messages temporaires, au-dessus du bas de l'écran.

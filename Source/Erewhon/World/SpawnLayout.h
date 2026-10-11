@@ -12,16 +12,24 @@ namespace ErewhonSpawn
 	/** Largeur des chemins de terre. */
 	constexpr float PathWidth = 500.f;
 
-	/** Demi-côté de la parcelle dégagée autour de la cabane. */
-	constexpr float PlotHalfSize = 1100.f;
-
 	/** Cabane : demi-longueur (axe X, nord-sud) et demi-largeur (axe Y). */
 	constexpr float CabinHalfLength = 450.f;
 	constexpr float CabinHalfWidth = 350.f;
 	constexpr float CabinWallHeight = 300.f;
+	constexpr float CabinWallThickness = 20.f;
 
-	/** Chemins (à dessiner) et zones exclues de la végétation, en coordonnées monde. */
-	EREWHON_API void BuildExclusions(const FIntPoint& Sector, TArray<FBox2D>& OutPaths, TArray<FBox2D>& OutExclusions);
+	/** Plancher surélevé de la cabane. */
+	constexpr float CabinFloorTop = 45.f;
+
+	/** Porte, au milieu du mur sud (−X). */
+	constexpr float DoorHalfWidth = 70.f;
+	constexpr float DoorHeight = 220.f;
+
+	/** Position des gonds de la porte (bord −Y de l'ouverture, au ras du plancher). */
+	EREWHON_API FVector DoorHingeLocation();
+
+	/** Chemins (cœur, à fondre dans l'herbe) en coordonnées monde. */
+	EREWHON_API void BuildPaths(const FIntPoint& Sector, TArray<FBox2D>& OutPaths);
 
 	/** Point d'apparition des joueurs : sur le chemin sud, face à la porte. */
 	EREWHON_API FTransform PlayerSpawnTransform();

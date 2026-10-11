@@ -5,7 +5,7 @@
 
 namespace ErewhonSpawn
 {
-	void BuildExclusions(const FIntPoint& Sector, TArray<FBox2D>& OutPaths, TArray<FBox2D>& OutExclusions)
+	void BuildPaths(const FIntPoint& Sector, TArray<FBox2D>& OutPaths)
 	{
 		const float Size = UErewhonSettings::Get().SectorSize();
 		const FVector2D Origin(ErewhonSector::Origin(Sector));
@@ -15,9 +15,11 @@ namespace ErewhonSpawn
 		// Bras nord-sud et est-ouest, d'un bord à l'autre du secteur.
 		OutPaths.Add(FBox2D(FVector2D(Origin.X, Center.Y - HalfPath), FVector2D(Origin.X + Size, Center.Y + HalfPath)));
 		OutPaths.Add(FBox2D(FVector2D(Center.X - HalfPath, Origin.Y), FVector2D(Center.X + HalfPath, Origin.Y + Size)));
+	}
 
-		OutExclusions.Append(OutPaths);
-		OutExclusions.Add(FBox2D(Center - FVector2D(PlotHalfSize), Center + FVector2D(PlotHalfSize)));
+	FVector DoorHingeLocation()
+	{
+		return ErewhonSector::Center(FIntPoint::ZeroValue) + FVector(-CabinHalfLength + CabinWallThickness * 0.5f, -DoorHalfWidth, CabinFloorTop);
 	}
 
 	FTransform PlayerSpawnTransform()

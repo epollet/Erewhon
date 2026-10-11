@@ -11,6 +11,8 @@
 #include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Sky/ErewhonWind.h"
+#include "World/ErewhonMaterials.h"
+#include "Core/ErewhonUserSettings.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogErewhonSky, Log, All);
 
@@ -60,9 +62,11 @@ ACelestialSystem::ACelestialSystem()
 	Atmosphere = CreateDefaultSubobject<USkyAtmosphereComponent>(TEXT("Atmosphere"));
 	Atmosphere->SetupAttachment(Root);
 	// Ciel un peu plus dense et bleu-vert : profondeur aérienne marquée sur l'horizon.
-	Atmosphere->SetRayleighScatteringScale(0.04f);
-	Atmosphere->SetMieScatteringScale(0.006f);
+	Atmosphere->SetRayleighScatteringScale(0.045f);
+	Atmosphere->SetMieScatteringScale(0.003f);
 	Atmosphere->SetAerialPespectiveViewDistanceScale(2.f);
+	// Sol de la planète vu au-delà de l'horizon : vert prairie plutôt que gris sombre.
+	Atmosphere->SetGroundAlbedo(FColor(70, 110, 50));
 
 	const auto MakeLight = [this](const TCHAR* Name, const FLinearColor& Color, float SourceAngle, int32 AtmosphereIndex)
 	{
@@ -80,6 +84,8 @@ ACelestialSystem::ACelestialSystem()
 	Usha = MakeLight(TEXT("Usha"), FLinearColor::FromSRGBColor(FColor(255, 160, 110)), 4.5f, 1);
 	Moon = MakeLight(TEXT("Moon"), FLinearColor::FromSRGBColor(FColor(190, 210, 255)), 1.5f, -1);
 	Moon->SetCastShadows(false);
+	// Une seule ombre portée, celle du Soleil : la seconde carte d'ombres d'Usha coûte cher.
+	Usha->SetCastShadows(false);
 	// Une seule lumière sert à la brume et aux translucides : le Soleil d'abord.
 	Sun->ForwardShadingPriority = 2;
 	Usha->ForwardShadingPriority = 1;
@@ -95,9 +101,10 @@ ACelestialSystem::ACelestialSystem()
 
 	Fog = CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("Fog"));
 	Fog->SetupAttachment(Root);
-	Fog->SetFogDensity(0.006f);
+	// Brume légère et lointaine : elle adoucit la limite d'affichage de l'herbe.
+	Fog->SetFogDensity(0.007f);
 	Fog->SetFogHeightFalloff(0.15f);
-	Fog->SetStartDistance(3000.f);
+	Fog->SetStartDistance(5000.f);
 
 	Clouds = CreateDefaultSubobject<UVolumetricCloudComponent>(TEXT("Clouds"));
 	Clouds->SetupAttachment(Root);
@@ -108,7 +115,7 @@ ACelestialSystem::ACelestialSystem()
 	FPostProcessSettings& PP = Grading->Settings;
 	// Étalonnage pastoral : saturation un peu poussée, contraste adouci, léger bloom.
 	PP.bOverride_ColorSaturation = true;
-	PP.ColorSaturation = FVector4(1.08f, 1.08f, 1.08f, 1.f);
+	PP.ColorSaturation = FVector4(1.12f, 1.12f, 1.12f, 1.f);
 	PP.bOverride_ColorContrast = true;
 	PP.ColorContrast = FVector4(0.96f, 0.96f, 0.96f, 1.f);
 	PP.bOverride_BloomIntensity = true;
@@ -140,6 +147,23 @@ void ACelestialSystem::BeginPlay()
 {
 	Super::BeginPlay();
 	SetupCloudMaterial();
+	ApplyUserSettings();
+	if (UErewhonUserSettings* User = UErewhonUserSettings::Get())
+	{
+		User->OnWorldDetailChanged.AddUObject(this, &ACelestialSystem::ApplyUserSettings);
+	}
+}
+
+void ACelestialSystem::ApplyUserSettings()
+{
+	// Les nuages volumétriques sont l'un des postes les plus lourds : on règle leur échantillonnage.
+	const UErewhonUserSettings* User = UErewhonUserSettings::Get();
+	const int32 Quality = User ? User->CloudQuality : 1;
+	const float Scale = Quality == 0 ? 0.25f : Quality == 1 ? 0.5f : 1.f;
+	Clouds->SetViewSampleCountScale(Scale);
+	Clouds->SetReflectionViewSampleCountScale(Scale);
+	Clouds->SetShadowViewSampleCountScale(Scale);
+	Clouds->SetShadowReflectionViewSampleCountScale(Scale);
 }
 
 void ACelestialSystem::SetupCloudMaterial()
@@ -214,18 +238,20 @@ void ACelestialSystem::UpdateBody(UDirectionalLightComponent* Light, const FOrbi
 
 void ACelestialSystem::UpdateClouds(double WorldClock)
 {
-	if (!CloudMaterial)
-	{
-		return;
-	}
 	const UErewhonSettings& Settings = UErewhonSettings::Get();
-	if (!CloudCoverageParam.IsNone())
+	if (UErewhonMaterials* Materials = GetWorld()->GetSubsystem<UErewhonMaterials>())
+	{
+		// L'herbe ondule avec le même vent que les nuages : plus fort, plus vite.
+		const float Strength = FMath::Clamp(static_cast<float>(ErewhonWind::Velocity(WorldClock).Size() / (ErewhonWind::BaseSpeed + ErewhonWind::SpeedAmplitude)), 0.f, 1.f);
+		Materials->SetWind(FMath::Lerp(0.15f, 0.6f, Strength), FMath::Lerp(0.35f, 1.1f, Strength));
+	}
+	if (CloudMaterial && !CloudCoverageParam.IsNone())
 	{
 		// Le ciel se couvre et se dégage sur CloudCoveragePeriodSeconds, autour du réglage du matériau.
 		const float Wave = FMath::Sin(WorldClock * UE_DOUBLE_TWO_PI / Settings.CloudCoveragePeriodSeconds);
 		CloudMaterial->SetScalarParameterValue(CloudCoverageParam, CloudCoverageDefault * (1.f + CloudCoverageSwing * Wave));
 	}
-	if (!CloudWindParam.IsNone())
+	if (CloudMaterial && !CloudWindParam.IsNone())
 	{
 		const FVector2D Wind = ErewhonWind::Velocity(WorldClock);
 		CloudMaterial->SetVectorParameterValue(CloudWindParam, FLinearColor(Wind.X, Wind.Y, 0.f, 0.1f));

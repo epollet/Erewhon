@@ -28,10 +28,15 @@ public:
 private:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UCapsuleComponent> Capsule;
+
+	/** Rotation du modèle généré pour qu'il regarde dans l'axe de l'acteur. */
+	UPROPERTY(EditAnywhere)
+	float MerchantMeshYaw = -90.f;
 };
 
 /**
- * Cabane du secteur 0:0, construite en primitives en attendant le modèle Meshy.
+ * Cabane du secteur 0:0 : structure procédurale (pour garder un intérieur où se tient
+ * le marchand), habillée des textures peintes générées, plus quelques accessoires Meshy.
  * Acteur local (non répliqué) : chaque machine la construit à l'identique.
  */
 UCLASS()
@@ -46,10 +51,15 @@ public:
 
 private:
 	void BuildCabin();
+	void AddFitted(class UStaticMesh* Mesh, const FTransform& Fit, const FVector& Location, float Yaw, bool bCollision);
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Root;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UPointLightComponent> Lamp;
+
+	/** Rotation du comptoir généré pour que sa façade regarde la porte. */
+	UPROPERTY(EditAnywhere)
+	float CounterMeshYaw = 0.f;
 };

@@ -14,6 +14,8 @@
 #include "Player/ErewhonCharacter.h"
 #include "TimerManager.h"
 #include "World/SectorLayout.h"
+#include "World/Door.h"
+#include "World/Terrain.h"
 #include "World/SpawnLayout.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonGameMode"
@@ -70,6 +72,11 @@ void AErewhonGameMode::InitGameState()
 void AErewhonGameMode::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// La porte de la cabane est un acteur répliqué : son état est partagé par tous.
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	GetWorld()->SpawnActor<ADoor>(ErewhonSpawn::DoorHingeLocation(), FRotator::ZeroRotator, Params);
 	GetWorldTimerManager().SetTimer(AutosaveTimer, this, &AErewhonGameMode::SaveWorld,
 		UErewhonSettings::Get().AutosaveIntervalSeconds, true);
 }
@@ -184,7 +191,10 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 		Inventory->RestoreSlots(Saved->Slots);
 		if (APawn* Pawn = Controller->GetPawn(); Pawn && Saved->bHasLocation)
 		{
-			Pawn->TeleportTo(Saved->Location + FVector(0, 0, 20), FRotator(0, Saved->Yaw, 0));
+			// Le relief a pu changer depuis la sauvegarde : on repose le joueur sur le sol.
+			FVector Location = Saved->Location;
+			Location.Z = ErewhonTerrain::Height(FVector2D(Location), WorldSave->WorldSeed) + 120.f;
+			Pawn->TeleportTo(Location, FRotator(0, Saved->Yaw, 0));
 			Controller->SetControlRotation(FRotator(0, Saved->Yaw, 0));
 		}
 		UE_LOG(LogErewhonGame, Log, TEXT("Retour de %s (%s)"), *PlayerState->GetPlayerName(), *Key);
