@@ -4,6 +4,7 @@
 #include "GameFramework/GameModeBase.h"
 #include "World/SectorTypes.h"
 #include "Inventory/InventoryComponent.h"
+#include "World/Storage.h"
 #include "ErewhonGameMode.generated.h"
 
 class AErewhonPlayerController;
@@ -39,10 +40,9 @@ public:
 	// Apothicairerie
 	FText TryBuyApothecary(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 	FText TryFeedFire(AErewhonPlayerController* Controller, class AApothecary* House);
-	FText TryStartCraft(AErewhonPlayerController* Controller, class AApothecary* House, FName Output, int32 Count);
-	/** Entre ses poches et une étagère (Shelf) : les piles de l'étagère sont celles de ses étages. */
-	FText TryMoveShelfItem(AErewhonPlayerController* Controller, class AApothecary* House, int32 Shelf, bool bFromShelf, int32 From, bool bToShelf, int32 To);
-	FText TryStashInShelves(AErewhonPlayerController* Controller, class AApothecary* House, int32 Shelf);
+	/** Au mortier ou au chaudron (meubles posés) : Count exemplaires, un à la fois. */
+	FText TryStartCraft(AErewhonPlayerController* Controller, class AStorageActor* Station, FName Output, int32 Count);
+	FText TryBuyStoreroom(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 
 	// Sac à dos
 	FText TryDropBackpack(AErewhonPlayerController* Controller);
@@ -83,11 +83,19 @@ private:
 	void ReleaseHeld(APawn* Pawn);
 	TSet<EShopKind> DoorsSpawned;
 
-	class AApothecary* SpawnApothecary(const FIntPoint& Sector, double FireUntil, const TArray<FInventorySlot>& Shelves = TArray<FInventorySlot>());
+	class AApothecary* SpawnApothecary(const FIntPoint& Sector, double FireUntil);
+	/**
+	 * Le mobilier d'une apothicairerie d'avant le mobilier à acheter (ou des tests) : une table et son mortier,
+	 * le chaudron à la crémaillère, trois étagères garnies de Shelves (douze piles, quatre par étagère).
+	 */
+	void SpawnFurnishing(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName, const TArray<FInventorySlot>& Shelves);
+	class AStorageActor* SpawnStorage(EStorageKind Kind, const FTransform& At, const FString& OwnerKey, const FString& OwnerName);
 	/** Un exemplaire de la préparation en cours est prêt : on l'échange contre ses ingrédients. */
 	void StepCraft(AErewhonPlayerController* Controller);
-	/** Le joueur est-il chez lui, assez près de sa maison pour s'en servir ? */
+	/** Le joueur est-il chez lui, assez près de sa maison (pour le feu) ? */
 	FText CheckAtHouse(AErewhonPlayerController* Controller, const class AApothecary* House) const;
+	/** Le joueur est-il à côté de son mortier ou de son chaudron ? */
+	FText CheckAtStation(AErewhonPlayerController* Controller, const class AStorageActor* Station) const;
 
 	UPROPERTY()
 	TMap<FIntPoint, TObjectPtr<class AApothecary>> Apothecaries;

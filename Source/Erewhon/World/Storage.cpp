@@ -9,6 +9,17 @@
 #include "Items/ItemDatabase.h"
 #include "Net/UnrealNetwork.h"
 #include "World/ErewhonVisuals.h"
+#include "World/Apothecary.h"
+#include "Sound/SoundWave.h"
+#include "World/ErewhonSound.h"
+#include "Components/AudioComponent.h"
+#include "EngineUtils.h"
+#include "Engine/Texture.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "ProceduralMeshComponent.h"
+#include "Player/ErewhonCharacter.h"
+#include "Core/ErewhonGameState.h"
+#include "World/SectorTypes.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonStorage"
 
@@ -48,12 +59,51 @@ namespace ErewhonPlaceables
 		{
 			return EStorageKind::Barrel;
 		}
+		if (ItemId == TEXT("shelf"))
+		{
+			return EStorageKind::Shelf;
+		}
+		if (ItemId == TEXT("table"))
+		{
+			return EStorageKind::Table;
+		}
+		if (ItemId == TEXT("mortar"))
+		{
+			return EStorageKind::Mortar;
+		}
+		if (ItemId == TEXT("cauldron"))
+		{
+			return EStorageKind::Cauldron;
+		}
+		if (ItemId == TEXT("drying_rack"))
+		{
+			return EStorageKind::DryingRack;
+		}
+		if (ItemId == TEXT("workbench"))
+		{
+			return EStorageKind::Workbench;
+		}
+		if (ItemId == TEXT("potpourri"))
+		{
+			return EStorageKind::Potpourri;
+		}
 		return {};
 	}
 
 	FName ItemForStorage(EStorageKind Kind)
 	{
-		return Kind == EStorageKind::Barrel ? FName(TEXT("barrel")) : FName(TEXT("crate"));
+		switch (Kind)
+		{
+		case EStorageKind::Barrel:   return TEXT("barrel");
+		case EStorageKind::Shelf:    return TEXT("shelf");
+		case EStorageKind::Table:    return TEXT("table");
+		case EStorageKind::Mortar:   return TEXT("mortar");
+		case EStorageKind::Cauldron: return TEXT("cauldron");
+		case EStorageKind::DryingRack: return TEXT("drying_rack");
+		case EStorageKind::Workbench:  return TEXT("workbench");
+		case EStorageKind::Potpourri:  return TEXT("potpourri");
+		default:                     return TEXT("crate");
+		}
 	}
 
 	bool IsCart(FName ItemId)
@@ -63,26 +113,110 @@ namespace ErewhonPlaceables
 
 	int32 Capacity(EStorageKind Kind)
 	{
-		// Le tonneau contient deux cagettes et demie.
-		return Kind == EStorageKind::Barrel ? 30 : 12;
+		// Le tonneau contient deux cagettes et demie ; l'étagère, une pile par étage.
+		switch (Kind)
+		{
+		case EStorageKind::Crate:  return 12;
+		case EStorageKind::Barrel: return 30;
+		case EStorageKind::Shelf:  return ErewhonApothecary::ShelfRows;
+		case EStorageKind::DryingRack: return 6;
+		default:                   return 0;
+		}
+	}
+
+	bool IsFurniture(EStorageKind Kind)
+	{
+		return Kind != EStorageKind::Crate && Kind != EStorageKind::Barrel;
+	}
+
+	bool IsHeavy(EStorageKind Kind)
+	{
+		return Kind == EStorageKind::Barrel || Kind == EStorageKind::Shelf || Kind == EStorageKind::Table || Kind == EStorageKind::Cauldron
+			|| Kind == EStorageKind::DryingRack || Kind == EStorageKind::Workbench;
 	}
 
 	float Height(EStorageKind Kind)
 	{
-		return Kind == EStorageKind::Barrel ? 95.f : 36.f;
+		switch (Kind)
+		{
+		case EStorageKind::Barrel:   return 95.f;
+		case EStorageKind::Shelf:    return ErewhonApothecary::ShelfHeight;
+		case EStorageKind::Table:    return 82.f;
+		case EStorageKind::Mortar:   return 20.f;
+		case EStorageKind::Cauldron: return 48.f;
+		case EStorageKind::DryingRack: return 170.f;
+		case EStorageKind::Workbench:  return 120.f;
+		case EStorageKind::Potpourri:  return 14.f;
+		default:                     return 36.f;
+		}
 	}
 
 	FText KindName(EStorageKind Kind)
 	{
-		return Kind == EStorageKind::Barrel ? LOCTEXT("Barrel", "Tonneau") : LOCTEXT("Crate", "Cagette");
+		switch (Kind)
+		{
+		case EStorageKind::Barrel:   return LOCTEXT("Barrel", "Tonneau");
+		case EStorageKind::Shelf:    return LOCTEXT("Shelf", "Étagère");
+		case EStorageKind::Table:    return LOCTEXT("Table", "Table");
+		case EStorageKind::Mortar:   return LOCTEXT("Mortar", "Mortier");
+		case EStorageKind::Cauldron: return LOCTEXT("Cauldron", "Chaudron");
+		case EStorageKind::DryingRack: return LOCTEXT("DryingRack", "Séchoir");
+		case EStorageKind::Workbench:  return LOCTEXT("Workbench", "Atelier");
+		case EStorageKind::Potpourri:  return LOCTEXT("Potpourri", "Pot-pourri");
+		default:                     return LOCTEXT("Crate", "Cagette");
+		}
+	}
+
+	bool CanPlaceAt(const UObject* WorldContext, const FString& PlayerKey, bool bCart, EStorageKind Kind, uint8 Type, const FVector& Location)
+	{
+		if (bCart)
+		{
+			return true;
+		}
+		if (Type == 2)
+		{
+			return !IsFurniture(Kind);
+		}
+		const AErewhonGameState* State = AErewhonGameState::Get(WorldContext);
+		const FString* Owner = State ? State->FindSectorOwnerKey(ErewhonSector::FromWorld(Location)) : nullptr;
+		return Owner && !PlayerKey.IsEmpty() && *Owner == PlayerKey;
+	}
+
+	TOptional<FTransform> HookFor(const UObject* WorldContext, EStorageKind Kind, const FVector& Location)
+	{
+		if (Kind != EStorageKind::Cauldron)
+		{
+			return {};
+		}
+		const TOptional<FTransform> Hook = ErewhonApothecary::HookTransform(WorldContext, ErewhonSector::FromWorld(Location));
+		if (!Hook.IsSet() || FVector::Dist2D(Hook->GetLocation(), Location) > 170.f)
+		{
+			return {};
+		}
+		return Hook;
 	}
 
 	UStaticMesh* StorageMesh(EStorageKind Kind, FTransform& OutFit)
 	{
-		// La cagette est construite en lattes (le modèle généré n'était qu'une façade plate).
-		if (Kind == EStorageKind::Crate)
+		// La cagette, l'étagère et la table sont construites en planches.
+		if (Kind == EStorageKind::Crate || Kind == EStorageKind::Shelf || Kind == EStorageKind::Table)
 		{
 			return nullptr;
+		}
+		const TCHAR* ModelName = Kind == EStorageKind::Mortar ? TEXT("SM_mortar") : Kind == EStorageKind::Cauldron ? TEXT("SM_cauldron")
+			: Kind == EStorageKind::DryingRack ? TEXT("SM_drying_rack") : Kind == EStorageKind::Workbench ? TEXT("SM_workbench")
+			: Kind == EStorageKind::Potpourri ? TEXT("SM_potpourri") : nullptr;
+		if (ModelName)
+		{
+			UStaticMesh* Model = LoadGenerated<UStaticMesh>(TEXT("Meshes"), ModelName);
+			if (Model)
+			{
+				// Le séchoir et l'atelier : largeur imposée, façade sur X une fois tournés (voir BeginPlay).
+				OutFit = Kind == EStorageKind::DryingRack ? FitToBox(Model, 150.f, 60.f, Height(Kind))
+					: Kind == EStorageKind::Workbench ? FitToBox(Model, 160.f, 70.f, Height(Kind))
+					: Kind == EStorageKind::Potpourri ? FitToLength(Model, 28.f, Height(Kind)) : FitToHeight(Model, Height(Kind));
+			}
+			return Model;
 		}
 		UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_barrel"));
 		if (Mesh)
@@ -113,6 +247,8 @@ namespace ErewhonPlaceables
 
 AStorageActor::AStorageActor()
 {
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = 0.f;
 	bReplicates = true;
 	SetReplicatingMovement(true);   // les attaches (mains, pile, charrette) suivent sur les clients
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
@@ -131,6 +267,8 @@ void AStorageActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME(AStorageActor, CartSlot);
 	DOREPLIFETIME(AStorageActor, Below);
 	DOREPLIFETIME(AStorageActor, Above);
+	DOREPLIFETIME(AStorageActor, SlotTimes);
+	DOREPLIFETIME(AStorageActor, ExpiresAt);
 }
 
 void AStorageActor::Setup(EStorageKind InKind, const FString& InOwnerKey, const FString& InOwnerName)
@@ -139,6 +277,7 @@ void AStorageActor::Setup(EStorageKind InKind, const FString& InOwnerKey, const 
 	OwnerKey = InOwnerKey;
 	OwnerName = InOwnerName;
 	Slots.SetNum(ErewhonPlaceables::Capacity(Kind));
+	SlotTimes.SetNum(Slots.Num());
 }
 
 void AStorageActor::BeginPlay()
@@ -154,12 +293,42 @@ void AStorageActor::BeginPlay()
 		Body->RegisterComponent();
 		AddInstanceComponent(Body);
 	}
+	else if (Kind == EStorageKind::Shelf || Kind == EStorageKind::Table)
+	{
+		// Le meuble en planches, et une boîte invisible pour sa collision (ciblage, pose).
+		const FVector Size = Kind == EStorageKind::Shelf
+			? FVector(ErewhonApothecary::ShelfDepth, ErewhonApothecary::ShelfWidth, ErewhonApothecary::ShelfHeight)
+			: FVector(84.f, 190.f, 82.f);
+		if (Kind == EStorageKind::Shelf)
+		{
+			DisplayFrame = NewObject<USceneComponent>(this);
+			DisplayFrame->SetupAttachment(Root);
+			DisplayFrame->RegisterComponent();
+			AddInstanceComponent(DisplayFrame);
+			ErewhonApothecary::BuildShelfFrame(this, DisplayFrame);
+		}
+		else
+		{
+			UMaterialInterface* Wood = MakePaintedMaterial(this, TEXT("wood_planks"), 120.f, Palette::WoodLight);
+			AddShape(this, Root, EShape::Cube, FVector(0, 0, 78.f), FVector(84.f, 190.f, 8.f), Palette::WoodLight, FRotator::ZeroRotator, false)->SetMaterial(0, Wood);
+			for (const float SX : { -1.f, 1.f })
+			{
+				for (const float SY : { -1.f, 1.f })
+				{
+					AddShape(this, Root, EShape::Cube, FVector(SX * 34.f, SY * 85.f, 37.f), FVector(8.f, 8.f, 74.f), Palette::WoodDark, FRotator::ZeroRotator, false);
+				}
+			}
+		}
+		UStaticMeshComponent* Hull = AddShape(this, Root, EShape::Cube, FVector(0, 0, Size.Z * 0.5f), Size, Palette::WoodLight, FRotator::ZeroRotator, true);
+		Hull->SetHiddenInGame(true);
+		Body = Hull;
+	}
 	else if (Kind == EStorageKind::Barrel)
 	{
 		Body = AddShape(this, Root, EShape::Cylinder, FVector(0, 0, 47.5f), FVector(60, 60, 95), Palette::WoodLight);
 		Body->SetMaterial(0, MakePaintedMaterial(Body, TEXT("wood_planks"), 80.f, Palette::WoodLight));
 	}
-	else
+	else if (Kind == EStorageKind::Crate)
 	{
 		// Cagette ouverte : un fond, trois lattes par côté avec des jours entre elles, des montants
 		// aux coins et une poignée découpée sur les petits côtés. 60 × 40 × 36 cm.
@@ -201,7 +370,116 @@ void AStorageActor::BeginPlay()
 		Hull->SetHiddenInGame(true);
 		Body = Hull;
 	}
+	if (Kind == EStorageKind::DryingRack && !DisplayFrame)
+	{
+		DisplayFrame = NewObject<USceneComponent>(this);
+		DisplayFrame->SetupAttachment(Root);
+		DisplayFrame->RegisterComponent();
+		AddInstanceComponent(DisplayFrame);
+		if (!Body)
+		{
+			// Sans modèle : deux montants et trois barres.
+			for (const float SY : { -1.f, 1.f })
+			{
+				AddShape(this, Root, EShape::Cube, FVector(0.f, SY * 70.f, 85.f), FVector(8.f, 8.f, 170.f), Palette::WoodDark, FRotator::ZeroRotator, false);
+			}
+			for (int32 Bar = 0; Bar < 3; ++Bar)
+			{
+				AddShape(this, Root, EShape::Cylinder, FVector(0.f, 0.f, 170.f * (0.9f - 0.2f * Bar)), FVector(4.f, 4.f, 140.f), Palette::WoodLight, FRotator(0.f, 0.f, 90.f), false);
+			}
+		}
+	}
+	if (!Body && (Kind == EStorageKind::DryingRack || Kind == EStorageKind::Workbench || Kind == EStorageKind::Potpourri))
+	{
+		// Sans modèle généré : une boîte (cible, collision), visible pour l'atelier et le pot-pourri.
+		const FVector Size = Kind == EStorageKind::DryingRack ? FVector(50.f, 150.f, 170.f) : Kind == EStorageKind::Workbench ? FVector(70.f, 160.f, 120.f) : FVector(28.f, 28.f, 14.f);
+		Body = AddShape(this, Root, EShape::Cube, FVector(0, 0, Size.Z * 0.5f), Size, Palette::WoodLight, FRotator::ZeroRotator, true);
+		Body->SetHiddenInGame(Kind == EStorageKind::DryingRack);
+	}
 	ApplyCollision();
+	RefreshDisplay();
+	SetActorTickEnabled(Kind == EStorageKind::DryingRack || Kind == EStorageKind::Potpourri);
+
+	// Le pot-pourri : quelques lueurs de pétales, roses et lilas, qui flottent autour de lui.
+	if (Kind == EStorageKind::Potpourri && GetNetMode() != NM_DedicatedServer)
+	{
+		UMaterialInterface* GlowMaterial = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_Glow"));
+		UTexture* Dot = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_star"));
+		const FLinearColor Colors[] = { FLinearColor(1.f, 0.55f, 0.75f), FLinearColor(0.75f, 0.6f, 1.f), FLinearColor(1.f, 0.85f, 0.6f) };
+		for (int32 i = 0; i < 9 && GlowMaterial && Dot; ++i)
+		{
+			USceneComponent* Petal = NewObject<USceneComponent>(this);
+			Petal->SetupAttachment(Root);
+			Petal->RegisterComponent();
+			AddInstanceComponent(Petal);
+			for (const float Yaw : { 0.f, 90.f })
+			{
+				if (UProceduralMeshComponent* Quad = AddPicture(this, Petal, FVector::ZeroVector, 20.f, 20.f, Yaw, Dot))
+				{
+					UMaterialInstanceDynamic* Glow = UMaterialInstanceDynamic::Create(GlowMaterial, this);
+					Glow->SetVectorParameterValue(TEXT("Color"), Colors[i % 3]);
+					Glow->SetScalarParameterValue(TEXT("Seed"), i * 0.9f);
+					Glow->SetScalarParameterValue(TEXT("Intensity"), 12.f);
+					Quad->SetMaterial(0, Glow);
+					Quad->SetCastShadow(false);
+				}
+			}
+			Petals.Add(Petal);
+		}
+	}
+}
+
+void AStorageActor::Commit()
+{
+	if (HasAuthority())
+	{
+		UpdateDrying();
+	}
+	RefreshDisplay();
+	OnStorageChanged.Broadcast();
+}
+
+void AStorageActor::RefreshDisplay()
+{
+	if (Kind == EStorageKind::Shelf && DisplayFrame)
+	{
+		ErewhonApothecary::BuildShelfDisplay(this, DisplayFrame, Slots, DisplayParts);
+	}
+	else if (Kind == EStorageKind::DryingRack && DisplayFrame && GetNetMode() != NM_DedicatedServer)
+	{
+		// Des bouquets pendus tête en bas aux barres du séchoir : un, deux ou trois selon la quantité.
+		for (UPrimitiveComponent* Part : DisplayParts)
+		{
+			if (Part)
+			{
+				Part->DestroyComponent();
+			}
+		}
+		DisplayParts.Reset();
+		const UItemDatabase* Items = UItemDatabase::Get(this);
+		for (int32 i = 0; i < Slots.Num() && Items; ++i)
+		{
+			const FItemDef* Def = Slots[i].IsEmpty() ? nullptr : Items->Find(Slots[i].ItemId);
+			if (!Def)
+			{
+				continue;
+			}
+			const float BarZ = ErewhonPlaceables::Height(EStorageKind::DryingRack) * (0.9f - 0.2f * (i / 2));   // les trois barres du haut
+			const float SideY = (i % 2 ? 1.f : -1.f) * 38.f;
+			const int32 Bunches = Slots[i].Count >= 8 ? 3 : Slots[i].Count >= 4 ? 2 : 1;
+			for (int32 b = 0; b < Bunches; ++b)
+			{
+				const FVector Hook(0.f, SideY + (b - (Bunches - 1) * 0.5f) * 15.f, BarZ);
+				DisplayParts.Add(AddShape(this, DisplayFrame, EShape::Cylinder, Hook - FVector(0, 0, 4.f), FVector(1.f, 1.f, 8.f), Palette::WoodDark, FRotator::ZeroRotator, false));
+				DisplayParts.Add(AddShape(this, DisplayFrame, EShape::Cone, Hook - FVector(0, 0, 8.f), FVector(13.f, 13.f, 26.f), Def->Color, FRotator(180.f, 0.f, 0.f), false));
+			}
+		}
+	}
+}
+
+int32 AStorageActor::SlotCap(const FItemDef& Def) const
+{
+	return Kind == EStorageKind::Shelf || Kind == EStorageKind::DryingRack ? FMath::Min(Def.MaxStack, ErewhonApothecary::PotionsPerSlot) : Def.MaxStack;
 }
 
 void AStorageActor::ApplyCollision()
@@ -210,6 +488,119 @@ void AStorageActor::ApplyCollision()
 	if (Body)
 	{
 		Body->SetCollisionProfileName(Carrier ? UCollisionProfile::NoCollision_ProfileName : UCollisionProfile::BlockAll_ProfileName);
+	}
+	// Un meuble ne se porte pas à bout de bras : il disparaît le temps qu'on choisisse où le poser (l'aperçu le montre).
+	SetActorHiddenInGame(Carrier && ErewhonPlaceables::IsFurniture(Kind));
+}
+
+void AStorageActor::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (Kind == EStorageKind::DryingRack && HasAuthority())
+	{
+		UpdateDrying();
+	}
+	else if (Kind == EStorageKind::Potpourri)
+	{
+		UpdatePotpourri(DeltaSeconds);
+	}
+}
+
+void AStorageActor::UpdateDrying()
+{
+	if (Kind != EStorageKind::DryingRack)
+	{
+		return;
+	}
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	const UItemDatabase* Items = UItemDatabase::Get(this);
+	if (!State || !Items)
+	{
+		return;
+	}
+	const double Now = State->GetWorldClock();
+	SlotTimes.SetNum(Slots.Num());
+	TimedItems.SetNum(Slots.Num());
+	bool bChanged = false;
+	for (int32 i = 0; i < Slots.Num(); ++i)
+	{
+		FInventorySlot& Slot = Slots[i];
+		const FItemDef* Def = Slot.IsEmpty() ? nullptr : Items->Find(Slot.ItemId);
+		if (!Def || Def->Category != EItemCategory::Plant)
+		{
+			// Vide, ou déjà sec : rien ne court.
+			bChanged |= SlotTimes[i] != 0.0;
+			SlotTimes[i] = 0.0;
+			TimedItems[i] = NAME_None;
+			continue;
+		}
+		if (TimedItems[i] != Slot.ItemId || SlotTimes[i] <= 0.0)
+		{
+			// Une plante vient d'arriver : le séchage commence (ou reprend, après un chargement).
+			const bool bResume = TimedItems[i].IsNone() && SlotTimes[i] > 0.0;
+			TimedItems[i] = Slot.ItemId;
+			if (!bResume)
+			{
+				SlotTimes[i] = Now;
+			}
+			bChanged = true;
+			continue;
+		}
+		const FName Dried(*(TEXT("dried_") + Slot.ItemId.ToString()));
+		if (Now - SlotTimes[i] >= ErewhonPlaceables::DryingSeconds && Items->Find(Dried))
+		{
+			Slot.ItemId = Dried;
+			SlotTimes[i] = 0.0;
+			TimedItems[i] = NAME_None;
+			bChanged = true;
+		}
+	}
+	if (bChanged)
+	{
+		ForceNetUpdate();
+		RefreshDisplay();
+		OnStorageChanged.Broadcast();
+	}
+}
+
+void AStorageActor::UpdatePotpourri(float DeltaSeconds)
+{
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	if (!State || Carrier)
+	{
+		return;
+	}
+	const double Now = State->GetWorldClock();
+	if (HasAuthority())
+	{
+		if (ExpiresAt > 0.0 && Now >= ExpiresAt)
+		{
+			Destroy();   // il a tout donné
+			return;
+		}
+		// Chaque seconde : ceux qui passent tout près en repartent apaisés, pour un bon moment.
+		CalmTimer += DeltaSeconds;
+		if (CalmTimer >= 1.f)
+		{
+			CalmTimer = 0.f;
+			for (TActorIterator<AErewhonCharacter> It(GetWorld()); It; ++It)
+			{
+				if (FVector::Dist(It->GetActorLocation(), GetActorLocation()) <= ErewhonPlaceables::PotpourriRadius)
+				{
+					It->GrantEffect(EPotionEffect::Calm, ErewhonPlaceables::CalmSeconds);
+				}
+			}
+		}
+	}
+	// Des pétales de lumière douce montent lentement en spirale, se fanent et renaissent.
+	PetalTime += DeltaSeconds;
+	for (int32 i = 0; i < Petals.Num(); ++i)
+	{
+		const float Life = FMath::Fmod(PetalTime * 0.18f + i / static_cast<float>(Petals.Num()), 1.f);
+		const float Angle = PetalTime * 0.6f + i * 2.4f;
+		const float Radius = 25.f + 90.f * Life;
+		Petals[i]->SetRelativeLocation(FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 15.f + Life * 160.f));
+		Petals[i]->SetRelativeScale3D(FVector(FMath::Sin(Life * UE_PI) * 0.9f + 0.05f));
 	}
 }
 
@@ -245,7 +636,14 @@ int32 AStorageActor::StackSize() const
 
 bool AStorageActor::Accepts(const FItemDef& Def) const
 {
-	return Def.Category == EItemCategory::Plant;
+	switch (Kind)
+	{
+	case EStorageKind::Crate:
+	case EStorageKind::Barrel: return Def.Category == EItemCategory::Plant;
+	case EStorageKind::Shelf:  return ErewhonApothecary::IsShelvable(Def);
+	case EStorageKind::DryingRack: return Def.Category == EItemCategory::Plant;
+	default:                   return false;
+	}
 }
 
 int32 AStorageActor::CountStored(FName ItemId) const
@@ -275,7 +673,7 @@ int32 AStorageActor::StoreItem(FName ItemId, int32 Count)
 			{
 				continue;
 			}
-			const int32 Moved = FMath::Min(Def->MaxStack - (bEmptyPass ? 0 : Slot.Count), Remaining);
+			const int32 Moved = FMath::Min(SlotCap(*Def) - (bEmptyPass ? 0 : Slot.Count), Remaining);
 			if (Moved > 0)
 			{
 				Slot.ItemId = ItemId;
@@ -317,20 +715,22 @@ void AStorageActor::PlaceOnGround(const FVector& Location, float Yaw)
 
 bool AStorageActor::StackOn(AStorageActor* Base)
 {
-	// Une cagette sur une cagette, trois au plus.
-	if (!Base || Base == this || Kind != EStorageKind::Crate || Base->GetKind() != EStorageKind::Crate)
+	// Une cagette sur une cagette, trois au plus ; un mortier sur une table.
+	const bool bCrates = Kind == EStorageKind::Crate && Base && Base->GetKind() == EStorageKind::Crate;
+	const bool bOnTable = Kind == EStorageKind::Mortar && Base && Base->GetKind() == EStorageKind::Table && !Base->GetAbove();
+	if (!Base || Base == this || (!bCrates && !bOnTable))
 	{
 		return false;
 	}
 	Base = Base->TopOfStack();
-	if (Base->StackSize() >= ErewhonPlaceables::MaxStack || Base == this)
+	if ((bCrates && Base->StackSize() >= ErewhonPlaceables::MaxStack) || Base == this)
 	{
 		return false;
 	}
 	Release();
 	AttachToActor(Base, FAttachmentTransformRules::KeepRelativeTransform);
 	SetActorRelativeLocation(FVector(0.f, 0.f, ErewhonPlaceables::Height(Base->GetKind())));
-	SetActorRelativeRotation(FRotator(0.f, FMath::RandRange(-4.f, 4.f), 0.f));
+	SetActorRelativeRotation(FRotator(0.f, bOnTable ? 0.f : FMath::RandRange(-4.f, 4.f), 0.f));
 	Below = Base;
 	Base->Above = this;
 	return true;
@@ -356,7 +756,17 @@ void AStorageActor::CarryBy(APawn* Pawn)
 	Release();
 	// Devant soi, à hauteur des hanches ; le tonneau, plus grand, descend un peu.
 	AttachToActor(Pawn, FAttachmentTransformRules::KeepRelativeTransform);
-	SetActorRelativeLocation(Kind == EStorageKind::Barrel ? FVector(62.f, 0.f, -62.f) : FVector(55.f, 0.f, -30.f));
+	FVector Offset(55.f, 0.f, -30.f);
+	switch (Kind)
+	{
+	case EStorageKind::Barrel:   Offset = FVector(62.f, 0.f, -62.f); break;
+	case EStorageKind::Shelf:    Offset = FVector(75.f, 0.f, -86.f); break;   // on la pousse devant soi
+	case EStorageKind::Table:    Offset = FVector(85.f, 0.f, -86.f); break;
+	case EStorageKind::Cauldron: Offset = FVector(55.f, 0.f, -55.f); break;
+	case EStorageKind::Mortar:   Offset = FVector(45.f, 0.f, -10.f); break;
+	default: break;
+	}
+	SetActorRelativeLocation(Offset);
 	SetActorRelativeRotation(FRotator(0.f, 90.f, 0.f));
 	Carrier = Pawn;
 	ApplyCollision();
@@ -366,7 +776,31 @@ FText AStorageActor::GetInteractionLabel() const
 {
 	if (IsOwnedBy(LocalPlayerKey(this)))
 	{
-		return FText::Format(LOCTEXT("Mine", "Prendre : {0}    [F] Ouvrir"), ErewhonPlaceables::KindName(Kind));
+		switch (Kind)
+		{
+		case EStorageKind::Table:
+			return LOCTEXT("MineTable", "Prendre : Table");
+		case EStorageKind::Mortar:
+			return LOCTEXT("MineMortar", "Prendre : Mortier    [F] Piler des plantes");
+		case EStorageKind::Cauldron:
+			return ErewhonApothecary::HouseOfHungCauldron(this)
+				? LOCTEXT("MineCauldronHung", "Prendre : Chaudron    [F] Préparer une potion")
+				: LOCTEXT("MineCauldron", "Prendre : Chaudron (à accrocher à la crémaillère)    [F] Préparer");
+		case EStorageKind::Shelf:
+			return LOCTEXT("MineShelf", "Prendre : Étagère    [F] Ranger potions et écrasés");
+		case EStorageKind::DryingRack:
+			return LOCTEXT("MineRack", "Prendre : Séchoir    [F] Y mettre des plantes à sécher");
+		case EStorageKind::Workbench:
+			return LOCTEXT("MineBench", "Prendre : Atelier    [F] Pots-pourris, teintures, bouquets");
+		case EStorageKind::Potpourri:
+		{
+			const AErewhonGameState* State = AErewhonGameState::Get(this);
+			const double Left = State ? FMath::Max(0.0, ExpiresAt - State->GetWorldClock()) : 0.0;
+			return FText::Format(LOCTEXT("MinePotpourri", "Pot-pourri (il parfume encore {0} min)    [E] Reprendre"), FText::AsNumber(FMath::CeilToInt32(Left / 60.0)));
+		}
+		default:
+			return FText::Format(LOCTEXT("Mine", "Prendre : {0}    [F] Ouvrir"), ErewhonPlaceables::KindName(Kind));
+		}
 	}
 	return FText::Format(LOCTEXT("Theirs", "{0} de {1}"), ErewhonPlaceables::KindName(Kind), FText::FromString(OwnerName));
 }
@@ -566,6 +1000,41 @@ void ACart::Tick(float DeltaSeconds)
 		FollowDriver();
 	}
 	SpinWheels();
+
+	// Le bruit des roues : il suit la vitesse (adoucie), et se tait à l'arrêt.
+	if (GetNetMode() != NM_DedicatedServer && DeltaSeconds > 0.f)
+	{
+		const float Speed = FVector::Dist2D(GetActorLocation(), LastRollLocation) / DeltaSeconds;
+		LastRollLocation = GetActorLocation();
+		RollSpeed = FMath::FInterpTo(RollSpeed, Speed < 1000.f ? Speed : 0.f, DeltaSeconds, 6.f);
+		if (!RollAudio)
+		{
+			if (USoundWave* Roll = ErewhonSound::Load(TEXT("amb_cart_roll")))
+			{
+				RollAudio = NewObject<UAudioComponent>(this);
+				RollAudio->SetupAttachment(Root);
+				RollAudio->SetRelativeLocation(FVector(AxleX, 0.f, AxleZ));
+				RollAudio->SetSound(Roll);
+				RollAudio->AttenuationSettings = ErewhonSound::Attenuation(200.f, 1800.f);
+				RollAudio->bAutoActivate = false;
+				RollAudio->RegisterComponent();
+			}
+		}
+		if (RollAudio)
+		{
+			const float Level = FMath::Clamp((RollSpeed - 15.f) / 160.f, 0.f, 1.f);
+			if (Level > 0.01f && !RollAudio->IsPlaying())
+			{
+				RollAudio->Play(FMath::FRandRange(0.f, 6.f));
+			}
+			else if (Level <= 0.01f && RollAudio->IsPlaying())
+			{
+				RollAudio->Stop();
+			}
+			RollAudio->SetVolumeMultiplier(0.9f * Level * ErewhonSound::ChannelVolume(ErewhonSound::EChannel::Effects));
+			RollAudio->SetPitchMultiplier(0.85f + 0.3f * Level);
+		}
+	}
 }
 
 void ACart::SpinWheels()

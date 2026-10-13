@@ -113,6 +113,20 @@ namespace ErewhonVisuals
 		return Centered * FTransform(FRotator(0.f, bLongAlongX ? 90.f : 0.f, 0.f));
 	}
 
+	FTransform FitToBox(const UStaticMesh* Mesh, float WidthCm, float DepthCm, float HeightCm)
+	{
+		EnsureCompiled(Mesh);
+		const FBox Box = Mesh->GetBoundingBox();
+		const FVector Size = Box.GetSize();
+		const bool bLongAlongX = Size.X > Size.Y;
+		const float SW = WidthCm / FMath::Max(bLongAlongX ? Size.X : Size.Y, 1.f);
+		const float SD = DepthCm / FMath::Max(bLongAlongX ? Size.Y : Size.X, 1.f);
+		const FVector Scale = bLongAlongX ? FVector(SW, SD, HeightCm / FMath::Max(Size.Z, 1.f)) : FVector(SD, SW, HeightCm / FMath::Max(Size.Z, 1.f));
+		const FVector Center = Box.GetCenter();
+		const FTransform Centered(FRotator::ZeroRotator, FVector(-Center.X * Scale.X, -Center.Y * Scale.Y, -Box.Min.Z * Scale.Z), Scale);
+		return Centered * FTransform(FRotator(0.f, bLongAlongX ? 90.f : 0.f, 0.f));
+	}
+
 	UProceduralMeshComponent* AddPicture(AActor* Owner, USceneComponent* Parent, const FVector& Center,
 		float Width, float Height, float Yaw, const FString& TextureName)
 	{
@@ -175,8 +189,8 @@ namespace ErewhonVisuals
 		{
 			const FVector2D A = PolygonYZ[i];
 			const FVector2D B = PolygonYZ[(i + 1) % N];
-			const FVector Edge(0.f, B.X - A.X, B.Y - A.Y);
-			const FVector Normal = FVector(0.f, Edge.Z, -Edge.Y).GetSafeNormal();
+			const FVector Side(0.f, B.X - A.X, B.Y - A.Y);
+			const FVector Normal = FVector(0.f, Side.Z, -Side.Y).GetSafeNormal();
 			const int32 Start = Vertices.Num();
 			Vertices.Append({ FVector(X0, A.X, A.Y), FVector(X1, A.X, A.Y), FVector(X1, B.X, B.Y), FVector(X0, B.X, B.Y) });
 			Normals.Append({ Normal, Normal, Normal, Normal });

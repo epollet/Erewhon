@@ -110,7 +110,7 @@ void AErewhonHUD::DrawHUD()
 	// Potions bues : leur effet et le temps qui reste, en haut à droite sous les images par seconde.
 	if (Character)
 	{
-		static const TCHAR* const Names[] = { TEXT(""), TEXT("Vitesse"), TEXT("Nyctalopie"), TEXT("Force"), TEXT("Saut"), TEXT("Rapetissement"), TEXT("Grandissement") };
+		static const TCHAR* const Names[] = { TEXT(""), TEXT("Vitesse"), TEXT("Nyctalopie"), TEXT("Force"), TEXT("Saut"), TEXT("Rapetissement"), TEXT("Grandissement"), TEXT("Sérénité") };
 		float PotionY = 48.f;
 		for (int32 Effect = 1; Effect < static_cast<int32>(EPotionEffect::Count); ++Effect)
 		{

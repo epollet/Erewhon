@@ -125,7 +125,12 @@ void AErewhonGameMode::BeginPlay()
 		if (Entry.Buildings & ESectorBuilding::Apothecary)
 		{
 			const FSavedSectorOwner* Saved = WorldSave->SectorOwners.FindByPredicate([&](const FSavedSectorOwner& S) { return S.Sector == Entry.Sector; });
-			SpawnApothecary(Entry.Sector, Saved ? Saved->FireUntil : 0.0, Saved ? Saved->Shelves : TArray<FInventorySlot>());
+			SpawnApothecary(Entry.Sector, Saved ? Saved->FireUntil : 0.0);
+			// Une apothicairerie d'avant le mobilier à acheter : on la meuble comme elle l'était.
+			if (Saved && Saved->Shelves.Num() > 0)
+			{
+				SpawnFurnishing(Entry.Sector, Entry.OwnerKey, Entry.OwnerName, Saved->Shelves);
+			}
 		}
 	}
 	GetGameState<AErewhonGameState>()->OnVillageChanged.AddUObject(this, &AErewhonGameMode::SpawnDoors);
@@ -172,7 +177,7 @@ void AErewhonGameMode::SaveWorld()
 	{
 		const TObjectPtr<AApothecary>* House = Apothecaries.Find(Entry.Sector);
 		WorldSave->SectorOwners.Add({ Entry.Sector, Entry.OwnerKey, Entry.OwnerName, Entry.RoadLinks, Entry.PavedLinks, Entry.Buildings,
-			House && *House ? (*House)->GetFireUntil() : 0.0, House && *House ? (*House)->GetShelves() : TArray<FInventorySlot>() });
+			House && *House ? (*House)->GetFireUntil() : 0.0, TArray<FInventorySlot>() });
 	}
 	WorldSave->Harvests.Reset();
 	for (const FHarvestEntry& Entry : State->GetHarvestEntries())
@@ -351,16 +356,39 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 	{
 		AErewhonGameState* TestState = GetGameState<AErewhonGameState>();
 		const FIntPoint TestSector(1, 1);
-		TestState->SetSectorOwner(TestSector, Key, DisplayName, (1 << 1) | (1 << 3), 0, ESectorBuilding::Apothecary);
+		// -ErewhonTestStoreroom : avec sa remise.
+		const uint8 TestBuildings = ESectorBuilding::Apothecary | (FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestStoreroom")) ? ESectorBuilding::Storeroom : 0);
+		TestState->SetSectorOwner(TestSector, Key, DisplayName, (1 << 1) | (1 << 3), 0, TestBuildings);
 		TArray<FInventorySlot> TestShelves;
-		TestShelves.SetNum(ErewhonApothecary::ShelfSlots);
-		const TPair<const TCHAR*, int32> Stocked[] = { { TEXT("potion_speed"), 10 }, { TEXT("potion_night"), 7 }, { TEXT("potion_grow"), 3 }, { TEXT("potion_jump"), 10 }, { TEXT("crushed_flower_purple"), 6 } };
+		TestShelves.SetNum(12);
+		const TPair<const TCHAR*, int32> Stocked[] = { { TEXT("potion_speed"), 10 }, { TEXT("crushed_flower_purple"), 6 }, { TEXT("potion_night"), 7 },
+			{ TEXT("potion_grow"), 3 }, { TEXT("potion_jump"), 10 } };
+		const int32 Where[] = { 0, 1, 3, 6, 9 };
 		for (int32 i = 0; i < UE_ARRAY_COUNT(Stocked); ++i)
 		{
-			TestShelves[(i * 3) % ErewhonApothecary::ShelfSlots + (i >= 4 ? 1 : 0)].ItemId = Stocked[i].Key;
-			TestShelves[(i * 3) % ErewhonApothecary::ShelfSlots + (i >= 4 ? 1 : 0)].Count = Stocked[i].Value;
+			TestShelves[Where[i]].ItemId = Stocked[i].Key;
+			TestShelves[Where[i]].Count = Stocked[i].Value;
 		}
-		SpawnApothecary(TestSector, TestState->GetWorldClock() + 600.0, TestShelves);
+		if (!Apothecaries.Contains(TestSector))
+		{
+			SpawnApothecary(TestSector, TestState->GetWorldClock() + 600.0);
+			if (!FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestEmpty")))
+			{
+				SpawnFurnishing(TestSector, Key, DisplayName, TestShelves);
+				// Un séchoir garni (un crochet déjà sec), un atelier, un pot-pourri allumé près de la porte.
+				const FTransform HouseT = ErewhonApothecary::HouseTransform(TestSector, TestState->GetWorldSeed());
+				const float Floor = ErewhonSpawn::CabinFloorTop;
+				AStorageActor* Rack = SpawnStorage(EStorageKind::DryingRack, FTransform(FRotator(0.f, 0.f, 0.f), FVector(-330.f, -220.f, Floor)) * HouseT, Key, DisplayName);
+				Rack->StoreItem(TEXT("flower_blue"), 8);
+				Rack->StoreItem(TEXT("herb"), 3);
+				Rack->EditSlots()[2].ItemId = TEXT("dried_flower_purple");
+				Rack->EditSlots()[2].Count = 6;
+				Rack->Commit();
+				SpawnStorage(EStorageKind::Workbench, FTransform(FRotator(0.f, -90.f, 0.f), FVector(150.f, -290.f, Floor)) * HouseT, Key, DisplayName);
+				AStorageActor* Pot = SpawnStorage(EStorageKind::Potpourri, FTransform(FVector(-560.f, 160.f, ErewhonTerrain::Height(FVector2D(HouseT.TransformPosition(FVector(-560.f, 160.f, 0.f))), TestState->GetWorldSeed()) - HouseT.GetLocation().Z)) * HouseT, Key, DisplayName);
+				Pot->SetExpiresAt(TestState->GetWorldClock() + ErewhonPlaceables::PotpourriSeconds);
+			}
+		}
 		for (const TPair<const TCHAR*, int32>& Gift : { TPair<const TCHAR*, int32>(TEXT("firewood"), 3), { TEXT("grass"), 6 },
 			{ TEXT("crushed_flower_blue"), 2 }, { TEXT("potion_base"), 1 }, { TEXT("potion_speed"), 1 }, { TEXT("potion_night"), 1 } })
 		{
@@ -515,7 +543,7 @@ FText AErewhonGameMode::TryBuyRoadLink(AErewhonPlayerController* Controller, con
 
 // ── Apothicairerie ───────────────────────────────────────────────────────────
 
-AApothecary* AErewhonGameMode::SpawnApothecary(const FIntPoint& Sector, double FireUntil, const TArray<FInventorySlot>& Shelves)
+AApothecary* AErewhonGameMode::SpawnApothecary(const FIntPoint& Sector, double FireUntil)
 {
 	if (const TObjectPtr<AApothecary>* Existing = Apothecaries.Find(Sector); Existing && *Existing)
 	{
@@ -524,7 +552,7 @@ AApothecary* AErewhonGameMode::SpawnApothecary(const FIntPoint& Sector, double F
 	const FTransform At = ErewhonApothecary::HouseTransform(Sector, GetGameState<AErewhonGameState>()->GetWorldSeed());
 	AApothecary* House = GetWorld()->SpawnActorDeferred<AApothecary>(AApothecary::StaticClass(), At, nullptr, nullptr,
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	House->Setup(Sector, FireUntil, Shelves);
+	House->Setup(Sector, FireUntil);
 	House->FinishSpawning(At);
 	Apothecaries.Add(Sector, House);
 	return House;
@@ -561,6 +589,26 @@ FText AErewhonGameMode::TryBuyApothecary(AErewhonPlayerController* Controller, c
 	return FText::GetEmpty();
 }
 
+FText AErewhonGameMode::CheckAtStation(AErewhonPlayerController* Controller, const AStorageActor* Station) const
+{
+	const AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
+	const APawn* Pawn = Controller->GetPawn();
+	if (!PlayerState || !PlayerState->IsRegistered() || !Pawn || !Station
+		|| (Station->GetKind() != EStorageKind::Mortar && Station->GetKind() != EStorageKind::Cauldron && Station->GetKind() != EStorageKind::Workbench))
+	{
+		return LOCTEXT("NoStation", "Il n'y a pas de quoi préparer ici.");
+	}
+	if (!Station->IsOwnedBy(PlayerState->GetPlayerKey()))
+	{
+		return LOCTEXT("NotYourStation", "Ce n'est pas à vous.");
+	}
+	if (Station->GetCarrier() || FVector::Dist(Pawn->GetActorLocation(), Station->GetActorLocation()) > ErewhonApothecary::UseReach)
+	{
+		return LOCTEXT("StationTooFar", "Vous êtes trop loin.");
+	}
+	return FText::GetEmpty();
+}
+
 FText AErewhonGameMode::CheckAtHouse(AErewhonPlayerController* Controller, const AApothecary* House) const
 {
 	const AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
@@ -575,7 +623,7 @@ FText AErewhonGameMode::CheckAtHouse(AErewhonPlayerController* Controller, const
 	{
 		return LOCTEXT("NotYourHouse", "Ce n'est pas votre apothicairerie.");
 	}
-	if (FVector::Dist2D(Pawn->GetActorLocation(), House->GetActorLocation()) > ErewhonApothecary::UseReach)
+	if (FVector::Dist2D(Pawn->GetActorLocation(), House->GetActorLocation()) > 650.f)
 	{
 		return LOCTEXT("HouseTooFar", "Vous êtes trop loin de l'apothicairerie.");
 	}
@@ -644,21 +692,31 @@ FText AErewhonGameMode::TryFeedFire(AErewhonPlayerController* Controller, AApoth
 	return FText::GetEmpty();
 }
 
-FText AErewhonGameMode::TryStartCraft(AErewhonPlayerController* Controller, AApothecary* House, FName Output, int32 Count)
+FText AErewhonGameMode::TryStartCraft(AErewhonPlayerController* Controller, AStorageActor* Station, FName Output, int32 Count)
 {
-	const FText Error = CheckAtHouse(Controller, House);
+	const FText Error = CheckAtStation(Controller, Station);
 	if (!Error.IsEmpty())
 	{
 		return Error;
 	}
 	const TOptional<ErewhonApothecary::FRecipe> Recipe = ErewhonApothecary::FindRecipe(*UItemDatabase::Get(this), Output);
-	if (!Recipe.IsSet() || Count <= 0)
+	const ErewhonApothecary::ECraft StationCraft = Station->GetKind() == EStorageKind::Cauldron ? ErewhonApothecary::ECraft::Cauldron
+		: Station->GetKind() == EStorageKind::Workbench ? ErewhonApothecary::ECraft::Workbench : ErewhonApothecary::ECraft::Mortar;
+	if (!Recipe.IsSet() || Count <= 0 || Recipe->Craft != StationCraft)
 	{
 		return LOCTEXT("NoRecipe", "Je ne sais pas préparer cela.");
 	}
-	if (Recipe->bCauldron && !House->IsFireLit())
+	if (Recipe->Craft == ErewhonApothecary::ECraft::Cauldron)
 	{
-		return LOCTEXT("FireOut", "Le feu est éteint : allumez-le avec du petit bois.");
+		const AApothecary* House = ErewhonApothecary::HouseOfHungCauldron(Station);
+		if (!House)
+		{
+			return LOCTEXT("NotHung", "Le chaudron doit pendre à la crémaillère d'une cheminée.");
+		}
+		if (!House->IsFireLit())
+		{
+			return LOCTEXT("FireOut", "Le feu est éteint : allumez-le avec du petit bois.");
+		}
 	}
 	if (!HasIngredients(Controller->GetPlayerState<AErewhonPlayerState>(), *Recipe))
 	{
@@ -670,7 +728,7 @@ FText AErewhonGameMode::TryStartCraft(AErewhonPlayerController* Controller, AApo
 	Job.Remaining = FMath::Min(Count, 999);
 	Job.StepSeconds = Recipe->Seconds();
 	Job.StepEnd = GetGameState<AErewhonGameState>()->GetWorldClock() + Job.StepSeconds;
-	Controller->SetCraftJob(Job, House);
+	Controller->SetCraftJob(Job, Station);
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	GetWorldTimerManager().SetTimer(Controller->CraftTimer, FTimerDelegate::CreateWeakLambda(this, [this, WeakController]()
 	{
@@ -685,7 +743,7 @@ FText AErewhonGameMode::TryStartCraft(AErewhonPlayerController* Controller, AApo
 void AErewhonGameMode::StepCraft(AErewhonPlayerController* Controller)
 {
 	FErewhonCraftJob Job = Controller->GetCraftJob();
-	AApothecary* House = Controller->GetCraftHouse();
+	AStorageActor* Station = Controller->GetCraftStation();
 	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
 	const TOptional<ErewhonApothecary::FRecipe> Recipe = ErewhonApothecary::FindRecipe(*UItemDatabase::Get(this), Job.Output);
 	const auto Stop = [Controller](const FText& Why)
@@ -701,13 +759,15 @@ void AErewhonGameMode::StepCraft(AErewhonPlayerController* Controller)
 		Stop(FText::GetEmpty());
 		return;
 	}
-	const FText Error = CheckAtHouse(Controller, House);
+	const FText Error = CheckAtStation(Controller, Station);
 	if (!Error.IsEmpty())
 	{
 		Stop(Error);
 		return;
 	}
-	if (Recipe->bCauldron && !House->IsFireLit())
+	const bool bCauldron = Recipe->Craft == ErewhonApothecary::ECraft::Cauldron;
+	const AApothecary* House = bCauldron ? ErewhonApothecary::HouseOfHungCauldron(Station) : nullptr;
+	if (bCauldron && (!House || !House->IsFireLit()))
 	{
 		Stop(LOCTEXT("FireWentOut", "Le feu s'est éteint : le chaudron refroidit."));
 		return;
@@ -731,7 +791,7 @@ void AErewhonGameMode::StepCraft(AErewhonPlayerController* Controller)
 		Stop(LOCTEXT("NoRoom", "Plus de place dans l'inventaire."));
 		return;
 	}
-	Controller->ClientCraftStep(Recipe->bCauldron);
+	Controller->ClientCraftStep(static_cast<uint8>(Recipe->Craft));
 
 	// Le suivant, s'il en reste à faire et de quoi le faire.
 	--Job.Remaining;
@@ -741,7 +801,7 @@ void AErewhonGameMode::StepCraft(AErewhonPlayerController* Controller)
 		return;
 	}
 	Job.StepEnd = GetGameState<AErewhonGameState>()->GetWorldClock() + Job.StepSeconds;
-	Controller->SetCraftJob(Job, House);
+	Controller->SetCraftJob(Job, Station);
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	GetWorldTimerManager().SetTimer(Controller->CraftTimer, FTimerDelegate::CreateWeakLambda(this, [this, WeakController]()
 	{
@@ -752,156 +812,74 @@ void AErewhonGameMode::StepCraft(AErewhonPlayerController* Controller)
 	}), Job.StepSeconds, false);
 }
 
-namespace
+FText AErewhonGameMode::TryBuyStoreroom(AErewhonPlayerController* Controller, const FIntPoint& Sector)
 {
-	/** Pose des exemplaires sur une étagère : d'abord sur les piles du même objet, puis sur les étages vides, du bas vers le haut. Renvoie combien. */
-	int32 ShelveItems(AApothecary* House, int32 Shelf, FName ItemId, int32 Count)
+	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
+	AErewhonGameState* State = GetGameState<AErewhonGameState>();
+	if (!PlayerState || !PlayerState->IsRegistered() || !IsNearMerchant(Controller, EShopKind::SectorManager))
 	{
-		int32 Placed = 0;
-		TArray<FInventorySlot>& Shelves = House->EditShelves();
-		const int32 First = ErewhonApothecary::FirstSlotOf(Shelf);
-		for (const bool bEmptyPass : { false, true })
-		{
-			for (int32 Index = First; Index < First + ErewhonApothecary::ShelfRows && Shelves.IsValidIndex(Index); ++Index)
-			{
-				FInventorySlot& Slot = Shelves[Index];
-				if (Placed >= Count)
-				{
-					break;
-				}
-				if (bEmptyPass ? !Slot.IsEmpty() : (Slot.IsEmpty() || Slot.ItemId != ItemId))
-				{
-					continue;
-				}
-				const int32 Put = FMath::Min(ErewhonApothecary::PotionsPerSlot - (Slot.IsEmpty() ? 0 : Slot.Count), Count - Placed);
-				if (Put > 0)
-				{
-					Slot.Count = (Slot.IsEmpty() ? 0 : Slot.Count) + Put;
-					Slot.ItemId = ItemId;
-					Placed += Put;
-				}
-			}
-		}
-		return Placed;
+		return LOCTEXT("ManagerTooFar", "Le gérant des secteurs est trop loin.");
 	}
-}
-
-FText AErewhonGameMode::TryMoveShelfItem(AErewhonPlayerController* Controller, AApothecary* House, int32 Shelf, bool bFromShelf, int32 From, bool bToShelf, int32 To)
-{
-	const FText Error = CheckAtHouse(Controller, House);
-	const UItemDatabase* Items = UItemDatabase::Get(this);
-	if (!Error.IsEmpty() || !Items || Shelf < 0 || Shelf >= ErewhonApothecary::ShelfCount)
+	const FString* OwnerKey = State->FindSectorOwnerKey(Sector);
+	if (!OwnerKey || *OwnerKey != PlayerState->GetPlayerKey())
 	{
-		return Error;
+		return LOCTEXT("NotYours", "Ce secteur ne vous appartient pas.");
 	}
-	// On ne touche qu'aux étages de l'étagère ouverte.
-	const auto OnShelf = [Shelf](int32 Index) { return Index == INDEX_NONE || ErewhonApothecary::ShelfOfSlot(Index) == Shelf; };
-	if ((bFromShelf && !OnShelf(From)) || (bToShelf && !OnShelf(To)))
+	if (!(State->GetBuildings(Sector) & ESectorBuilding::Apothecary))
 	{
-		return FText::GetEmpty();
+		return LOCTEXT("NeedApothecary", "Il faut d'abord l'apothicairerie.");
 	}
-	UInventoryComponent* Inventory = Controller->GetPlayerState<AErewhonPlayerState>()->GetInventory();
-	TArray<FInventorySlot>& Source = bFromShelf ? House->EditShelves() : Inventory->EditSlots();
-	TArray<FInventorySlot>& Target = bToShelf ? House->EditShelves() : Inventory->EditSlots();
-	if (!Source.IsValidIndex(From) || Source[From].IsEmpty() || (!bFromShelf && Source[From].Kind != ESlotKind::Inventory))
+	if (State->GetBuildings(Sector) & ESectorBuilding::Storeroom)
 	{
-		return FText::GetEmpty();
+		return LOCTEXT("StoreroomBuilt", "La remise est déjà construite.");
 	}
-	const FItemDef* Def = Items->Find(Source[From].ItemId);
-	if (!Def)
+	if (!PlayerState->SpendCoins(UErewhonSettings::Get().StoreroomPrice))
 	{
-		return FText::GetEmpty();
+		return LOCTEXT("NotEnoughCoins", "Pas assez de pièces.");
 	}
-	if (bToShelf && !ErewhonApothecary::IsShelvable(*Def))
-	{
-		return LOCTEXT("ShelfOnly", "Les étagères sont pour les potions et les écrasés.");
-	}
-	// Une pile de 10 au plus par rayon.
-	const auto Cap = [](bool bShelf, const FItemDef& Item) { return bShelf ? FMath::Min(Item.MaxStack, ErewhonApothecary::PotionsPerSlot) : Item.MaxStack; };
-	if (To == INDEX_NONE)
-	{
-		const int32 Count = Source[From].Count;
-		const int32 Moved = bToShelf ? ShelveItems(House, Shelf, Def->Id, Count) : Inventory->StoreItem(Def->Id, Count);
-		if (Moved <= 0)
-		{
-			return bToShelf ? LOCTEXT("ShelvesFull", "Cette étagère est pleine.") : LOCTEXT("InventoryFull", "Inventaire plein.");
-		}
-		FInventorySlot& Origin = (bFromShelf ? House->EditShelves() : Inventory->EditSlots())[From];
-		Origin.Count -= Moved;
-		if (Origin.Count <= 0)
-		{
-			Origin.Clear();
-		}
-	}
-	else
-	{
-		if (!Target.IsValidIndex(To) || (&Source == &Target && From == To) || (!bToShelf && Target[To].Kind != ESlotKind::Inventory))
-		{
-			return FText::GetEmpty();
-		}
-		FInventorySlot& A = Source[From];
-		FInventorySlot& B = Target[To];
-		if (B.IsEmpty() || B.ItemId == A.ItemId)
-		{
-			const int32 Moved = FMath::Min(A.Count, Cap(bToShelf, *Def) - (B.IsEmpty() ? 0 : B.Count));
-			if (Moved <= 0)
-			{
-				return FText::GetEmpty();
-			}
-			B.Count = (B.IsEmpty() ? 0 : B.Count) + Moved;
-			B.ItemId = A.ItemId;
-			A.Count -= Moved;
-			if (A.Count <= 0)
-			{
-				A.Clear();
-			}
-		}
-		else
-		{
-			// Échange : chacun doit pouvoir aller de l'autre côté, sans dépasser 10 sur un rayon.
-			const FItemDef* Other = Items->Find(B.ItemId);
-			if (!Other || (bFromShelf && (!ErewhonApothecary::IsShelvable(*Other) || B.Count > Cap(true, *Other)))
-				|| (bToShelf && A.Count > Cap(true, *Def)))
-			{
-				return LOCTEXT("CannotSwapShelf", "Cet objet ne va pas là.");
-			}
-			Swap(A.ItemId, B.ItemId);
-			Swap(A.Count, B.Count);
-		}
-	}
-	Inventory->CommitChanges();
-	House->CommitShelves();
+	State->AddBuilding(Sector, ESectorBuilding::Storeroom);
+	Controller->ClientToast(LOCTEXT("StoreroomDone", "La remise est construite : on y entre par la droite de l'apothicairerie."));
 	return FText::GetEmpty();
 }
 
-FText AErewhonGameMode::TryStashInShelves(AErewhonPlayerController* Controller, AApothecary* House, int32 Shelf)
+AStorageActor* AErewhonGameMode::SpawnStorage(EStorageKind Kind, const FTransform& At, const FString& OwnerKey, const FString& OwnerName)
 {
-	const FText Error = CheckAtHouse(Controller, House);
-	const UItemDatabase* Items = UItemDatabase::Get(this);
-	if (!Error.IsEmpty() || !Items || Shelf < 0 || Shelf >= ErewhonApothecary::ShelfCount)
+	AStorageActor* Storage = GetWorld()->SpawnActorDeferred<AStorageActor>(AStorageActor::StaticClass(), At, nullptr, nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	Storage->Setup(Kind, OwnerKey, OwnerName);
+	Storage->FinishSpawning(At);
+	return Storage;
+}
+
+void AErewhonGameMode::SpawnFurnishing(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName, const TArray<FInventorySlot>& Shelves)
+{
+	const FTransform House = ErewhonApothecary::HouseTransform(Sector, GetGameState<AErewhonGameState>()->GetWorldSeed());
+	const auto At = [&House](const FVector& Local, float Yaw) { return FTransform(FRotator(0.f, Yaw, 0.f), Local) * House; };
+	const float Floor = ErewhonSpawn::CabinFloorTop;
+	// La table au milieu, dans la largeur ; le mortier dessus.
+	AStorageActor* Table = SpawnStorage(EStorageKind::Table, At(FVector(40.f, 0.f, Floor), 0.f), OwnerKey, OwnerName);
+	SpawnStorage(EStorageKind::Mortar, At(FVector(40.f, -45.f, Floor + 82.f), 0.f), OwnerKey, OwnerName)->StackOn(Table);
+	// Le chaudron à la crémaillère.
+	if (const TOptional<FTransform> Hook = ErewhonApothecary::HookTransform(this, Sector))
 	{
-		return Error;
+		SpawnStorage(EStorageKind::Cauldron, *Hook, OwnerKey, OwnerName);
 	}
-	UInventoryComponent* Inventory = Controller->GetPlayerState<AErewhonPlayerState>()->GetInventory();
-	int32 Moved = 0;
-	for (FInventorySlot& Slot : Inventory->EditSlots())
+	// Trois étagères contre le mur de droite, de part et d'autre de la fenêtre, façade vers la pièce.
+	const float X[] = { -320.f, -180.f, 230.f };
+	for (int32 i = 0; i < 3; ++i)
 	{
-		const FItemDef* Def = Slot.Kind == ESlotKind::Inventory && !Slot.IsEmpty() ? Items->Find(Slot.ItemId) : nullptr;
-		if (!Def || !ErewhonApothecary::IsShelvable(*Def))
+		AStorageActor* Shelf = SpawnStorage(EStorageKind::Shelf,
+			At(FVector(X[i], ErewhonSpawn::CabinHalfWidth - ErewhonSpawn::CabinWallThickness - 20.f, Floor), 90.f), OwnerKey, OwnerName);
+		for (int32 Row = 0; Row < ErewhonApothecary::ShelfRows; ++Row)
 		{
-			continue;
+			const int32 Old = i * ErewhonApothecary::ShelfRows + Row;
+			if (Shelves.IsValidIndex(Old) && !Shelves[Old].IsEmpty())
+			{
+				Shelf->EditSlots()[Row] = Shelves[Old];
+			}
 		}
-		const int32 Placed = ShelveItems(House, Shelf, Def->Id, Slot.Count);
-		Moved += Placed;
-		Slot.Count -= Placed;
-		if (Slot.Count <= 0)
-		{
-			Slot.Clear();
-		}
+		Shelf->Commit();
 	}
-	Inventory->CommitChanges();
-	House->CommitShelves();
-	return Moved > 0 ? FText::GetEmpty() : LOCTEXT("NothingToShelve", "Rien à ranger (ou cette étagère est pleine).");
 }
 
 FText AErewhonGameMode::TrySellSector(AErewhonPlayerController* Controller, const FIntPoint& Sector)
@@ -1378,6 +1356,16 @@ FText AErewhonGameMode::TryPlace(AErewhonPlayerController* Controller, uint8 Typ
 		return FText::GetEmpty();
 	}
 	const FVector Where = Type == 0 ? Location : (Target ? Target->GetActorLocation() : Location);
+	{
+		const FName Held = PlayerState->GetInventory()->GetHandItem();
+		const AStorageActor* Carried = Character->GetCarried();
+		const bool bCartItem = !Carried && ErewhonPlaceables::IsCart(Held);
+		const TOptional<EStorageKind> HeldKind = Carried ? TOptional<EStorageKind>(Carried->GetKind()) : ErewhonPlaceables::StorageForItem(Held);
+		if (!bCartItem && HeldKind.IsSet() && !ErewhonPlaceables::CanPlaceAt(this, PlayerState->GetPlayerKey(), false, *HeldKind, Type, Where))
+		{
+			return LOCTEXT("NotYourSector", "Seulement sur vos secteurs (ou, pour une cagette, dans une charrette).");
+		}
+	}
 	if (FVector::Dist(Character->GetActorLocation(), Where) > 700.f)
 	{
 		return LOCTEXT("TooFarToPlace", "C'est trop loin.");
@@ -1408,10 +1396,19 @@ FText AErewhonGameMode::TryPlace(AErewhonPlayerController* Controller, uint8 Typ
 		const EStorageKind Kind = Storage ? Storage->GetKind() : NewKind.GetValue();
 		AStorageActor* Base = Type == 1 ? Cast<AStorageActor>(Target) : nullptr;
 		ACart* Cart = Type == 2 ? Cast<ACart>(Target) : nullptr;
-		if (Type == 1 && (!Base || Kind != EStorageKind::Crate || Base->GetKind() != EStorageKind::Crate || !Base->IsOwnedBy(PlayerState->GetPlayerKey())
+		const bool bMortarOnTable = Type == 1 && Base && Kind == EStorageKind::Mortar && Base->GetKind() == EStorageKind::Table && !Base->GetAbove();
+		if (Type == 1 && !bMortarOnTable && (!Base || Kind != EStorageKind::Crate || Base->GetKind() != EStorageKind::Crate || !Base->IsOwnedBy(PlayerState->GetPlayerKey())
 			|| Base->TopOfStack()->StackSize() >= ErewhonPlaceables::MaxStack || Base->TopOfStack()->GetCarrier()))
 		{
 			return LOCTEXT("CannotStack", "On ne peut pas l'empiler là.");
+		}
+		if (Type == 1 && Base && !Base->IsOwnedBy(PlayerState->GetPlayerKey()))
+		{
+			return LOCTEXT("CannotStack", "On ne peut pas l'empiler là.");
+		}
+		if (Type == 2 && ErewhonPlaceables::IsFurniture(Kind))
+		{
+			return LOCTEXT("NoFurnitureInCart", "Le mobilier ne va pas dans la charrette.");
 		}
 		if (Type == 2 && (!Cart || !Cart->IsOwnedBy(PlayerState->GetPlayerKey()) || Cart->GetLoad(Slot) || Slot < 0 || Slot >= ACart::SlotCount))
 		{
@@ -1422,6 +1419,10 @@ FText AErewhonGameMode::TryPlace(AErewhonPlayerController* Controller, uint8 Typ
 			const FTransform Spawn(FRotator(0.f, Yaw, 0.f), Location);
 			Storage = GetWorld()->SpawnActorDeferred<AStorageActor>(AStorageActor::StaticClass(), Spawn);
 			Storage->Setup(Kind, PlayerState->GetPlayerKey(), PlayerState->GetPlayerName());
+			if (Kind == EStorageKind::Potpourri)
+			{
+				Storage->SetExpiresAt(GetGameState<AErewhonGameState>()->GetWorldClock() + ErewhonPlaceables::PotpourriSeconds);
+			}
 			Storage->FinishSpawning(Spawn);
 		}
 		Character->SetCarried(nullptr);
@@ -1432,6 +1433,10 @@ FText AErewhonGameMode::TryPlace(AErewhonPlayerController* Controller, uint8 Typ
 		else if (Type == 2)
 		{
 			Storage->LoadInto(Cart, Slot);
+		}
+		else if (const TOptional<FTransform> Hook = ErewhonPlaceables::HookFor(this, Kind, Location))
+		{
+			Storage->PlaceOnGround(Hook->GetLocation(), Hook->Rotator().Yaw);   // le chaudron pend à la crémaillère
 		}
 		else
 		{
@@ -1515,7 +1520,8 @@ FText AErewhonGameMode::TryMoveStorageItem(AErewhonPlayerController* Controller,
 	}
 	if (bToStorage && !Storage->Accepts(*Def))
 	{
-		return LOCTEXT("PlantsOnly", "On n'y range que des plantes.");
+		return Storage->GetKind() == EStorageKind::Shelf ? LOCTEXT("ShelfOnly", "L'étagère est pour les potions et les écrasés.")
+			: LOCTEXT("PlantsOnly", "On n'y range que des plantes.");
 	}
 	if (To == INDEX_NONE)
 	{
@@ -1542,7 +1548,7 @@ FText AErewhonGameMode::TryMoveStorageItem(AErewhonPlayerController* Controller,
 		FInventorySlot& B = Target[To];
 		if (B.IsEmpty() || B.ItemId == A.ItemId)
 		{
-			const int32 Moved = FMath::Min(A.Count, Def->MaxStack - (B.IsEmpty() ? 0 : B.Count));
+			const int32 Moved = FMath::Min(A.Count, (bToStorage ? Storage->SlotCap(*Def) : Def->MaxStack) - (B.IsEmpty() ? 0 : B.Count));
 			if (Moved <= 0)
 			{
 				return FText::GetEmpty();
@@ -1558,7 +1564,8 @@ FText AErewhonGameMode::TryMoveStorageItem(AErewhonPlayerController* Controller,
 		else
 		{
 			const FItemDef* Other = Items->Find(B.ItemId);
-			if (!Other || (bFromStorage && !Storage->Accepts(*Other)))
+			if (!Other || (bFromStorage && (!Storage->Accepts(*Other) || B.Count > Storage->SlotCap(*Other)))
+				|| (bToStorage && A.Count > Storage->SlotCap(*Def)))
 			{
 				return LOCTEXT("CannotSwap", "Cet objet ne va pas là.");
 			}
@@ -1651,6 +1658,8 @@ void AErewhonGameMode::CaptureObjects()
 		Saved.OwnerKey = Storage->GetOwnerKey();
 		Saved.OwnerName = Storage->GetOwnerName();
 		Saved.Slots = Storage->GetSlots();
+		Saved.SlotTimes = Storage->GetSlotTimes();
+		Saved.ExpiresAt = Storage->GetExpiresAt();
 		FVector Location = Storage->GetActorLocation();
 		if (const APawn* Carrier = Storage->GetCarrier())
 		{
@@ -1684,6 +1693,11 @@ void AErewhonGameMode::SpawnSavedObjects()
 	{
 		AStorageActor* Storage = GetWorld()->SpawnActorDeferred<AStorageActor>(AStorageActor::StaticClass(), Saved.Transform);
 		Storage->Setup(static_cast<EStorageKind>(Saved.Kind), Saved.OwnerKey, Saved.OwnerName);
+		if (Saved.SlotTimes.Num() > 0)
+		{
+			Storage->SetSlotTimes(Saved.SlotTimes);
+		}
+		Storage->SetExpiresAt(Saved.ExpiresAt);
 		for (int32 i = 0; i < Saved.Slots.Num() && i < Storage->EditSlots().Num(); ++i)
 		{
 			Storage->EditSlots()[i] = Saved.Slots[i];

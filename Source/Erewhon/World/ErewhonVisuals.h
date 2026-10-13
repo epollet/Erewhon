@@ -80,6 +80,9 @@ namespace ErewhonVisuals
 	 */
 	EREWHON_API FTransform FitToLength(const UStaticMesh* Mesh, float LengthCm, float HeightCm = 0.f);
 
+	/** Comme FitToLength, mais chaque dimension imposée : le grand côté horizontal (sur Y), le petit, la hauteur. */
+	EREWHON_API FTransform FitToBox(const UStaticMesh* Mesh, float WidthCm, float DepthCm, float HeightCm);
+
 	/**
 	 * Ajoute un tableau : un rectangle Width × Height (cm) qui montre la texture générée TextureName
 	 * (ex. « T_map_wall »), centré sur Center et tourné vers −X une fois pivoté de Yaw.

@@ -183,6 +183,118 @@
     },
 
     {
+      "id": "shelf", "name": "Étagère à potions", "category": "placeable",
+      "description": "Quatre étages, une pile de dix potions ou écrasés par étage. [F] pour y ranger.\nEn main, cliquez pour le poser (sur vos secteurs) ; [E] pour le reprendre.",
+      "buy_price": 180, "max_stack": 1, "color": [170, 120, 75]
+    },
+    {
+      "id": "table", "name": "Table de travail", "category": "placeable",
+      "description": "Une solide table de chêne : on y pose le mortier.\nEn main, cliquez pour le poser (sur vos secteurs) ; [E] pour le reprendre.",
+      "buy_price": 150, "max_stack": 1, "color": [160, 115, 70]
+    },
+    {
+      "id": "mortar", "name": "Mortier", "category": "placeable",
+      "description": "Pour piler les plantes en écrasés. [F] pour s'en servir ; il se pose aussi sur une table.\nEn main, cliquez pour le poser (sur vos secteurs) ; [E] pour le reprendre.",
+      "buy_price": 120, "max_stack": 1, "color": [150, 150, 145]
+    },
+    {
+      "id": "cauldron", "name": "Chaudron", "category": "placeable",
+      "description": "Pour les bases et les potions. Posé près d'une cheminée, il pend à la crémaillère ; il faut un feu allumé.\nEn main, cliquez pour le poser (sur vos secteurs) ; [E] pour le reprendre.",
+      "buy_price": 300, "max_stack": 1, "color": [60, 60, 64]
+    },
+
+    {
+      "id": "dried_grass", "name": "Herbe séchée", "category": "resource",
+      "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
+      "sell_price": 2, "max_stack": 30, "color": [190,  170,  90]
+    },
+    {
+      "id": "dried_flower_white", "name": "Fleur blanche séchée", "category": "resource",
+      "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
+      "sell_price": 6, "max_stack": 30, "color": [225,  215,  185]
+    },
+    {
+      "id": "dried_flower_blue", "name": "Fleur bleue séchée", "category": "resource",
+      "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
+      "sell_price": 6, "max_stack": 30, "color": [110,  130,  180]
+    },
+    {
+      "id": "dried_flower_purple", "name": "Fleur violette séchée", "category": "resource",
+      "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
+      "sell_price": 6, "max_stack": 30, "color": [140,  100,  160]
+    },
+    {
+      "id": "dried_herb", "name": "Herbe aromatique séchée", "category": "resource",
+      "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
+      "sell_price": 2, "max_stack": 30, "color": [120,  130,  80]
+    },
+    {
+      "id": "dried_fern", "name": "Fougère séchée", "category": "resource",
+      "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
+      "sell_price": 4, "max_stack": 30, "color": [150,  120,  70]
+    },
+    {
+      "id": "dried_broadleaf", "name": "Plantain séché", "category": "resource",
+      "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
+      "sell_price": 2, "max_stack": 30, "color": [140,  130,  80]
+    },
+    {
+      "id": "dried_weed_dock", "name": "Patience séchée", "category": "resource",
+      "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
+      "sell_price": 4, "max_stack": 30, "color": [150,  100,  60]
+    },
+    {
+      "id": "dried_weed_nettle", "name": "Ortie séchée", "category": "resource",
+      "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
+      "sell_price": 4, "max_stack": 30, "color": [110,  120,  70]
+    },
+    {
+      "id": "dye_blue", "name": "Teinture bleue", "category": "resource",
+      "description": "Trois écrasés de fleur bleue. La couturière la rachète bon prix.",
+      "sell_price": 30, "max_stack": 10, "color": [50,  90,  200]
+    },
+    {
+      "id": "dye_purple", "name": "Teinture violette", "category": "resource",
+      "description": "Trois écrasés de fleur violette. La couturière la rachète bon prix.",
+      "sell_price": 30, "max_stack": 10, "color": [130,  60,  180]
+    },
+    {
+      "id": "dye_green", "name": "Teinture verte", "category": "resource",
+      "description": "Trois écrasés d'ortie. La couturière la rachète bon prix.",
+      "sell_price": 18, "max_stack": 10, "color": [50,  130,  60]
+    },
+    {
+      "id": "dye_rust", "name": "Teinture rouille", "category": "resource",
+      "description": "Trois écrasés de patience. La couturière la rachète bon prix.",
+      "sell_price": 18, "max_stack": 10, "color": [170,  80,  40]
+    },
+    {
+      "id": "bouquet_fresh", "name": "Bouquet des prés en pot", "category": "resource",
+      "description": "Fleurs blanches, bleues, violettes et une fougère, dans un petit pot.",
+      "sell_price": 34, "max_stack": 5, "color": [240,  200,  210]
+    },
+    {
+      "id": "bouquet_dry", "name": "Bouquet sec en pot", "category": "resource",
+      "description": "Fleurs séchées et herbe dorée : il ne fane plus.",
+      "sell_price": 56, "max_stack": 5, "color": [210,  180,  120]
+    },
+    {
+      "id": "potpourri", "name": "Pot-pourri", "category": "placeable",
+      "description": "Posez-le : dix minutes durant, il parfume les alentours et apaise ceux qui passent (sérénité : herbes hautes et buissons ne retiennent plus, cinq minutes).\nEn main, cliquez pour le poser (sur vos secteurs).",
+      "sell_price": 40, "max_stack": 1, "color": [230,  150,  190]
+    },
+    {
+      "id": "drying_rack", "name": "Séchoir", "category": "placeable",
+      "description": "Six crochets où pendre ses plantes : elles sèchent en quatre minutes. [F] pour y mettre des plantes.\nEn main, cliquez pour le poser (sur vos secteurs).",
+      "buy_price": 160, "max_stack": 1, "color": [160,  120,  80]
+    },
+    {
+      "id": "workbench", "name": "Atelier d'apothicaire", "category": "placeable",
+      "description": "Pots-pourris de fleurs séchées, teintures d'écrasés, bouquets en pot. [F] pour y travailler.\nEn main, cliquez pour le poser (sur vos secteurs).",
+      "buy_price": 350, "max_stack": 1, "color": [150,  110,  75]
+    },
+
+    {
       "id": "tshirt_orange", "name": "T-shirt orange", "category": "clothing", "clothing_slot": "torso",
       "description": "T-shirt léger, couleur mandarine.",
       "buy_price": 30, "color": [230, 120, 40]

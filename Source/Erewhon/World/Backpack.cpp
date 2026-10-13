@@ -20,7 +20,13 @@ namespace ErewhonBackpack
 		const FLinearColor GCanvasDark = FLinearColor::FromSRGBColor(FColor(90, 106, 58));
 		const FLinearColor GLeather = FLinearColor::FromSRGBColor(FColor(124, 72, 40));
 		const FLinearColor GBrass = FLinearColor::FromSRGBColor(FColor(200, 160, 76));
+		/** Rotation du modèle généré pour que ses poches regardent vers +X. */
+		constexpr float GBackpackMeshYaw = 90.f;
 	}
+
+	/** Le sac en volumes simples (sans modèle généré). */
+	template <typename TPart>
+	void BuildVolumes(const TPart& Part, bool bCollision);
 
 	TArray<UStaticMeshComponent*> Build(AActor* Owner, USceneComponent* Parent, bool bCollision)
 	{
@@ -31,6 +37,35 @@ namespace ErewhonBackpack
 			Piece->SetCastShadow(true);
 			return Piece;
 		};
+		// Le modèle généré, s'il existe (poches vers +X) ; sinon, le sac en volumes simples.
+		if (UStaticMesh* Model = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_backpack")))
+		{
+			UStaticMeshComponent* Bag = AddGeneratedMesh(Owner, Parent, Model, FVector::ZeroVector, 52.f, GBackpackMeshYaw, bCollision);
+			Bag->SetCastShadow(true);
+		}
+		else
+		{
+			BuildVolumes(Part, bCollision);
+		}
+		// Passants de cuir de chaque côté, où pendent les outils.
+		TArray<UStaticMeshComponent*> Holders;
+		for (const float Side : { -1.f, 1.f })
+		{
+			UStaticMeshComponent* Holder = NewObject<UStaticMeshComponent>(Owner);
+			Holder->SetupAttachment(Parent);
+			Holder->SetRelativeLocationAndRotation(FVector(0, Side * 21.f, 4.f), FRotator(0.f, 0.f, Side * 6.f));
+			Holder->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Holder->SetVisibility(false);
+			Holder->RegisterComponent();
+			Owner->AddInstanceComponent(Holder);
+			Holders.Add(Holder);
+		}
+		return Holders;
+	}
+
+	template <typename TPart>
+	void BuildVolumes(const TPart& Part, bool bCollision)
+	{
 		// Corps de toile, dessus arrondi.
 		Part(EShape::Cube, FVector(0, 0, 21), FVector(24, 36, 42), GCanvas, FRotator::ZeroRotator, bCollision);
 		Part(EShape::Cylinder, FVector(0, 0, 42), FVector(24, 24, 36), GCanvas, FRotator(0.f, 0.f, 90.f));
@@ -46,22 +81,11 @@ namespace ErewhonBackpack
 			// Bretelles, côté dos.
 			Part(EShape::Cube, FVector(-13, Y * 1.1f, 24), FVector(2, 5, 40), GLeather);
 		}
-		// Passants de cuir de chaque côté, où pendent les outils.
-		TArray<UStaticMeshComponent*> Holders;
 		for (const float Side : { -1.f, 1.f })
 		{
 			Part(EShape::Cube, FVector(0, Side * 18.6f, 30), FVector(6, 1.5f, 4), GLeather);
 			Part(EShape::Cube, FVector(0, Side * 18.6f, 12), FVector(6, 1.5f, 4), GLeather);
-			UStaticMeshComponent* Holder = NewObject<UStaticMeshComponent>(Owner);
-			Holder->SetupAttachment(Parent);
-			Holder->SetRelativeLocationAndRotation(FVector(0, Side * 21.f, 4.f), FRotator(0.f, 0.f, Side * 6.f));
-			Holder->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			Holder->SetVisibility(false);
-			Holder->RegisterComponent();
-			Owner->AddInstanceComponent(Holder);
-			Holders.Add(Holder);
 		}
-		return Holders;
 	}
 
 	void SetTools(const TArray<UStaticMeshComponent*>& Holders, const TArray<FName>& Tools)

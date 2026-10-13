@@ -116,6 +116,9 @@ struct FSavedStorage
 	UPROPERTY() int32 CartSlot = INDEX_NONE;
 	/** Index (dans Storages, toujours plus petit) de la cagette sur laquelle elle est posée. */
 	UPROPERTY() int32 Below = INDEX_NONE;
+	/** Séchoir : le début du séchage de chaque place ; pot-pourri : l'heure où il s'éteint (horloge du monde). */
+	UPROPERTY() TArray<double> SlotTimes;
+	UPROPERTY() double ExpiresAt = 0.0;
 };
 
 /** Sauvegarde serveur du monde (Saved/SaveGames/<WorldSaveSlot>.sav). */

@@ -67,7 +67,7 @@ namespace
 		{
 			// Chaumière de pierre des champs, toit d'ardoise moussue, plancher de bois.
 			Style.Wall = TEXT("stone");
-			Style.WallTile = 340.f;   // de grosses pierres des champs
+			Style.WallTile = 480.f;   // de grosses pierres des champs
 			Style.WallColor = Palette::Stone;
 			Style.Roof = TEXT("roof_slate");
 			Style.RoofTile = 200.f;
@@ -308,11 +308,24 @@ void ASpawnCabin::BuildCabin()
 	Box(FVector(-HL, GDoorHalfWidth, 0), FVector(-HL + T, HW, H), Palette::WoodLight);
 	Box(FVector(-HL, -GDoorHalfWidth, GDoorHeight), FVector(-HL + T, GDoorHalfWidth, H), Palette::WoodLight);
 
-	// Murs latéraux, chacun percé d'une fenêtre centrée.
+	// Murs latéraux, chacun percé d'une fenêtre centrée ; avec la remise, une porte remplace celle de droite.
 	for (const float Side : { -1.f, 1.f })
 	{
 		const float Y0 = Side > 0 ? HW - T : -HW;
 		const float Y1 = Side > 0 ? HW : -HW + T;
+		if (Side > 0 && bStoreroom && Kind == EShopKind::Apothecary)
+		{
+			Box(FVector(-HL, Y0, 0), FVector(-GDoorHalfWidth, Y1, H), Palette::WoodLight);
+			Box(FVector(GDoorHalfWidth, Y0, 0), FVector(HL, Y1, H), Palette::WoodLight);
+			Box(FVector(-GDoorHalfWidth, Y0, GDoorHeight), FVector(GDoorHalfWidth, Y1, H), Palette::WoodLight);
+			// Le chambranle, des deux côtés.
+			for (const float X : { -GDoorHalfWidth - 6.f, GDoorHalfWidth + 6.f })
+			{
+				Box(FVector(X - 6.f, Y0 - 4.f, 0), FVector(X + 6.f, Y1 + 4.f, GDoorHeight + 8.f), Palette::WoodDark);
+			}
+			Box(FVector(-GDoorHalfWidth - 12.f, Y0 - 4.f, GDoorHeight), FVector(GDoorHalfWidth + 12.f, Y1 + 4.f, GDoorHeight + 12.f), Palette::WoodDark);
+			continue;
+		}
 		Box(FVector(-HL, Y0, 0), FVector(-GWindowHalfWidth, Y1, H), Palette::WoodLight);
 		Box(FVector(GWindowHalfWidth, Y0, 0), FVector(HL, Y1, H), Palette::WoodLight);
 		Box(FVector(-GWindowHalfWidth, Y0, 0), FVector(GWindowHalfWidth, Y1, GWindowSill), Palette::WoodLight);
@@ -349,6 +362,53 @@ void ASpawnCabin::BuildCabin()
 		const FVector Center(0, Side * HalfSpan * 0.5f, GFloorTop + H + RidgeRise * 0.5f + 8.f);
 		Paint(AddShape(this, Root, EShape::Cube, Center, FVector(2 * HL + 2 * GRoofOverhang, SlabWidth, 16), Palette::Roof,
 			FRotator(0, 0, Side * Style.RoofSlope)), Palette::Roof);
+	}
+
+	// La remise : une pièce de plain-pied accolée au mur de droite, sous un toit en appentis.
+	if (bStoreroom && Kind == EShopKind::Apothecary)
+	{
+		const float L = ErewhonApothecary::StoreroomHalfLength;
+		const float D = ErewhonApothecary::StoreroomDepth;
+		constexpr float AH = 230.f;   // hauteur des murs de la remise
+		UStaticMeshComponent* Base = AddShape(this, Root, EShape::Cube, FVector(0.f, HW + D * 0.5f, (GFloorTop - FoundationDepth) * 0.5f),
+			FVector(2 * L + 30.f, D + 20.f, GFloorTop + FoundationDepth), Palette::Stone);
+		Base->SetMaterial(0, MakePaintedMaterial(Base, TEXT("stone"), 160.f, Palette::Stone));
+		UStaticMeshComponent* Boards = AddShape(this, Root, EShape::Cube, FVector(0.f, HW + D * 0.5f, GFloorTop + 1.f), FVector(2 * (L - T), D, 2.f), Palette::WoodLight);
+		Boards->SetMaterial(0, MakePaintedMaterial(Boards, Style.Floor, Style.FloorTile, Palette::WoodLight));
+		// Le seuil de la porte, à travers l'épaisseur du mur.
+		UStaticMeshComponent* Sill = AddShape(this, Root, EShape::Cube, FVector(0.f, HW - T * 0.5f, GFloorTop + 1.f), FVector(2 * GDoorHalfWidth, T + 6.f, 2.f), Palette::WoodLight);
+		Sill->SetMaterial(0, MakePaintedMaterial(Sill, Style.Floor, Style.FloorTile, Palette::WoodLight));
+		Box(FVector(-L, HW + D - T, 0), FVector(L, HW + D, AH), Palette::WoodLight);
+		for (const float SX : { -1.f, 1.f })
+		{
+			Box(FVector(SX > 0 ? L - T : -L, HW, 0), FVector(SX > 0 ? L : -L + T, HW + D, AH), Palette::WoodLight);
+			Box(FVector(SX * L - T, HW + D - T, 0), FVector(SX * L + T, HW + D + T, AH + 6.f), Palette::WoodDark);   // poteau d'angle
+		}
+		// Les pignons du toit en appentis, au-dessus des murs de côté.
+		UMaterialInterface* WallMaterial = MakePaintedMaterial(this, Style.Wall, Style.WallTile, Style.WallColor);
+		const TArray<FVector2D> Lean = { FVector2D(HW, GFloorTop + AH), FVector2D(HW + D, GFloorTop + AH), FVector2D(HW, GFloorTop + H - 6.f) };
+		AddPrism(this, Root, Lean, L - T, L, WallMaterial);
+		AddPrism(this, Root, Lean, -L, -L + T, WallMaterial);
+		// Le toit : du dessous de l'avant-toit de la maison jusqu'au-delà du mur du fond.
+		const float Run = D + 40.f, Rise = H - 6.f - AH;
+		const float Slope = FMath::RadiansToDegrees(FMath::Atan2(Rise, Run));
+		Paint(AddShape(this, Root, EShape::Cube, FVector(0.f, HW + Run * 0.5f, GFloorTop + AH + Rise * 0.5f + 8.f),
+			FVector(2 * L + 40.f, FMath::Sqrt(Run * Run + Rise * Rise), 14.f), Palette::Roof, FRotator(0.f, 0.f, Slope)), Palette::Roof);
+		// Un plafond de planches sous le toit, et une lampe à huile : la pièce est vide, prête à meubler.
+		AddBox(Root, FVector(-L + T, HW, GFloorTop + AH - 8.f), FVector(L - T, HW + D - T, GFloorTop + AH), Palette::WoodLight, TEXT("wood_planks"), 220.f);
+		for (const float Y : { HW + D * 0.33f, HW + D * 0.66f })
+		{
+			Box(FVector(-L + T, Y - 9.f, AH - 26.f), FVector(L - T, Y + 9.f, AH - 8.f), Palette::WoodDark);   // solives
+		}
+		UPointLightComponent* StoreLamp = NewObject<UPointLightComponent>(this);
+		StoreLamp->SetupAttachment(Root);
+		StoreLamp->SetRelativeLocation(FVector(0.f, HW + D * 0.5f, GFloorTop + AH - 40.f));
+		StoreLamp->SetIntensityUnits(ELightUnits::Lumens);
+		StoreLamp->SetIntensity(500.f);
+		StoreLamp->SetAttenuationRadius(500.f);
+		StoreLamp->SetLightColor(FLinearColor::FromSRGBColor(FColor(255, 196, 120)));
+		StoreLamp->RegisterComponent();
+		AddInstanceComponent(StoreLamp);
 	}
 
 	// Hauteur du dessous du toit à l'aplomb des murs longs : la sablière comble ce jour.
@@ -915,29 +975,54 @@ void ASpawnCabin::BuildApothecaryInterior()
 		return Part;
 	};
 
-	// La cheminée, contre le mur du fond : âtre, jambages, linteau, manteau de bois, hotte jusqu'au plafond.
+	// La cheminée, contre le mur du fond : le modèle peint, ou à défaut des blocs de pierre.
 	const float Back = HL - T;
-	Stone(FVector(Back - 100.f, -115.f, 0.f), FVector(Back, 115.f, 8.f));
-	for (const float SY : { -1.f, 1.f })
+	if (UStaticMesh* Fireplace = ErewhonApothecary::HasFireplaceModel() ? LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_fireplace")) : nullptr)
 	{
-		Stone(FVector(Back - 80.f, SY > 0 ? 62.f : -102.f, 0.f), FVector(Back, SY > 0 ? 102.f : -62.f, 125.f));
+		// Mise à la taille : large de FireplaceWidth, moins profonde que le modèle ; le haut traverse le plafond.
+		const FBox Bounds = Fireplace->GetBoundingBox();
+		const FVector Size = Bounds.GetSize();
+		const bool bWideX = Size.X > Size.Y;
+		const float S = ErewhonApothecary::FireplaceWidth / (bWideX ? Size.X : Size.Y);
+		const float SD = ErewhonApothecary::FireplaceDepth / (bWideX ? Size.Y : Size.X);
+		const FVector Scale = bWideX ? FVector(S, SD, S) : FVector(SD, S, S);
+		const FVector Center = Bounds.GetCenter();
+		const FTransform Fit(FRotator::ZeroRotator, -FVector(Center.X * Scale.X, Center.Y * Scale.Y, Bounds.Min.Z * Scale.Z), Scale);
+		UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
+		Part->SetStaticMesh(Fireplace);
+		Part->SetupAttachment(Root);
+		Part->SetRelativeTransform(Fit * FTransform(FRotator(0.f, (bWideX ? 90.f : 0.f) + FireplaceFrontYaw, 0.f), FVector(Back - ErewhonApothecary::FireplaceDepth * 0.5f, 0.f, GFloorTop)));
+		// Elle arrête le joueur, mais pas la visée : on vise les bûches et le chaudron au fond du foyer.
+		Part->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+		Part->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+		Part->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+		Part->RegisterComponent();
+		AddInstanceComponent(Part);
 	}
-	Stone(FVector(Back - 80.f, -102.f, 125.f), FVector(Back, 102.f, 152.f));
-	AddBox(Root, FVector(Back - 92.f, -118.f, GFloorTop + 152.f), FVector(Back, 118.f, GFloorTop + 162.f), Palette::WoodDark, TEXT("wood_trim"), 140.f);
-	Stone(FVector(Back - 52.f, -84.f, 162.f), FVector(Back, 84.f, H - 10.f));
-	// Le fond du foyer, noirci de suie.
-	Stone(FVector(Back - 14.f, -62.f, 8.f), FVector(Back, 62.f, 125.f), FLinearColor(0.18f, 0.16f, 0.15f));
-	// Sur le manteau : deux pots et une chandelle.
-	AddShape(this, Root, EShape::Cylinder, FVector(Back - 40.f, -70.f, GFloorTop + 172.f), FVector(14, 14, 20), FLinearColor::FromSRGBColor(FColor(150, 90, 60)), FRotator::ZeroRotator, false);
-	AddShape(this, Root, EShape::Cylinder, FVector(Back - 40.f, 75.f, GFloorTop + 170.f), FVector(12, 12, 16), FLinearColor::FromSRGBColor(FColor(90, 120, 150)), FRotator::ZeroRotator, false);
-	AddShape(this, Root, EShape::Cylinder, FVector(Back - 40.f, 20.f, GFloorTop + 172.f), FVector(5, 5, 20), FLinearColor::FromSRGBColor(FColor(240, 230, 200)), FRotator::ZeroRotator, false);
+	else
+	{
+		Stone(FVector(Back - 100.f, -115.f, 0.f), FVector(Back, 115.f, 8.f));
+		for (const float SY : { -1.f, 1.f })
+		{
+			Stone(FVector(Back - 80.f, SY > 0 ? 62.f : -102.f, 0.f), FVector(Back, SY > 0 ? 102.f : -62.f, 125.f));
+		}
+		Stone(FVector(Back - 80.f, -102.f, 125.f), FVector(Back, 102.f, 152.f));
+		AddBox(Root, FVector(Back - 92.f, -118.f, GFloorTop + 152.f), FVector(Back, 118.f, GFloorTop + 162.f), Palette::WoodDark, TEXT("wood_trim"), 140.f);
+		Stone(FVector(Back - 52.f, -84.f, 162.f), FVector(Back, 84.f, H - 10.f));
+		// Le fond du foyer, noirci de suie.
+		Stone(FVector(Back - 14.f, -62.f, 8.f), FVector(Back, 62.f, 125.f), FLinearColor(0.18f, 0.16f, 0.15f));
+		// Sur le manteau : deux pots et une chandelle.
+		AddShape(this, Root, EShape::Cylinder, FVector(Back - 40.f, -70.f, GFloorTop + 172.f), FVector(14, 14, 20), FLinearColor::FromSRGBColor(FColor(150, 90, 60)), FRotator::ZeroRotator, false);
+		AddShape(this, Root, EShape::Cylinder, FVector(Back - 40.f, 75.f, GFloorTop + 170.f), FVector(12, 12, 16), FLinearColor::FromSRGBColor(FColor(90, 120, 150)), FRotator::ZeroRotator, false);
+		AddShape(this, Root, EShape::Cylinder, FVector(Back - 40.f, 20.f, GFloorTop + 172.f), FVector(5, 5, 20), FLinearColor::FromSRGBColor(FColor(240, 230, 200)), FRotator::ZeroRotator, false);
+	}
 
 	// La crémaillère : une barre de fer d'un jambage à l'autre, deux tiges qui tiennent le chaudron au-dessus du feu.
 	{
 		const FLinearColor Iron = FLinearColor::FromSRGBColor(FColor(46, 44, 42));
 		const FVector Pot = ErewhonApothecary::CauldronLocal();
 		const float BarZ = Pot.Z + 60.f;
-		AddShape(this, Root, EShape::Cylinder, FVector(Pot.X, 0.f, BarZ), FVector(3.f, 3.f, 124.f), Iron, FRotator(0.f, 0.f, 90.f), false);
+		AddShape(this, Root, EShape::Cylinder, FVector(Pot.X, 0.f, BarZ), FVector(3.f, 3.f, ErewhonApothecary::HasFireplaceModel() ? 110.f : 124.f), Iron, FRotator(0.f, 0.f, 90.f), false);
 		for (const float SY : { -1.f, 1.f })
 		{
 			AddShape(this, Root, EShape::Cylinder, FVector(Pot.X, SY * 23.f, (BarZ + Pot.Z + 34.f) * 0.5f), FVector(1.6f, 1.6f, BarZ - Pot.Z - 34.f), Iron, FRotator::ZeroRotator, false);
@@ -952,42 +1037,7 @@ void ASpawnCabin::BuildApothecaryInterior()
 		Stone(FVector(HL - 76.f, -48.f, H + RidgeRise + 70.f), FVector(HL + 12.f, 48.f, H + RidgeRise + 82.f));
 	}
 
-	// La table de travail au milieu, dans la largeur : le mortier et le chaudron y sont posés (AApothecaryStation).
-	{
-		const FVector Table(ErewhonApothecary::MortarLocal().X, 0.f, GFloorTop);
-		AddBox(Root, Table + FVector(-42, -105, 74), Table + FVector(42, 105, 82), Palette::WoodLight, TEXT("wood_planks"), 120.f);
-		for (const float SX : { -1.f, 1.f })
-		{
-			for (const float SY : { -1.f, 1.f })
-			{
-				AddShape(this, Root, EShape::Cube, Table + FVector(SX * 34.f, SY * 95.f, 37.f), FVector(8, 8, 74), Palette::WoodDark);
-			}
-		}
-		// Le chaudron est sur le feu : à sa place, un flacon et un bol.
-		if (UStaticMesh* Flask = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_potion_base")))
-		{
-			AddGeneratedMesh(this, Root, Flask, Table + FVector(8.f, 50.f, 82.f), 16.f, 200.f, false);
-		}
-		if (UStaticMesh* Bowl = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_bowl")))
-		{
-			AddGeneratedMesh(this, Root, Bowl, Table + FVector(-14.f, 74.f, 82.f), 6.f, 0.f, false);
-		}
-		// Un tabouret de chaque côté de la table, côté porte.
-		for (const float SY : { -1.f, 1.f })
-		{
-			const FVector Stool = Table + FVector(-80.f, SY * 55.f, 0.f);
-			AddShape(this, Root, EShape::Cylinder, Stool + FVector(0, 0, 44), FVector(34, 34, 5), Palette::WoodLight, FRotator::ZeroRotator, true);
-			AddShape(this, Root, EShape::Cylinder, Stool + FVector(0, 0, 21), FVector(8, 8, 42), Palette::WoodDark, FRotator::ZeroRotator, false);
-		}
-	}
-
-	// Trois étagères à potions contre le mur de droite (on y range ses potions : AApothecary les garnit),
-	// des bocaux sur une quatrième, à gauche de l'entrée.
-	for (int32 Shelf = 0; Shelf < ErewhonApothecary::ShelfCount; ++Shelf)
-	{
-		const FTransform At = ErewhonApothecary::ShelfLocal(Shelf);
-		AddShelf(At.GetLocation(), At.Rotator().Yaw, 11 + Shelf, EShelfGoods::None);
-	}
+	// Le mobilier (table, mortier, chaudron, étagères) s'achète au General Store ; reste une étagère à bocaux, à gauche de l'entrée.
 	AddShelf(FVector(-HL * 0.5f, -HW + T + 20.f, GFloorTop), -90.f, 10, EShelfGoods::Pantry);
 
 	// Des bouquets de plantes qui sèchent, pendus aux poutres, tête en bas.

@@ -60,6 +60,10 @@ public:
 	UPROPERTY(EditAnywhere)
 	EShopKind Kind = EShopKind::GeneralStore;
 
+	/** Apothicairerie : avec sa remise, à droite (+Y), où l'on passe par une porte à la place de la fenêtre. */
+	UPROPERTY(EditAnywhere)
+	bool bStoreroom = false;
+
 private:
 	/** Ce que porte une étagère. */
 	enum class EShelfGoods : uint8 { Pantry, Office, Fabric, None };
@@ -89,6 +93,10 @@ private:
 
 	/** Profondeur du remblai et du perron sous le plancher (plus grande sur un terrain en pente). */
 	float FoundationDepth = 20.f;
+
+	/** Rotation de la cheminée générée pour que sa façade regarde la pièce. */
+	UPROPERTY(EditAnywhere)
+	float FireplaceFrontYaw = 0.f;
 
 	/** Rotation du bureau aux cartes généré, même règle. */
 	UPROPERTY(EditAnywhere)

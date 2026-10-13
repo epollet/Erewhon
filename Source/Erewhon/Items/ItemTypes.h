@@ -27,6 +27,7 @@ enum class EPotionEffect : uint8
 	Jump,       // on saute plus haut
 	Shrink,     // on rapetisse
 	Grow,       // on grandit
+	Calm,       // sérénité (pot-pourri) : herbes hautes et buissons ne ralentissent plus
 	Count UMETA(Hidden)
 };
 
@@ -190,7 +191,7 @@ struct FItemDef
 	bool IsPotion() const { return Category == EItemCategory::Potion && PotionEffect != EPotionEffect::None; }
 
 	/** Le commerce qui vend et rachète cet objet : les vêtements chez le tailleur, le reste au General Store. */
-	EShopKind ShopFor() const { return IsClothing() ? EShopKind::Tailor : EShopKind::GeneralStore; }
+	EShopKind ShopFor() const { return IsClothing() || Id.ToString().StartsWith(TEXT("dye_")) ? EShopKind::Tailor : EShopKind::GeneralStore; }
 	bool IsUnique() const { return Category == EItemCategory::Tool || Category == EItemCategory::Backpack; }
 	bool IsBackpack() const { return Category == EItemCategory::Backpack; }
 

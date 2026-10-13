@@ -179,15 +179,9 @@ void SInventoryPanel::Construct(const FArguments& InArgs)
 	Controller = InArgs._Controller;
 	OpenedBag = InArgs._Bag;
 	OpenedStorage = InArgs._Storage;
-	OpenedShelves = InArgs._Shelves;
-	ShelfIndex = InArgs._ShelfIndex;
 	if (AStorageActor* Storage = OpenedStorage.Get())
 	{
 		Storage->OnStorageChanged.AddSP(this, &SInventoryPanel::Rebuild);
-	}
-	if (AApothecary* House = OpenedShelves.Get())
-	{
-		House->OnShelvesChanged.AddSP(this, &SInventoryPanel::Rebuild);
 	}
 
 	if (UInventoryComponent* Inventory = GetInventory())
@@ -205,12 +199,11 @@ void SInventoryPanel::Construct(const FArguments& InArgs)
 
 	const float Width = ColumnWidth(GInventoryColumns) + ColumnWidth(GClothingColumns) + ColumnWidth(GEquipmentColumns) + 2 * GColumnGap + 70.f
 		+ (ShowsBag() ? ColumnWidth(OpenedStorage.IsValid() && OpenedStorage->GetKind() == EStorageKind::Barrel ? 5
-			: OpenedShelves.IsValid() ? 4 : GBagColumns) + 2 * GColumnGap + 10.f : 0.f);
+			: OpenedStorage.IsValid() && OpenedStorage->GetKind() == EStorageKind::Shelf ? 4 : GBagColumns) + 2 * GColumnGap + 10.f : 0.f);
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	ChildSlot
 	[
-		Window(OpenedShelves.IsValid() ? FText::Format(LOCTEXT("TitleShelves", "Inventaire et étagère {0}"), FText::AsNumber(ShelfIndex + 1))
-			: OpenedStorage.IsValid() ? FText::Format(LOCTEXT("TitleStorage", "Inventaire et {0}"), ErewhonPlaceables::KindName(OpenedStorage->GetKind()).ToLower())
+		Window(OpenedStorage.IsValid() ? FText::Format(LOCTEXT("TitleStorage", "Inventaire et {0}"), ErewhonPlaceables::KindName(OpenedStorage->GetKind()).ToLower())
 			: ShowsBag() ? LOCTEXT("TitleBag", "Inventaire et sac à dos") : LOCTEXT("Title", "Inventaire"), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
 			Width)
@@ -233,10 +226,6 @@ UBackpackComponent* SInventoryPanel::GetBackpack() const
 const TArray<FInventorySlot>& SInventoryPanel::OtherSlots() const
 {
 	static const TArray<FInventorySlot> None;
-	if (const AApothecary* House = OpenedShelves.Get())
-	{
-		return House->GetShelves();
-	}
 	if (const AStorageActor* Storage = OpenedStorage.Get())
 	{
 		return Storage->GetSlots();
@@ -251,11 +240,7 @@ void SInventoryPanel::MoveItem(bool bFromOther, int32 From, bool bToOther, int32
 	{
 		return;
 	}
-	if (AApothecary* House = OpenedShelves.Get())
-	{
-		Controller->ServerMoveShelfItem(House, static_cast<uint8>(ShelfIndex), bFromOther, From, bToOther, To);
-	}
-	else if (AStorageActor* Storage = OpenedStorage.Get())
+	if (AStorageActor* Storage = OpenedStorage.Get())
 	{
 		Controller->ServerMoveStorageItem(Storage, bFromOther, From, bToOther, To);
 	}
@@ -267,9 +252,9 @@ void SInventoryPanel::MoveItem(bool bFromOther, int32 From, bool bToOther, int32
 
 bool SInventoryPanel::ShowsBag() const
 {
-	if (OpenedStorage.IsValid() || OpenedShelves.IsValid())
+	if (OpenedStorage.IsValid())
 	{
-		return true;   // la colonne de droite montre le conteneur ou les étagères
+		return true;   // la colonne de droite montre le conteneur ouvert
 	}
 	const UBackpackComponent* Backpack = GetBackpack();
 	// Sur le dos, le sac reste fermé : il faut le poser pour y fouiller.
@@ -286,11 +271,7 @@ FReply SInventoryPanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& 
 	}
 	if (Key == EKeys::G && ShowsBag() && Controller.IsValid())
 	{
-		if (AApothecary* House = OpenedShelves.Get())
-		{
-			Controller->ServerStashInShelves(House, static_cast<uint8>(ShelfIndex));
-		}
-		else if (AStorageActor* Storage = OpenedStorage.Get())
+		if (AStorageActor* Storage = OpenedStorage.Get())
 		{
 			Controller->ServerStashInStorage(Storage);
 		}
@@ -318,10 +299,6 @@ FReply SInventoryPanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& 
 
 void SInventoryPanel::Discard(bool bBag, int32 SlotIndex)
 {
-	if (bBag && OpenedShelves.IsValid())
-	{
-		return;   // rien ne se jette depuis les étagères : on le reprend d'abord
-	}
 	const TArray<FInventorySlot>& Slots = bBag ? OtherSlots() : GetInventory()->GetSlots();
 	const UItemDatabase* Items = UItemDatabase::Get(Controller.Get());
 	const FItemDef* Def = Slots.IsValidIndex(SlotIndex) && !Slots[SlotIndex].IsEmpty() && Items ? Items->Find(Slots[SlotIndex].ItemId) : nullptr;
@@ -396,7 +373,7 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(bool bBag, int32 SlotIndex, const
 			{
 				MoveItem(true, SlotIndex, false, INDEX_NONE);   // reprendre dans ses poches
 			}
-			else if (OpenedShelves.IsValid())
+			else if (OpenedStorage.IsValid() && OpenedStorage->GetKind() == EStorageKind::Shelf)
 			{
 				MoveItem(false, SlotIndex, true, INDEX_NONE);   // devant les étagères, un clic y range l'objet (on ne boit pas par mégarde)
 			}
@@ -422,7 +399,7 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(bool bBag, int32 SlotIndex, const
 
 TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 {
-	if (const AApothecary* House = OpenedShelves.Get())
+	if (const AStorageActor* Shelf = OpenedStorage.Get(); Shelf && Shelf->GetKind() == EStorageKind::Shelf)
 	{
 		// L'étagère ouverte, dessinée comme elle est : ses étages de haut en bas, une pile par étage.
 		using namespace ErewhonApothecary;
@@ -430,8 +407,8 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 		TSharedRef<SVerticalBox> Floors = SNew(SVerticalBox);
 		for (int32 Row = ShelfRows - 1; Row >= 0; --Row)
 		{
-			const int32 Index = FirstSlotOf(ShelfIndex) + Row;
-			const FInventorySlot* Slot = House->GetShelves().IsValidIndex(Index) ? &House->GetShelves()[Index] : nullptr;
+			const int32 Index = Row;
+			const FInventorySlot* Slot = Shelf->GetSlots().IsValidIndex(Index) ? &Shelf->GetSlots()[Index] : nullptr;
 			const FItemDef* Def = Slot && !Slot->IsEmpty() && Items ? Items->Find(Slot->ItemId) : nullptr;
 			Floors->AddSlot().AutoHeight().Padding(0, 0, 0, 4)
 			[
@@ -464,7 +441,7 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
 				[
-					SNew(STextBlock).Text(FText::Format(LOCTEXT("ShelfHeader", "Étagère {0}"), FText::AsNumber(ShelfIndex + 1)))
+					SNew(STextBlock).Text(LOCTEXT("ShelfHeader", "Étagère"))
 					.Font(Font(11, true)).ColorAndOpacity(BagAccent)
 				]
 				+ SVerticalBox::Slot().AutoHeight()[Separator()]
@@ -499,7 +476,9 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 				[
-					SNew(STextBlock).Text(LOCTEXT("StorageHint", "Des plantes seulement. [G] y ranger toutes vos plantes."))
+					SNew(STextBlock).Text(Opened->GetKind() == EStorageKind::DryingRack
+						? LOCTEXT("RackHint", "Des plantes, dix par crochet : elles sèchent en quatre minutes. [G] y ranger toutes vos plantes.")
+						: LOCTEXT("StorageHint", "Des plantes seulement. [G] y ranger toutes vos plantes."))
 					.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
 				]
 			];

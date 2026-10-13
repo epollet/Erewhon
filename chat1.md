@@ -122,4 +122,112 @@ Au sujet des routes qui permettent l'accès à un secteur privé je voudrais cha
 
 Il faudra un modéle animé pour le joueur
 A certains endroits, les lanternes pourraient être mises sur le même poteau que pour les panneaux plutot que de mettre un poteau supplémentaire
+Les arbres de l'amélioration d'embelissement doivent être beaucoup plus grand pour faire de l'ombre au centre du village, peut être en ajouter quelques uns
+Les pots de fleurs et bancs devraient avoir leur propre modéle et devrait ne pas avoir d'herbe à leur emplacement, peut-être même un petit chemin de terre jusqu'aux bancs
+Ajoute aussi un panneau de triche permettant d'avancer le temps et de définir son nombre de crédits (CTRL + ALT + ù puis CTRL + SHIFT + *)
+
+=======================================================
+
+Les lanternes devraient illuminer un tout petit peu moins (-20%) et osciller aléatoirement, comme une flamme de bougie.
+our les arbres, génére également des modéle, des arbres avec un beau et grand feuillage, genre saule ou dans le genre.
+
+J'aimerais ajouter également une charette de transport, achetable au general store pour 1000c. Quand elle est achetée, elle vient dans l'inventaire. Elle s'équipe pour permettre de la poser, on voit alors à l'endroit ou pointe notre curseur une projection de la charette. On la place alors à cet endroit au clic gauche.
+La charette a deux roues et deux manches à l'avant. En regardant devant la charette, on peut appuyer sur F pour la conduire. On avance alors à 50% de notre vitesse normale. On appuiera sur F de nous pour quitter la conuite de la charette.
+Dans la charette, on peut placer 2 conteneurs (nouveau) en ayant le conteneur dans les main et en cliquant sur l'emplacement qui se met en surbrillance au survol.
+Les conteneur s'achéte au general store, arrivent dans l'inventaire. En cliquant dessus, on les équipes en main. En cliquant par terre, on la dépose. En appuyant sur e dessus, on la prend. En la visant et appuyant sur f, on accéde à son inventaire avec en parraléle le notre.
+2 nouveaux conteneur :
+- La cagette : peut contenir des plantes, autant d'emplacement que dans un sac, vaut 200c et on peut en empiler jusqu'à 3, mais on ne peut en prendre qu'une en mains.
+- le tonneau : peut contenir l'équivalent de 2.5 cagettes, vaut 420c. Quand on porte un tonneau, on avance 50% moins vite.
+
+===========================================================
+
+Les bancs sont à l'envers
+ça crache lorsque je veux accéder à l'inventaire
+```
+LoginId:d2de880de5f049489cabda75ab65d74d
+EpicAccountId:3bc7cdab0a864b799aab1e33e82b6ae8
+
+Unhandled Exception: EXCEPTION_ACCESS_VIOLATION reading address 0x0000000000000010
+
+UnrealEditor_CoreUObject
+UnrealEditor_CoreUObject
+UnrealEditor_Erewhon!SInventoryPanel::Construct() [C:\Users\ADMIN\Documents\Unreal Projects\Erewhon\Source\Erewhon\UI\SInventoryPanel.cpp:181]
+UnrealEditor_Erewhon!TSlateDecl<SInventoryPanel,RequiredArgs::T0RequiredArgs>::operator<<=() [C:\Program Files\Epic Games\UE_5.8\Engine\Source\Runtime\SlateCore\Public\Widgets\DeclarativeSyntaxSupport.h:983]
+UnrealEditor_Erewhon!AErewhonPlayerController::OpenInventory() [C:\Users\ADMIN\Documents\Unreal Projects\Erewhon\Source\Erewhon\Core\ErewhonPlayerController.cpp:407]
+UnrealEditor_Erewhon!TBaseUObjectMethodDelegateInstance<0,AErewhonCharacter,void __cdecl(void),FDefaultDelegateUserPolicy>::Execute() [C:\Program Files\Epic Games\UE_5.8\Engine\Source\Runtime\Core\Public\Delegates\DelegateInstancesImpl.h:609]
+UnrealEditor_Erewhon!FEnhancedInputActionEventDelegateBinding<TDelegate<void __cdecl(void),FDefaultDelegateUserPolicy> >::Execute() [C:\Program Files\Epic Games\UE_5.8\Engine\Plugins\EnhancedInput\Source\EnhancedInput\Public\EnhancedInputComponent.h:340]
+UnrealEditor_EnhancedInput
+UnrealEditor_Engine
+UnrealEditor_EnhancedInput
+UnrealEditor_Engine
+UnrealEditor_Engine
+UnrealEditor_Engine
+UnrealEditor_Engine
+UnrealEditor_Erewhon!AErewhonPlayerController::PlayerTick() [C:\Users\ADMIN\Documents\Unreal Projects\Erewhon\Source\Erewhon\Core\ErewhonPlayerController.cpp:447]
+UnrealEditor_Engine
+UnrealEditor_Engine
+UnrealEditor_Engine
+UnrealEditor_Core
+UnrealEditor_Core
+UnrealEditor_Core
+UnrealEditor_Core
+UnrealEditor_Engine
+UnrealEditor_Engine
+UnrealEditor_Engine
+UnrealEditor_Engine
+UnrealEditor
+UnrealEditor
+UnrealEditor
+UnrealEditor
+UnrealEditor
+UnrealEditor
+kernel32
+ntdll
+```
+
+==============================================================
+
+Les saules font un peu jungle, on peut les garder pour plus tard mais là c'est pas un arbre qu'on met dans un village.
+La charette contient déjà des choses, elle devrait être vide pour qu'on puisse y metre cagettes et tonneaux.
+Lorsque l'on conduit la charette, celle-ci doit suivre le joueur en roulant. Elle s'orientera en tournant autour du milieu entre les roues. Si on la pousse pendant qu'on la conduit (on va vers elle, à l'envers donc), elle roule à l'envers.
+
+==============================================================
+
+L'axe en bois de la charette pour tenir les roues est visible  et pas centré avec les roues, il est beaucoup trop en avant. Soit il faut l'aligner, soit le retirer.
+On va ajouter une nouvelle amélioration pour un secteur de type prairie : apothicairerie. Elle coute 2000c et construit une petite maison d'apoticaire à l'intérieur avec une piéce dans laquelle on a une cheminée qu'on peut allumer avec du petit bois qu'on peut acheter au generals store. ça permet de faire un peu de lumiére. On à aussi une table sur laquelle on a un petit chaudron et un mortier.
+Autour de la maison, on a quelques arbres.
+Si des améliorations de jonction avec la route sont faites, un chemin complémentaire est ajouté jusqu'à l'apoticairerie.
+Avec le mortier, on peut créer des écrasés de plante qui valent 1.5x plus que la plante elle même et prenne 1s chaque à faire. Ensuite, dans le chaudrons, on peut mettre les écrasés d'herbe pour faire des bases de potion, puis en combinant d'autres type de plantes, on obtiens des potions différentes.
+Les potions peuvent être utilisées pour obtenir des effets comme un buff de vitesse, la vision nocturne, de la force (pour ne pas ête ralenti quand on porte quelquechose), un saut plus haut, rapetisser ou grandir.
+Ces potions valent x2 par rapport à l'écrasé.
+Il faudrait aussi ajouter la lune et les étoiles (la lune est en opposition au soleil et brille beaucoup moins).
+
+==================================================================
+
+Les tonneaux et cagettes placés dans la charette ne sont pas assez bas, ils sont au niveau du dessus des barières autour de la charette, mais ils devraient être au niveau du plancher de la charette
+Les pierres des murs de l'apoticairie doivent être plus grosse (x2)
+
+===============================================================
+
+Le jeu est fermé. Tu peux aussi retirer les cout pour les fabrications dans le mortier et le chaudron.
+Aussi, les étagères de l'apoticairies doivent être du coté droit de la piéce, il doit y en avoir 3 et on doit pouvoir y placer les potions. Elles seront ainsi visibles par stack (10).
+
+================================================================
+
+Fait de beaux models pour les potions.
+La barre de progression pour faire les potions n'est pas assez visible, pas assez de contraste
+Je pense que le chaudron devrait être sur le feu. n'hésite pas à faire un beau model animé pour le feu.
+Si le feu est allumé, alors on peu faire des potions.
+On peut aussi mettre des écrasés sur les étagères.
+Si on fait E sur une étagère, on accède à son inventaire, on voit les différentes rangées et on peut donc y placer là où on veut nos items
+
+==============================================================
+
+Peut-être une cheminée modélisée sera plus jolie
+Grossi encore un peu la pierre utilisée pour les murs
+Je propose de faire une petite piéce sur la droite de l'apoticairie qui serait la remise, accessible depuis l'intérieur.
+Cette remise serait une amélioration de l'apoticairerie achetable pour 1000c.
+D'ailleurs je pense que le mobilier devra être achetable au general store : étagères, table, chaudron, mortier. Je te laisse mettre des prix cohérents. 
+Aussi, les éléments mobilier, ainsi que les conteneurs, ne peuvent pas être posé sur un secteur qui n'est pas le notre. En revanche, on peut toujours poser n'importe où une charette. Et on peut toujours y déposer cagette et tonneaux, même si on est pas sur son secteur
+Grossi un peu la taille des potions et éventuellement ajoute leur de petits effets de lumiére
 

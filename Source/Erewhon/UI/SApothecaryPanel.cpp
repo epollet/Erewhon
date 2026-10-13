@@ -16,6 +16,7 @@
 #include "Widgets/SToolTip.h"
 #include "Widgets/Text/STextBlock.h"
 #include "World/Apothecary.h"
+#include "World/Storage.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonApothecaryPanel"
 
@@ -49,8 +50,11 @@ namespace
 void SApothecaryPanel::Construct(const FArguments& InArgs)
 {
 	Controller = InArgs._Controller;
-	House = InArgs._House;
-	bCauldron = InArgs._Station == EApothecaryStation::Cauldron;
+	Station = InArgs._Station;
+	Craft = InArgs._Craft;
+	bCauldron = Craft == static_cast<uint8>(ErewhonApothecary::ECraft::Cauldron);
+	const bool bWorkbench = Craft == static_cast<uint8>(ErewhonApothecary::ECraft::Workbench);
+	House = bCauldron ? ErewhonApothecary::HouseOfHungCauldron(Station.Get()) : nullptr;
 	if (House.IsValid())
 	{
 		House->OnFireChanged.AddSP(this, &SApothecaryPanel::Rebuild);
@@ -68,10 +72,12 @@ void SApothecaryPanel::Construct(const FArguments& InArgs)
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	ChildSlot
 	[
-		Window(bCauldron ? LOCTEXT("CauldronTitle", "Le chaudron") : LOCTEXT("MortarTitle", "Le mortier"),
+		Window(bWorkbench ? LOCTEXT("WorkbenchTitle", "L'atelier") : bCauldron ? LOCTEXT("CauldronTitle", "Le chaudron") : LOCTEXT("MortarTitle", "Le mortier"),
 			SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
-			GPanelWidth, bCauldron
+			GPanelWidth, bWorkbench
+				? LOCTEXT("WorkbenchSubtitle", "Pots-pourris de fleurs séchées, teintures d'écrasés, bouquets en pot.")
+				: bCauldron
 				? LOCTEXT("CauldronSubtitle", "Deux écrasés d'herbe font une base ; une base et deux écrasés d'une plante, une potion.")
 				: LOCTEXT("MortarSubtitle", "Chaque plante, pilée une seconde, donne son écrasé (pris dans vos poches et votre sac)."))
 	];
@@ -148,10 +154,10 @@ void SApothecaryPanel::Rebuild()
 
 	TSharedRef<SVerticalBox> List = SNew(SVerticalBox);
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
-	TWeakObjectPtr<AApothecary> WeakHouse = House;
+	TWeakObjectPtr<AStorageActor> WeakStation = Station;
 	const bool bBusy = Controller->GetCraftJob().IsActive();
 	const bool bCold = bCauldron && !(House.IsValid() && House->IsFireLit());
-	for (const ErewhonApothecary::FRecipe& Recipe : ErewhonApothecary::Recipes(*Items, bCauldron))
+	for (const ErewhonApothecary::FRecipe& Recipe : ErewhonApothecary::Recipes(*Items, static_cast<ErewhonApothecary::ECraft>(Craft)))
 	{
 		const FItemDef* Def = Items->Find(Recipe.Output);
 		if (!Def)
@@ -190,17 +196,17 @@ void SApothecaryPanel::Rebuild()
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 6, 0)
 			[
-				Button(LOCTEXT("MakeOne", "1"), [WeakController, WeakHouse, Output]()
+				Button(LOCTEXT("MakeOne", "1"), [WeakController, WeakStation, Output]()
 				{
-					if (WeakController.IsValid()) { WeakController->ServerStartCraft(WeakHouse.Get(), Output, 1); }
+					if (WeakController.IsValid()) { WeakController->ServerStartCraft(WeakStation.Get(), Output, 1); }
 				}, EButton::Secondary, bCan, 50.f, 11)
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			[
 				Button(FText::Format(LOCTEXT("MakeAll", "Tout ({0})"), FText::AsNumber(Possible > 0 && Possible < TNumericLimits<int32>::Max() ? Possible : 0)),
-					[WeakController, WeakHouse, Output, Possible]()
+					[WeakController, WeakStation, Output, Possible]()
 				{
-					if (WeakController.IsValid()) { WeakController->ServerStartCraft(WeakHouse.Get(), Output, Possible); }
+					if (WeakController.IsValid()) { WeakController->ServerStartCraft(WeakStation.Get(), Output, Possible); }
 				}, EButton::Primary, bCan, 100.f, 11)
 			],
 			8.f);
@@ -226,9 +232,16 @@ TSharedRef<SWidget> SApothecaryPanel::BuildFire() const
 	// Sous le chaudron : le feu, et de quoi le nourrir.
 	const AApothecary* Home = House.Get();
 	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
-	if (!Home || !State)
+	if (!State)
 	{
 		return SNew(SBox);
+	}
+	if (!Home)
+	{
+		return CardBox(
+			SNew(STextBlock).Text(LOCTEXT("NotHung", "Le chaudron doit pendre à la crémaillère de la cheminée : prenez-le et posez-le près du foyer."))
+			.Font(Font(11, true)).ColorAndOpacity(Danger).AutoWrapText(true),
+			8.f);
 	}
 	const bool bLit = Home->IsFireLit();
 	const int32 Wood = CountOwned(State, TEXT("firewood"));

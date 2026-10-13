@@ -8,7 +8,6 @@
 class UInputAction;
 class UInputMappingContext;
 class SWidget;
-enum class EApothecaryStation : uint8;
 
 /** Actions d'entrée créées par code (pas d'assets à maintenir). */
 USTRUCT()
@@ -76,10 +75,8 @@ public:
 	/** Inventaire, avec à côté le contenu d'une cagette ou d'un tonneau. */
 	void OpenStorage(class AStorageActor* Storage);
 	void OpenStore(EShopKind Kind);
-	/** Le mortier ou le chaudron de son apothicairerie. */
-	void OpenApothecary(class AApothecary* House, EApothecaryStation Station);
-	/** Une de ses étagères, à côté de l'inventaire : on y dispose ses potions et ses écrasés étage par étage. */
-	void OpenShelves(class AApothecary* House, int32 Shelf);
+	/** Son mortier ou son chaudron (meubles posés). */
+	void OpenApothecary(class AStorageActor* Station, uint8 Craft);
 
 	/** Panneau de triche (Ctrl+Alt+ù puis Ctrl+Maj+*). */
 	void OpenCheats();
@@ -95,8 +92,8 @@ public:
 	FSimpleMulticastDelegate OnCraftChanged;
 
 	/** Serveur : la préparation en cours, et la maison où elle se fait. */
-	void SetCraftJob(const FErewhonCraftJob& Job, class AApothecary* House);
-	class AApothecary* GetCraftHouse() const { return CraftHouse.Get(); }
+	void SetCraftJob(const FErewhonCraftJob& Job, class AStorageActor* Station);
+	class AStorageActor* GetCraftStation() const { return CraftStation.Get(); }
 	FTimerHandle CraftTimer;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -183,22 +180,18 @@ public:
 
 	/** Préparer Count exemplaires d'Output (un écrasé, une base, une potion), un à la fois. */
 	UFUNCTION(Server, Reliable)
-	void ServerStartCraft(class AApothecary* House, FName Output, int32 Count);
+	void ServerStartCraft(class AStorageActor* Station, FName Output, int32 Count);
 
 	UFUNCTION(Server, Reliable)
 	void ServerStopCraft();
 
-	/** Déplace un objet entre ses poches et les étagères (To = INDEX_NONE : là où il y a de la place). */
+	/** La remise de l'apothicairerie. */
 	UFUNCTION(Server, Reliable)
-	void ServerMoveShelfItem(class AApothecary* House, uint8 Shelf, bool bFromShelf, int32 From, bool bToShelf, int32 To);
-
-	/** G : toutes ses potions et ses écrasés sur cette étagère. */
-	UFUNCTION(Server, Reliable)
-	void ServerStashInShelves(class AApothecary* House, uint8 Shelf);
+	void ServerBuyStoreroom(FIntPoint Sector);
 
 	/** Un exemplaire est prêt : le bruit du pilon ou du chaudron. */
 	UFUNCTION(Client, Unreliable)
-	void ClientCraftStep(bool bCauldron);
+	void ClientCraftStep(uint8 Craft);
 
 	UFUNCTION(Client, Reliable)
 	void ClientToast(const FText& Text);
@@ -232,7 +225,7 @@ private:
 	EShopKind StoreKind = EShopKind::GeneralStore;
 	TWeakObjectPtr<class ABackpack> OpenedBag;
 	TWeakObjectPtr<class AStorageActor> OpenedStorage;
-	TWeakObjectPtr<class AApothecary> OpenedHouse;
+	TWeakObjectPtr<AActor> OpenedStation;
 	TWeakPtr<SWidget> ApothecaryWidget;
 
 	UFUNCTION()
@@ -241,7 +234,7 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_CraftJob)
 	FErewhonCraftJob CraftJob;
 
-	TWeakObjectPtr<class AApothecary> CraftHouse;
+	TWeakObjectPtr<class AStorageActor> CraftStation;
 
 	/** Écoute des raccourcis de triche, avant les entrées du jeu et des menus. */
 	TSharedPtr<class IInputProcessor> CheatKeys;

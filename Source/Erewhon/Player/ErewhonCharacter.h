@@ -66,6 +66,8 @@ public:
 	bool HasPotion(EPotionEffect Effect) const { return PotionRemaining(Effect) > 0.f; }
 	/** Secondes d'effet restantes (0 s'il est passé). */
 	float PotionRemaining(EPotionEffect Effect) const;
+	/** Serveur : un effet venu d'ailleurs (la sérénité d'un pot-pourri), prolongé s'il dure déjà. */
+	void GrantEffect(EPotionEffect Effect, double Seconds);
 
 private:
 	void Move(const FInputActionValue& Value);
@@ -82,6 +84,8 @@ private:
 	void ApplyView();
 	void BuildWornBackpack();
 	void ApplyBackpack();
+	void AttachBackpackToSpine();
+	bool bBackpackOnSpine = false;
 	void ApplySeat();
 
 	/** Le personnage animé (modèle Meshy et ses animations), s'il a été importé. */
@@ -109,6 +113,8 @@ private:
 	struct FPlacement
 	{
 		bool bValid = false;
+		/** Visé, mais interdit ici (pas son secteur). */
+		bool bForbidden = false;
 		uint8 Type = 0;   // 0 : sol, 1 : sur une cagette, 2 : dans une charrette
 		FVector Location = FVector::ZeroVector;
 		float Yaw = 0.f;
@@ -191,6 +197,9 @@ private:
 	/** Halo posé sur la plante visée (une copie par partie de la touffe). */
 	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> Highlights;
 	UPROPERTY(Transient) TObjectPtr<class UMaterialInterface> HighlightMaterial;
+	UPROPERTY(Transient) TObjectPtr<class UMaterialInstanceDynamic> ForbiddenMaterial;
+	/** Le bruit de l'outil, relancé à chaque coup. */
+	UPROPERTY(Transient) TObjectPtr<class UAudioComponent> ToolAudio;
 
 	FCharacterTarget Target;
 	FDelegateHandle AppearanceHandle;

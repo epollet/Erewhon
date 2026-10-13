@@ -397,8 +397,8 @@ void AVillageDecor::BuildDecoration()
 			AddGeneratedMesh(this, Root, PotMesh, Local, 75.f, Rand.FRandRange(0.f, 360.f), true);
 			return;
 		}
-		UStaticMeshComponent* Clay = AddShape(this, Root, EShape::Cylinder, Local + FVector(0, 0, 16), FVector(40, 40, 32), GTerracotta, FRotator::ZeroRotator, true);
-		Clay->SetMaterial(0, MakePaintedMaterial(Clay, TEXT("roof_tiles"), 120.f, GTerracotta));
+		UStaticMeshComponent* Pot = AddShape(this, Root, EShape::Cylinder, Local + FVector(0, 0, 16), FVector(40, 40, 32), GTerracotta, FRotator::ZeroRotator, true);
+		Pot->SetMaterial(0, MakePaintedMaterial(Pot, TEXT("roof_tiles"), 120.f, GTerracotta));
 		AddShape(this, Root, EShape::Cylinder, Local + FVector(0, 0, 31), FVector(36, 36, 2), Palette::Dirt, FRotator::ZeroRotator, false);
 		for (int32 i = 0; i < 4; ++i)
 		{

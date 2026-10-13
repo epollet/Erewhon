@@ -9,11 +9,12 @@
 #include "Core/ErewhonPlayerState.h"
 #include "Core/ErewhonSettings.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Items/ItemDatabase.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
-#include "Engine/Texture.h"
 #include "ProceduralMeshComponent.h"
 #include "World/Door.h"
 #include "World/ErewhonSound.h"
@@ -21,6 +22,7 @@
 #include "World/SectorTypes.h"
 #include "World/SpawnCabin.h"
 #include "World/SpawnLayout.h"
+#include "World/Storage.h"
 #include "World/Terrain.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonApothecary"
@@ -45,21 +47,25 @@ namespace
 	const FLinearColor GBark = FLinearColor::FromSRGBColor(FColor(96, 70, 48));
 }
 
-// ── Plan et recettes ─────────────────────────────────────────────────────────
+// ── Plan, étagères et recettes ───────────────────────────────────────────────
 
 namespace ErewhonApothecary
 {
-	FVector MortarLocal() { return FVector(40.f, -45.f, ErewhonSpawn::CabinFloorTop + 82.f); }
-	FVector CauldronLocal() { return HearthLocal() + FVector(0.f, 0.f, 46.f); }   // pendu à la crémaillère, au-dessus des flammes
-	FVector HearthLocal() { return FVector(ErewhonSpawn::CabinHalfLength - ErewhonSpawn::CabinWallThickness - 42.f, 0.f, ErewhonSpawn::CabinFloorTop + 8.f); }
-
-	FTransform ShelfLocal(int32 Shelf)
+	bool HasFireplaceModel()
 	{
-		// Contre le mur +Y, de part et d'autre de la fenêtre (centrée, ±100 cm).
-		const float X[ShelfCount] = { -320.f, -180.f, 230.f };
-		return FTransform(FRotator(0.f, 90.f, 0.f),
-			FVector(X[FMath::Clamp(Shelf, 0, ShelfCount - 1)], ErewhonSpawn::CabinHalfWidth - ErewhonSpawn::CabinWallThickness - 20.f, ErewhonSpawn::CabinFloorTop));
+		static const bool bModel = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_fireplace")) != nullptr;
+		return bModel;
 	}
+
+	FVector HearthLocal()
+	{
+		// Dans le modèle, la sole du foyer est à 10 % de la hauteur, au milieu de la profondeur de l'ouverture.
+		const float Back = ErewhonSpawn::CabinHalfLength - ErewhonSpawn::CabinWallThickness;
+		return HasFireplaceModel()
+			? FVector(Back - 62.f, 0.f, ErewhonSpawn::CabinFloorTop + 23.f)
+			: FVector(Back - 42.f, 0.f, ErewhonSpawn::CabinFloorTop + 8.f);
+	}
+	FVector CauldronLocal() { return HearthLocal() + FVector(0.f, 0.f, 46.f); }   // le pied du chaudron, pendu au-dessus des flammes
 
 	bool IsShelvable(const FItemDef& Def)
 	{
@@ -68,7 +74,116 @@ namespace ErewhonApothecary
 
 	float ShelfRowZ(int32 Row)
 	{
-		return 8.f + 46.f * Row;   // le dessus des planches de l'étagère (voir ASpawnCabin::AddShelf)
+		// Le dessus des planches : celles du modèle généré (mesurées), ou celles de BuildShelfFrame.
+		static const bool bModel = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_shelf")) != nullptr;
+		const float ModelRows[ShelfRows] = { 10.5f, 51.5f, 95.5f, 140.f };
+		return bModel ? ModelRows[FMath::Clamp(Row, 0, ShelfRows - 1)] : 8.f + 46.f * Row;
+	}
+
+	void BuildShelfFrame(AActor* Owner, USceneComponent* Parent)
+	{
+		if (UStaticMesh* Model = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_shelf")))
+		{
+			// Le modèle peint, façade vers −X comme les planches (sa collision : la boîte du meuble).
+			UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(Owner);
+			Part->SetStaticMesh(Model);
+			Part->SetupAttachment(Parent);
+			Part->SetRelativeTransform(FitToBox(Model, ShelfWidth, ShelfDepth, ShelfHeight));
+			Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Part->RegisterComponent();
+			Owner->AddInstanceComponent(Part);
+			return;
+		}
+		constexpr float Board = 4.f;
+		UMaterialInterface* Wood = MakePaintedMaterial(Owner, TEXT("wood_planks"), 90.f, Palette::WoodLight, FLinearColor(0.85f, 0.75f, 0.62f));
+		const auto Plank = [Owner, Parent, Wood](const FVector& Center, const FVector& Size)
+		{
+			AddShape(Owner, Parent, EShape::Cube, Center, Size, Palette::WoodLight, FRotator::ZeroRotator, false)->SetMaterial(0, Wood);
+		};
+		for (const float SideY : { -1.f, 1.f })
+		{
+			Plank(FVector(0.f, SideY * (ShelfWidth * 0.5f - Board * 0.5f), ShelfHeight * 0.5f), FVector(ShelfDepth, Board, ShelfHeight));
+		}
+		Plank(FVector(ShelfDepth * 0.5f - 1.f, 0.f, ShelfHeight * 0.5f), FVector(2.f, ShelfWidth, ShelfHeight));   // le fond
+		for (const float Z : { 6.f, 52.f, 98.f, 144.f, ShelfHeight - Board * 0.5f })
+		{
+			Plank(FVector(0.f, 0.f, Z), FVector(ShelfDepth, ShelfWidth - 2 * Board, Board));
+		}
+	}
+
+	void BuildShelfDisplay(AActor* Owner, USceneComponent* Parent, const TArray<FInventorySlot>& Slots, TArray<TObjectPtr<UPrimitiveComponent>>& Parts)
+	{
+		for (UPrimitiveComponent* Part : Parts)
+		{
+			if (Part)
+			{
+				Part->DestroyComponent();
+			}
+		}
+		Parts.Reset();
+		const UItemDatabase* Items = UItemDatabase::Get(Owner);
+		if (!Items || Owner->GetNetMode() == NM_DedicatedServer)
+		{
+			return;
+		}
+		const FLinearColor Cork = FLinearColor::FromSRGBColor(FColor(150, 110, 70));
+		UStaticMesh* Bowl = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_bowl"));
+		UMaterialInterface* GlowMaterial = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_Glow"));
+		UTexture* GlowTexture = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_star"));
+		for (int32 Row = 0; Row < Slots.Num() && Row < ShelfRows; ++Row)
+		{
+			const FInventorySlot& Slot = Slots[Row];
+			const FItemDef* Def = Slot.IsEmpty() ? nullptr : Items->Find(Slot.ItemId);
+			if (!Def)
+			{
+				continue;
+			}
+			// Une pile par étage : dix flacons (ou bols) sur deux rangs en quinconce.
+			const bool bCrushed = Def->Id.ToString().StartsWith(TEXT("crushed_"));
+			UStaticMesh* Model = bCrushed ? Bowl : Cast<UStaticMesh>(Def->Mesh.TryLoad());
+			UMaterialInstanceDynamic* Glow = nullptr;
+			if (Def->IsPotion() && GlowMaterial && GlowTexture)
+			{
+				Glow = UMaterialInstanceDynamic::Create(GlowMaterial, Owner);
+				Glow->SetVectorParameterValue(TEXT("Color"), Def->Color);
+				Glow->SetScalarParameterValue(TEXT("Seed"), Row * 1.7f);
+			}
+			for (int32 k = 0; k < FMath::Min(Slot.Count, PotionsPerSlot); ++k)
+			{
+				const bool bFront = k < 5;
+				const FVector Foot(bFront ? -8.f : 6.f, bFront ? -40.f + k * 20.f : -30.f + (k - 5) * 20.f, ShelfRowZ(Row));
+				if (Model)
+				{
+					Parts.Add(AddGeneratedMesh(Owner, Parent, Model, Foot, bCrushed ? 6.f : 20.f, 180.f + (k % 3 - 1) * 14.f, false));
+					if (bCrushed)
+					{
+						// La pâte de plante dans le bol, à sa couleur.
+						Parts.Add(AddShape(Owner, Parent, EShape::Cylinder, Foot + FVector(0, 0, 4.6f), FVector(8.5f, 8.5f, 1.4f), Def->Color, FRotator::ZeroRotator, false));
+					}
+				}
+				else
+				{
+					Parts.Add(AddShape(Owner, Parent, EShape::Sphere, Foot + FVector(0, 0, 7.f), FVector(11.f, 11.f, 14.f), Def->Color, FRotator::ZeroRotator, false));
+					Parts.Add(AddShape(Owner, Parent, EShape::Cylinder, Foot + FVector(0, 0, 16.f), FVector(4.f, 4.f, 5.f), Cork, FRotator::ZeroRotator, false));
+				}
+				if (Glow)
+				{
+					// Une petite lueur de la couleur de la potion, qui palpite doucement devant le flacon.
+					if (UProceduralMeshComponent* Halo = AddPicture(Owner, Parent, Foot + FVector(-9.f, 0.f, 9.f), 26.f, 26.f, 0.f, GlowTexture))
+					{
+						Halo->SetMaterial(0, Glow);
+						Parts.Add(Halo);
+					}
+				}
+			}
+		}
+		for (UPrimitiveComponent* Part : Parts)
+		{
+			if (Part)
+			{
+				Part->SetCastShadow(false);
+			}
+		}
 	}
 
 	int32 DoorSide(const FIntPoint& Sector)
@@ -112,6 +227,54 @@ namespace ErewhonApothecary
 		return State && (State->GetBuildings(Sector) & ESectorBuilding::Apothecary) != 0;
 	}
 
+	bool HasStoreroom(const AErewhonGameState* State, const FIntPoint& Sector)
+	{
+		return HasHouse(State, Sector) && (State->GetBuildings(Sector) & ESectorBuilding::Storeroom) != 0;
+	}
+
+	TOptional<FTransform> HookTransform(const UObject* WorldContext, const FIntPoint& Sector)
+	{
+		const AErewhonGameState* State = AErewhonGameState::Get(WorldContext);
+		if (!HasHouse(State, Sector))
+		{
+			return {};
+		}
+		const FTransform House = HouseTransform(Sector, State->GetWorldSeed());
+		return FTransform(House.Rotator(), House.TransformPosition(CauldronLocal()));
+	}
+
+	AApothecary* FindHouse(const UObject* WorldContext, const FIntPoint& Sector)
+	{
+		UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+		if (!World)
+		{
+			return nullptr;
+		}
+		for (TActorIterator<AApothecary> It(World); It; ++It)
+		{
+			if (It->GetSector() == Sector)
+			{
+				return *It;
+			}
+		}
+		return nullptr;
+	}
+
+	AApothecary* HouseOfHungCauldron(const AStorageActor* Cauldron)
+	{
+		if (!Cauldron || Cauldron->GetKind() != EStorageKind::Cauldron || Cauldron->GetCarrier())
+		{
+			return nullptr;
+		}
+		const FIntPoint Sector = ErewhonSector::FromWorld(Cauldron->GetActorLocation());
+		const TOptional<FTransform> Hook = HookTransform(Cauldron, Sector);
+		if (!Hook.IsSet() || FVector::Dist(Hook->GetLocation(), Cauldron->GetActorLocation()) > 20.f)
+		{
+			return nullptr;
+		}
+		return FindHouse(Cauldron, Sector);
+	}
+
 	bool IsInside(const UObject* WorldContext, const FVector& World)
 	{
 		const AErewhonGameState* State = AErewhonGameState::Get(WorldContext);
@@ -121,48 +284,70 @@ namespace ErewhonApothecary
 			return false;
 		}
 		const FVector Local = HouseTransform(Sector, State->GetWorldSeed()).InverseTransformPosition(World);
-		return FMath::Abs(Local.X) < ErewhonSpawn::CabinHalfLength && FMath::Abs(Local.Y) < ErewhonSpawn::CabinHalfWidth
-			&& Local.Z > ErewhonSpawn::CabinFloorTop - 20.f;
+		if (Local.Z < ErewhonSpawn::CabinFloorTop - 20.f)
+		{
+			return false;
+		}
+		const bool bMain = FMath::Abs(Local.X) < ErewhonSpawn::CabinHalfLength && FMath::Abs(Local.Y) < ErewhonSpawn::CabinHalfWidth;
+		const bool bStore = HasStoreroom(State, Sector) && FMath::Abs(Local.X) < StoreroomHalfLength
+			&& Local.Y >= ErewhonSpawn::CabinHalfWidth && Local.Y < ErewhonSpawn::CabinHalfWidth + StoreroomDepth;
+		return bMain || bStore;
 	}
 
-	TArray<FRecipe> Recipes(const UItemDatabase& Items, bool bCauldron)
+	TArray<FRecipe> Recipes(const UItemDatabase& Items, ECraft Craft)
 	{
 		TArray<FRecipe> Out;
-		if (!bCauldron)
+		const auto Add = [&Items, &Out, Craft](const TCHAR* Output, TArray<TPair<FName, int32>> Inputs)
 		{
-			// Le mortier : chaque plante donne son écrasé.
+			// Seulement si tout existe dans le catalogue.
+			bool bKnown = Items.Find(Output) != nullptr;
+			for (const TPair<FName, int32>& Input : Inputs)
+			{
+				bKnown &= Items.Find(Input.Key) != nullptr;
+			}
+			if (bKnown)
+			{
+				Out.Add({ FName(Output), MoveTemp(Inputs), Craft });
+			}
+		};
+		switch (Craft)
+		{
+		case ECraft::Mortar:
+			// Chaque plante donne son écrasé.
 			for (const FItemDef* Plant : Items.GetPlants())
 			{
-				if (Items.Find(Crushed(Plant->Id)))
-				{
-					Out.Add({ Crushed(Plant->Id), { { Plant->Id, 1 } }, false });
-				}
+				Add(*Crushed(Plant->Id).ToString(), { { Plant->Id, 1 } });
 			}
-			return Out;
-		}
-		// Le chaudron : deux écrasés d'herbe font une base ; une base et deux écrasés d'une plante, une potion.
-		const FName Base(TEXT("potion_base"));
-		const FName Grass = Crushed(TEXT("grass"));
-		if (Items.Find(Base) && Items.Find(Grass))
-		{
-			Out.Add({ Base, { { Grass, 2 } }, true });
-		}
-		for (const TPair<const TCHAR*, const TCHAR*>& Potion : GPotions)
-		{
-			const FName Ingredient = Crushed(Potion.Value);
-			if (Items.Find(Potion.Key) && Items.Find(Ingredient))
+			break;
+		case ECraft::Cauldron:
+			// Deux écrasés d'herbe font une base ; une base et deux écrasés d'une plante, une potion.
+			Add(TEXT("potion_base"), { { Crushed(TEXT("grass")), 2 } });
+			for (const TPair<const TCHAR*, const TCHAR*>& Potion : GPotions)
 			{
-				Out.Add({ FName(Potion.Key), { { Base, 1 }, { Ingredient, 2 } }, true });
+				Add(Potion.Key, { { TEXT("potion_base"), 1 }, { Crushed(Potion.Value), 2 } });
 			}
+			break;
+		case ECraft::Workbench:
+			// Le pot-pourri, de fleurs et d'herbes séchées.
+			Add(TEXT("potpourri"), { { TEXT("dried_flower_white"), 2 }, { TEXT("dried_flower_purple"), 2 }, { TEXT("dried_herb"), 1 } });
+			// Les teintures : trois écrasés d'une même plante.
+			Add(TEXT("dye_blue"), { { Crushed(TEXT("flower_blue")), 3 } });
+			Add(TEXT("dye_purple"), { { Crushed(TEXT("flower_purple")), 3 } });
+			Add(TEXT("dye_green"), { { Crushed(TEXT("weed_nettle")), 3 } });
+			Add(TEXT("dye_rust"), { { Crushed(TEXT("weed_dock")), 3 } });
+			// Les bouquets en pot : frais, ou de plantes séchées.
+			Add(TEXT("bouquet_fresh"), { { TEXT("flower_white"), 2 }, { TEXT("flower_blue"), 2 }, { TEXT("flower_purple"), 1 }, { TEXT("fern"), 1 } });
+			Add(TEXT("bouquet_dry"), { { TEXT("dried_flower_white"), 2 }, { TEXT("dried_flower_blue"), 1 }, { TEXT("dried_flower_purple"), 1 }, { TEXT("dried_grass"), 2 } });
+			break;
 		}
 		return Out;
 	}
 
 	TOptional<FRecipe> FindRecipe(const UItemDatabase& Items, FName Output)
 	{
-		for (const bool bCauldron : { false, true })
+		for (const ECraft Craft : { ECraft::Mortar, ECraft::Cauldron, ECraft::Workbench })
 		{
-			for (const FRecipe& Recipe : Recipes(Items, bCauldron))
+			for (const FRecipe& Recipe : Recipes(Items, Craft))
 			{
 				if (Recipe.Output == Output)
 				{
@@ -192,85 +377,12 @@ void AApothecary::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AApothecary, Sector);
 	DOREPLIFETIME(AApothecary, FireUntil);
-	DOREPLIFETIME(AApothecary, Shelves);
 }
 
-void AApothecary::Setup(const FIntPoint& InSector, double InFireUntil, const TArray<FInventorySlot>& InShelves)
+void AApothecary::Setup(const FIntPoint& InSector, double InFireUntil)
 {
 	Sector = InSector;
 	FireUntil = InFireUntil;
-	Shelves = InShelves;
-	Shelves.SetNum(ErewhonApothecary::ShelfSlots);
-}
-
-void AApothecary::CommitShelves()
-{
-	ForceNetUpdate();
-	OnRep_Shelves();   // l'hôte d'une partie en écoute ne reçoit pas d'OnRep
-}
-
-void AApothecary::OnRep_Shelves()
-{
-	BuildShelfPotions();
-	OnShelvesChanged.Broadcast();
-}
-
-void AApothecary::BuildShelfPotions()
-{
-	if (!bBuilt || GetNetMode() == NM_DedicatedServer)
-	{
-		return;
-	}
-	for (UStaticMeshComponent* Bottle : ShelfBottles)
-	{
-		if (Bottle)
-		{
-			Bottle->DestroyComponent();
-		}
-	}
-	ShelfBottles.Reset();
-	const UItemDatabase* Items = UItemDatabase::Get(this);
-	const FLinearColor Cork = FLinearColor::FromSRGBColor(FColor(150, 110, 70));
-	UStaticMesh* Bowl = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_bowl"));
-	for (int32 Index = 0; Index < Shelves.Num() && Index < ErewhonApothecary::ShelfSlots; ++Index)
-	{
-		const FInventorySlot& Slot = Shelves[Index];
-		const FItemDef* Def = Items && !Slot.IsEmpty() ? Items->Find(Slot.ItemId) : nullptr;
-		if (!Def)
-		{
-			continue;
-		}
-		// Une pile par rayon : un flacon (ou un bol) par exemplaire, alignés.
-		const bool bCrushed = Def->Id.ToString().StartsWith(TEXT("crushed_"));
-		UStaticMesh* Model = bCrushed ? Bowl : Cast<UStaticMesh>(Def->Mesh.TryLoad());
-		const FTransform Shelf = ErewhonApothecary::ShelfLocal(Index / ErewhonApothecary::ShelfRows);
-		const float Z = ErewhonApothecary::ShelfRowZ(Index % ErewhonApothecary::ShelfRows);
-		for (int32 k = 0; k < FMath::Min(Slot.Count, ErewhonApothecary::PotionsPerSlot); ++k)
-		{
-			const FVector Foot = Shelf.TransformPosition(FVector(-4.f, -45.f + k * 10.f, Z));
-			if (Model)
-			{
-				ShelfBottles.Add(AddGeneratedMesh(this, Root, Model, Foot, bCrushed ? 4.5f : 14.f, Shelf.Rotator().Yaw + 180.f + (k % 3 - 1) * 12.f, false));
-				if (bCrushed)
-				{
-					// La pâte de plante dans le bol, à sa couleur.
-					ShelfBottles.Add(AddShape(this, Root, EShape::Cylinder, Foot + FVector(0, 0, 3.6f), FVector(6.5f, 6.5f, 1.2f), Def->Color, FRotator::ZeroRotator, false));
-				}
-				continue;
-			}
-			UStaticMeshComponent* Body = AddShape(this, Root, EShape::Sphere, Foot + FVector(0, 0, 5.5f), FVector(8.f, 8.f, 11.f), Def->Color, FRotator::ZeroRotator, false);
-			UStaticMeshComponent* Stopper = AddShape(this, Root, EShape::Cylinder, Foot + FVector(0, 0, 13.f), FVector(3.5f, 3.5f, 4.f), Cork, FRotator::ZeroRotator, false);
-			ShelfBottles.Add(Body);
-			ShelfBottles.Add(Stopper);
-		}
-	}
-	for (UStaticMeshComponent* Part : ShelfBottles)
-	{
-		if (Part)
-		{
-			Part->SetCastShadow(false);
-		}
-	}
 }
 
 bool AApothecary::IsFireLit() const
@@ -305,17 +417,18 @@ void AApothecary::BeginPlay()
 
 void AApothecary::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// Revente du secteur : la maison et ses postes disparaissent avec elle.
+	// Revente du secteur : la maison disparaît avec elle.
+	if (AErewhonGameState* State = AErewhonGameState::Get(this))
+	{
+		State->OnSectorOwnerChanged.Remove(OwnerHandle);
+	}
 	if (House)
 	{
 		House->Destroy();
 	}
-	for (AActor* Station : Stations)
+	if (HearthStation)
 	{
-		if (Station)
-		{
-			Station->Destroy();
-		}
+		HearthStation->Destroy();
 	}
 	if (Door && HasAuthority())
 	{
@@ -324,9 +437,34 @@ void AApothecary::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void AApothecary::BuildLocal()
+void AApothecary::BuildHouse()
 {
 	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	if (House)
+	{
+		House->Destroy();
+	}
+	bHouseHasStoreroom = ErewhonApothecary::HasStoreroom(State, Sector);
+	const FTransform HouseT = GetActorTransform();
+	House = GetWorld()->SpawnActorDeferred<ASpawnCabin>(ASpawnCabin::StaticClass(), HouseT, nullptr, nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	House->Kind = EShopKind::Apothecary;
+	House->bStoreroom = bHouseHasStoreroom;
+	House->FinishSpawning(HouseT);
+}
+
+void AApothecary::OnSectorOwnerChanged(const FIntPoint& Changed)
+{
+	// La remise vient d'être construite : la maison se refait avec sa porte de côté.
+	if (Changed == Sector && bBuilt && ErewhonApothecary::HasStoreroom(AErewhonGameState::Get(this), Sector) != bHouseHasStoreroom)
+	{
+		BuildHouse();
+	}
+}
+
+void AApothecary::BuildLocal()
+{
+	AErewhonGameState* State = AErewhonGameState::Get(this);
 	if (bBuilt || !State)
 	{
 		return;
@@ -334,12 +472,8 @@ void AApothecary::BuildLocal()
 	bBuilt = true;
 	const FTransform HouseT = ErewhonApothecary::HouseTransform(Sector, State->GetWorldSeed());
 	SetActorTransform(HouseT);
-
-	// La maison elle-même : une cabane du village, à l'habillage de l'apothicaire.
-	House = GetWorld()->SpawnActorDeferred<ASpawnCabin>(ASpawnCabin::StaticClass(), HouseT, nullptr, nullptr,
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	House->Kind = EShopKind::Apothecary;
-	House->FinishSpawning(HouseT);
+	BuildHouse();
+	OwnerHandle = State->OnSectorOwnerChanged.AddUObject(this, &AApothecary::OnSectorOwnerChanged);
 
 	// La porte (répliquée) : le serveur la pose.
 	if (HasAuthority())
@@ -351,23 +485,14 @@ void AApothecary::BuildLocal()
 		Door = GetWorld()->SpawnActor<ADoor>(Hinge.GetLocation(), Hinge.Rotator(), Params);
 	}
 
-	// Les postes : le mortier et le chaudron sur la table, la cheminée.
-	struct FSpot { EApothecaryStation Kind; FTransform Local; int32 Shelf; };
-	const FSpot Spots[] = {
-		{ EApothecaryStation::Mortar, FTransform(ErewhonApothecary::MortarLocal()), 0 },
-		{ EApothecaryStation::Cauldron, FTransform(ErewhonApothecary::CauldronLocal()), 0 },
-		{ EApothecaryStation::Shelf, ErewhonApothecary::ShelfLocal(0), 0 },
-		{ EApothecaryStation::Shelf, ErewhonApothecary::ShelfLocal(1), 1 },
-		{ EApothecaryStation::Shelf, ErewhonApothecary::ShelfLocal(2), 2 },
-	};
-	for (const FSpot& Spot : Spots)
+	// Le foyer, qu'on vise pour y mettre du petit bois.
 	{
-		const FTransform At = Spot.Local * HouseT;
+		const FTransform At = FTransform(ErewhonApothecary::HearthLocal()) * HouseT;
 		AApothecaryStation* Station = GetWorld()->SpawnActorDeferred<AApothecaryStation>(AApothecaryStation::StaticClass(), At, nullptr, nullptr,
 			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-		Station->Setup(this, Spot.Kind, Spot.Shelf);
+		Station->Setup(this);
 		Station->FinishSpawning(At);
-		Stations.Add(Station);
+		HearthStation = Station;
 	}
 
 	// Quelques grands arbres autour, sur les diagonales : jamais sur un chemin ni devant la porte.
@@ -408,7 +533,6 @@ void AApothecary::BuildLocal()
 	{
 		return;
 	}
-	BuildShelfPotions();
 	// Les flammes : des flammes peintes croisées, que M_Flame fait onduler, autour et sous le chaudron.
 	UMaterialInterface* FlameMaterial = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_Flame"));
 	UTexture* FlameTexture = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_flame"));
@@ -456,7 +580,7 @@ void AApothecary::BuildLocal()
 		FireSound->SetupAttachment(Root);
 		FireSound->SetRelativeLocation(Hearth + FVector(0, 0, 30));
 		FireSound->SetSound(Crackle);
-		FireSound->AttenuationSettings = ErewhonSound::Attenuation(150.f, 1400.f);
+		FireSound->AttenuationSettings = ErewhonSound::Attenuation(400.f, 1800.f);
 		FireSound->SetVolumeMultiplier(0.f);
 		FireSound->bAutoActivate = false;
 		FireSound->RegisterComponent();
@@ -522,11 +646,11 @@ void AApothecary::UpdateFire(float DeltaSeconds)
 		{
 			FireSound->Stop();
 		}
-		FireSound->SetVolumeMultiplier(0.8f * FireLevel * ErewhonSound::ChannelVolume(ErewhonSound::EChannel::Effects));
+		FireSound->SetVolumeMultiplier(1.4f * FireLevel * ErewhonSound::ChannelVolume(ErewhonSound::EChannel::Effects));
 	}
 }
 
-// ── Les postes ───────────────────────────────────────────────────────────────
+// ── Le foyer ─────────────────────────────────────────────────────────────────
 
 AApothecaryStation::AApothecaryStation()
 {
@@ -537,64 +661,12 @@ AApothecaryStation::AApothecaryStation()
 	RootComponent = Bounds;
 }
 
-void AApothecaryStation::Setup(AApothecary* InHouse, EApothecaryStation InKind, int32 InShelf)
-{
-	House = InHouse;
-	Kind = InKind;
-	ShelfIndex = InShelf;
-}
-
 void AApothecaryStation::BeginPlay()
 {
 	Super::BeginPlay();
-	// Une zone de visée au-dessus du poste, et son objet posé dessus.
-	USceneComponent* Base = NewObject<USceneComponent>(this);
-	Base->SetupAttachment(Bounds);
-	Base->RegisterComponent();
-	switch (Kind)
-	{
-	case EApothecaryStation::Mortar:
-		Bounds->SetBoxExtent(FVector(22.f, 22.f, 16.f));
-		Base->SetRelativeLocation(FVector(0, 0, -16.f));
-		if (UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_mortar")))
-		{
-			AddGeneratedMesh(this, Base, Mesh, FVector::ZeroVector, 20.f, 0.f, false);
-		}
-		else
-		{
-			AddShape(this, Base, EShape::Cylinder, FVector(0, 0, 7), FVector(24, 24, 14), Palette::Stone, FRotator::ZeroRotator, false);
-			AddShape(this, Base, EShape::Cylinder, FVector(3, 0, 18), FVector(4, 4, 22), Palette::Stone, FRotator(20.f, 0.f, 0.f), false);
-		}
-		break;
-	case EApothecaryStation::Cauldron:
-		Bounds->SetBoxExtent(FVector(30.f, 30.f, 26.f));
-		Base->SetRelativeLocation(FVector(0, 0, -26.f));
-		if (UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_cauldron")))
-		{
-			AddGeneratedMesh(this, Base, Mesh, FVector::ZeroVector, 48.f, 0.f, false);
-		}
-		else
-		{
-			AddShape(this, Base, EShape::Sphere, FVector(0, 0, 16), FVector(36, 36, 30), FLinearColor::FromSRGBColor(FColor(40, 40, 44)), FRotator::ZeroRotator, false);
-			AddShape(this, Base, EShape::Cylinder, FVector(0, 0, 28), FVector(26, 26, 2), FLinearColor::FromSRGBColor(FColor(90, 170, 80)), FRotator::ZeroRotator, false);
-		}
-		break;
-	case EApothecaryStation::Shelf:
-		// Toute l'étagère se vise.
-		Bounds->SetBoxExtent(FVector(20.f, 62.f, 96.f));
-		Base->SetRelativeLocation(FVector(0, 0, -96.f));
-		SetActorLocation(GetActorLocation() + FVector(0, 0, 96.f));
-		break;
-	default:
-		Bounds->SetBoxExtent(FVector(40.f, 70.f, 55.f));
-		Base->SetRelativeLocation(FVector(0, 0, -55.f));
-		SetActorLocation(GetActorLocation() + FVector(0, 0, 55.f));
-		break;
-	}
-	if (Kind == EApothecaryStation::Mortar || Kind == EApothecaryStation::Cauldron)
-	{
-		SetActorLocation(GetActorLocation() + FVector(0, 0, Bounds->GetUnscaledBoxExtent().Z));
-	}
+	// Les bûches seulement : le chaudron pendu au-dessus se vise à part.
+	Bounds->SetBoxExtent(FVector(30.f, 55.f, 20.f));
+	SetActorLocation(GetActorLocation() + GetActorRotation().RotateVector(FVector(-8.f, 0.f, 20.f)));
 }
 
 bool AApothecaryStation::IsLocalOwner() const
@@ -619,23 +691,12 @@ FText AApothecaryStation::GetInteractionLabel() const
 		const AErewhonGameState* State = AErewhonGameState::Get(this);
 		return FText::Format(LOCTEXT("OthersHouse", "Apothicairerie de {0}"), FText::FromString(State ? State->GetSectorOwnerName(Home->GetSector()) : FString()));
 	}
-	switch (Kind)
+	if (Home->IsFireLit())
 	{
-	case EApothecaryStation::Mortar:
-		return LOCTEXT("UseMortar", "Piler des plantes au mortier");
-	case EApothecaryStation::Cauldron:
-		return Home->IsFireLit() ? LOCTEXT("UseCauldron", "Préparer une potion au chaudron")
-			: LOCTEXT("UseCauldronCold", "Le chaudron (le feu est éteint)");
-	case EApothecaryStation::Shelf:
-		return FText::Format(LOCTEXT("UseShelf", "Étagère {0} (potions et écrasés)"), FText::AsNumber(ShelfIndex + 1));
-	default:
-		if (Home->IsFireLit())
-		{
-			return FText::Format(LOCTEXT("FeedFire", "Remettre du petit bois (le feu brûle encore {0} min)"),
-				FText::AsNumber(FMath::CeilToInt32(Home->FireRemaining() / 60.0)));
-		}
-		return LOCTEXT("LightFire", "Allumer le feu (petit bois)");
+		return FText::Format(LOCTEXT("FeedFire", "Remettre du petit bois (le feu brûle encore {0} min)"),
+			FText::AsNumber(FMath::CeilToInt32(Home->FireRemaining() / 60.0)));
 	}
+	return LOCTEXT("LightFire", "Allumer le feu (petit bois)");
 }
 
 void AApothecaryStation::Interact(AErewhonPlayerController* Controller)
@@ -650,12 +711,7 @@ void AApothecaryStation::Interact(AErewhonPlayerController* Controller)
 		Controller->ShowToast(LOCTEXT("NotYourHouse", "Ce n'est pas votre apothicairerie."));
 		return;
 	}
-	if (Kind == EApothecaryStation::Shelf)
-	{
-		Controller->OpenShelves(Home, ShelfIndex);
-		return;
-	}
-	Controller->OpenApothecary(Home, Kind);
+	Controller->ServerFeedFire(Home);
 }
 
 #undef LOCTEXT_NAMESPACE

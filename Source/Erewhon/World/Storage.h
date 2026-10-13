@@ -10,12 +10,19 @@ class ACart;
 class UStaticMesh;
 class UStaticMeshComponent;
 
-/** Les conteneurs qu'on pose dans le monde. */
+/** Les conteneurs et le mobilier qu'on pose dans le monde (l'ordre est sauvegardé : ajouter à la fin). */
 UENUM()
 enum class EStorageKind : uint8
 {
 	Crate,    // cagette : des plantes, 12 places, s'empile par 3
 	Barrel,   // tonneau : des plantes, 30 places, lourd à porter
+	Shelf,    // étagère à potions : 4 étages, une pile de 10 par étage
+	Table,    // table de travail : on y pose un mortier
+	Mortar,   // mortier : plantes → écrasés
+	Cauldron, // chaudron : pendu à la crémaillère d'une cheminée allumée, écrasés → potions
+	DryingRack, // séchoir : les plantes y sèchent
+	Workbench,  // petit atelier d'apothicaire : pots-pourris, teintures, bouquets
+	Potpourri,  // pot-pourri posé : parfume les alentours et apaise ceux qui passent, un temps
 };
 
 /** Ce qu'on peut poser dans le monde depuis ses mains (objet de l'inventaire). */
@@ -27,12 +34,32 @@ namespace ErewhonPlaceables
 	EREWHON_API bool IsCart(FName ItemId);
 
 	EREWHON_API int32 Capacity(EStorageKind Kind);
+	/** Mobilier de l'apothicairerie (étagère, table, mortier, chaudron) : ni pile ni charrette. */
+	EREWHON_API bool IsFurniture(EStorageKind Kind);
+	/** On avance moitié moins vite en le portant. */
+	EREWHON_API bool IsHeavy(EStorageKind Kind);
 	EREWHON_API float Height(EStorageKind Kind);
 	EREWHON_API FText KindName(EStorageKind Kind);
 
 	/** Le modèle d'un conteneur ou de la charrette, et sa mise à l'échelle (posé sur Z = 0, grand côté sur Y). */
 	EREWHON_API UStaticMesh* StorageMesh(EStorageKind Kind, FTransform& OutFit);
 	EREWHON_API UStaticMesh* CartMesh(FTransform& OutFit);
+
+	/**
+	 * Peut-on poser ceci là ? (Type : 0 au sol, 1 sur un autre, 2 dans une charrette.)
+	 * La charrette se pose partout ; une cagette ou un tonneau va dans une charrette partout ;
+	 * sinon, conteneurs et mobilier ne se posent que sur ses propres secteurs.
+	 */
+	EREWHON_API bool CanPlaceAt(const UObject* WorldContext, const FString& PlayerKey, bool bCart, EStorageKind Kind, uint8 Type, const FVector& Location);
+
+	/** Temps de séchage d'une plante sur le séchoir, durée de vie d'un pot-pourri posé et de sa sérénité (s). */
+	constexpr double DryingSeconds = 240.0;
+	constexpr double PotpourriSeconds = 600.0;
+	constexpr double CalmSeconds = 300.0;
+	constexpr float PotpourriRadius = 600.f;
+
+	/** Un chaudron posé près d'une cheminée s'accroche à sa crémaillère : le repère du crochet. */
+	EREWHON_API TOptional<FTransform> HookFor(const UObject* WorldContext, EStorageKind Kind, const FVector& Location);
 
 	/** Nombre de cagettes au plus dans une pile. */
 	constexpr int32 MaxStack = 3;
@@ -52,12 +79,17 @@ public:
 	AStorageActor();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	virtual FText GetInteractionLabel() const override;
 	virtual void Interact(AErewhonPlayerController* Controller) override;
 
 	EStorageKind GetKind() const { return Kind; }
+	/** Séchoir : l'horloge du monde à laquelle chaque place a reçu ses plantes (0 : vide ou sec). */
+	const TArray<double>& GetSlotTimes() const { return SlotTimes; }
+	/** Pot-pourri : l'horloge du monde à laquelle il s'éteint. */
+	double GetExpiresAt() const { return ExpiresAt; }
 	bool IsOwnedBy(const FString& Key) const { return !Key.IsEmpty() && Key == OwnerKey; }
 	const FString& GetOwnerKey() const { return OwnerKey; }
 	const FString& GetOwnerName() const { return OwnerName; }
@@ -72,15 +104,19 @@ public:
 	AStorageActor* TopOfStack();
 	int32 StackSize() const;
 
-	/** Peut-on ranger cet objet dedans ? (des plantes seulement) */
+	/** Peut-on ranger cet objet dedans ? (des plantes ; sur une étagère, potions et écrasés) */
 	bool Accepts(const struct FItemDef& Def) const;
+	/** Combien d'exemplaires par place (10 sur une étagère). */
+	int32 SlotCap(const struct FItemDef& Def) const;
 	int32 CountStored(FName ItemId) const;
 
 	// ── Serveur ──
 
 	void Setup(EStorageKind InKind, const FString& InOwnerKey, const FString& InOwnerName);
+	void SetSlotTimes(const TArray<double>& Times) { SlotTimes = Times; }
+	void SetExpiresAt(double Time) { ExpiresAt = Time; }
 	TArray<FInventorySlot>& EditSlots() { return Slots; }
-	void Commit() { OnStorageChanged.Broadcast(); }
+	void Commit();
 	int32 StoreItem(FName ItemId, int32 Count);
 
 	/** Se détache de tout (sol, pile, charrette, mains) avant d'aller ailleurs. */
@@ -99,7 +135,34 @@ private:
 	void OnRep_State();
 
 	UFUNCTION()
-	void OnRep_Slots() { OnStorageChanged.Broadcast(); }
+	void OnRep_Slots() { Commit(); }
+
+	/** Ce que montre le meuble : les flacons de l'étagère, les bouquets du séchoir. */
+	void RefreshDisplay();
+	/** Séchoir (serveur) : suit l'arrivée des plantes, change en plantes sèches celles qui ont assez séché. */
+	void UpdateDrying();
+	/** Pot-pourri : les pétales qui flottent (client), la sérénité des voisins et l'extinction (serveur). */
+	void UpdatePotpourri(float DeltaSeconds);
+
+	UPROPERTY(Replicated)
+	TArray<double> SlotTimes;
+
+	/** L'objet que suit chaque place du séchoir (une autre plante remet le séchage à zéro). */
+	TArray<FName> TimedItems;
+
+	UPROPERTY(Replicated)
+	double ExpiresAt = 0.0;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<USceneComponent>> Petals;
+	float PetalTime = 0.f;
+	float CalmTimer = 0.f;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USceneComponent> DisplayFrame;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UPrimitiveComponent>> DisplayParts;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Root;
@@ -202,6 +265,12 @@ private:
 	TArray<TWeakObjectPtr<USceneComponent>> WheelPivots;
 	TArray<FVector> LastWheelPositions;
 	TArray<float> WheelAngles;
+
+	/** Le roulement des roues, plus fort quand elle va vite. */
+	UPROPERTY(Transient)
+	TObjectPtr<class UAudioComponent> RollAudio;
+	FVector LastRollLocation = FVector::ZeroVector;
+	float RollSpeed = 0.f;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Root;

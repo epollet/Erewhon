@@ -1,6 +1,7 @@
 #include "Player/ErewhonCharacter.h"
 
 #include "Camera/CameraComponent.h"
+#include "Components/AudioComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Animation/AnimSequence.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -31,6 +32,7 @@
 #include "World/Sector.h"
 #include "World/SectorManager.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonCharacter"
 
@@ -287,6 +289,34 @@ void AErewhonCharacter::BuildWornBackpack()
 		WornTools.Add(Holder);
 	}
 	WornBackpack->SetVisibility(false, true);
+}
+
+void AErewhonCharacter::AttachBackpackToSpine()
+{
+	// Avec le corps animé, le sac suit le haut du dos (il bouge avec la marche, la course, le saut).
+	// On l'y accroche une fois la pose de repos calculée : il garde alors sa place dans le dos.
+	if (bBackpackOnSpine || !AnimatedBody || !WornBackpack || GetGameTimeSinceCreation() < 0.5f)
+	{
+		return;
+	}
+	bBackpackOnSpine = true;
+	TArray<FName> Bones;
+	AnimatedBody->GetBoneNames(Bones);
+	FName Spine;
+	for (const FName& Bone : Bones)
+	{
+		const FString Name = Bone.ToString();
+		if (Name.Contains(TEXT("Spine"), ESearchCase::IgnoreCase) || Name.Contains(TEXT("Chest"), ESearchCase::IgnoreCase))
+		{
+			Spine = Bone;   // le dernier trouvé est le plus haut
+		}
+	}
+	if (!Spine.IsNone())
+	{
+		const FTransform Wanted = FTransform(FRotator(0.f, 180.f, 0.f), FVector(-27.f, 0.f, -12.f)) * GetCapsuleComponent()->GetComponentTransform();
+		WornBackpack->AttachToComponent(AnimatedBody, FAttachmentTransformRules::KeepWorldTransform, Spine);
+		WornBackpack->SetWorldTransform(Wanted);
+	}
 }
 
 void AErewhonCharacter::ApplyBackpack()
@@ -614,8 +644,12 @@ void AErewhonCharacter::UpdateGroundSpeed()
 	{
 		const FVector Location = GetActorLocation();
 		Factor = Layouts->GetLayout(ErewhonSector::FromWorld(Location), State->GetWorldSeed())->SpeedFactor(FVector2D(Location));
+		if (HasPotion(EPotionEffect::Calm))
+		{
+			Factor = FMath::Max(Factor, 1.f);   // sérénité : herbes hautes et buissons ne retiennent plus
+		}
 	}
-	if ((DrivenCart || (Carried && Carried->GetKind() == EStorageKind::Barrel)) && !HasPotion(EPotionEffect::Strength))
+	if ((DrivenCart || (Carried && ErewhonPlaceables::IsHeavy(Carried->GetKind()))) && !HasPotion(EPotionEffect::Strength))
 	{
 		Factor *= 0.5f;   // on pousse une charrette, on porte un tonneau (sauf avec la potion de force)
 	}
@@ -659,7 +693,24 @@ void AErewhonCharacter::BagAction()
 	{
 		if (Storage->IsOwnedBy(State->GetPlayerKey()))
 		{
-			PC->OpenStorage(Storage);
+			// Le mortier et le chaudron servent à préparer ; la table ne s'ouvre pas.
+			switch (Storage->GetKind())
+			{
+			case EStorageKind::Mortar:
+			case EStorageKind::Cauldron:
+			case EStorageKind::Workbench:
+				PC->OpenApothecary(Storage, static_cast<uint8>(Storage->GetKind() == EStorageKind::Cauldron ? ErewhonApothecary::ECraft::Cauldron
+					: Storage->GetKind() == EStorageKind::Workbench ? ErewhonApothecary::ECraft::Workbench : ErewhonApothecary::ECraft::Mortar));
+				break;
+			case EStorageKind::Potpourri:
+				break;   // il parfume, c'est tout
+			case EStorageKind::Table:
+				PC->ShowToast(LOCTEXT("TableHint", "Posez-y un mortier : prenez-le en main et visez la table."));
+				break;
+			default:
+				PC->OpenStorage(Storage);
+				break;
+			}
 		}
 		else
 		{
@@ -754,6 +805,10 @@ void AErewhonCharacter::Primary()
 		{
 			PC->ServerPlace(Placement.Type, Placement.Location, Placement.Yaw, Placement.Target.Get(), Placement.Slot);
 		}
+		else if (Placement.bForbidden)
+		{
+			PC->ShowToast(LOCTEXT("NotHere", "Seulement sur vos secteurs (ou, pour une cagette, dans une charrette)."));
+		}
 		else
 		{
 			PC->ShowToast(LOCTEXT("NoPlace", "Visez le sol (ou une cagette, une charrette) pour le poser."));
@@ -766,6 +821,31 @@ void AErewhonCharacter::Primary()
 		return;
 	}
 
+	// Un outil en main : chaque clic donne son coup (et son bruit), repris depuis le début s'il était en cours.
+	const AErewhonPlayerState* MyState = GetPlayerState<AErewhonPlayerState>();
+	const UItemDatabase* Items = UItemDatabase::Get(this);
+	const FItemDef* HandDef = MyState && Items ? Items->Find(MyState->GetInventory()->GetHandItem()) : nullptr;
+	if (HandDef && HandDef->Category == EItemCategory::Tool)
+	{
+		SwingTime = GSwingDuration;
+		if (!ToolAudio)
+		{
+			ToolAudio = NewObject<UAudioComponent>(this);
+			ToolAudio->SetupAttachment(GetCapsuleComponent());
+			ToolAudio->SetRelativeLocation(FVector(40.f, 20.f, 30.f));
+			ToolAudio->bAutoActivate = false;
+			ToolAudio->bAllowSpatialization = false;
+			ToolAudio->RegisterComponent();
+		}
+		if (USoundWave* Swish = ErewhonSound::Load(TEXT("sickle_swish")))
+		{
+			ToolAudio->Stop();
+			ToolAudio->SetSound(Swish);
+			ToolAudio->SetVolumeMultiplier(0.7f * ErewhonSound::ChannelVolume(ErewhonSound::EChannel::Effects));
+			ToolAudio->SetPitchMultiplier(FMath::FRandRange(0.93f, 1.07f));
+			ToolAudio->Play();
+		}
+	}
 	if (!Target.Plant.IsValid())
 	{
 		return;
@@ -797,6 +877,7 @@ void AErewhonCharacter::Tick(float DeltaSeconds)
 	UpdatePotions(DeltaSeconds);
 	if (GetNetMode() != NM_DedicatedServer)
 	{
+		AttachBackpackToSpine();
 		UpdateAnimation(DeltaSeconds);
 		UpdateFootsteps(DeltaSeconds);
 	}
@@ -836,7 +917,7 @@ void AErewhonCharacter::DrinkPotion(EPotionEffect Effect)
 	{
 		return;
 	}
-	PotionUntil.SetNum(static_cast<int32>(EPotionEffect::Count));
+	PotionUntil.SetNum(static_cast<int32>(EPotionEffect::Count));   // (un effet ajouté au jeu agrandit le tableau)
 	// Rapetisser et grandir s'annulent : la dernière potion bue l'emporte.
 	if (Effect == EPotionEffect::Shrink || Effect == EPotionEffect::Grow)
 	{
@@ -845,6 +926,17 @@ void AErewhonCharacter::DrinkPotion(EPotionEffect Effect)
 	}
 	PotionUntil[static_cast<int32>(Effect)] = State->GetWorldClock() + ErewhonApothecary::PotionSeconds;
 	MulticastPotionDrunk();
+}
+
+void AErewhonCharacter::GrantEffect(EPotionEffect Effect, double Seconds)
+{
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	if (!State || Effect == EPotionEffect::None)
+	{
+		return;
+	}
+	PotionUntil.SetNum(static_cast<int32>(EPotionEffect::Count));
+	PotionUntil[static_cast<int32>(Effect)] = FMath::Max(PotionUntil[static_cast<int32>(Effect)], State->GetWorldClock() + Seconds);
 }
 
 void AErewhonCharacter::MulticastPotionDrunk_Implementation()
@@ -1011,7 +1103,16 @@ void AErewhonCharacter::UpdatePlacement()
 		HitCart = HitStorage->GetCart();   // viser un conteneur dans la charrette, c'est viser la charrette
 	}
 	const FString& Key = State->GetPlayerKey();
-	if (!bCart && Kind == EStorageKind::Crate && HitStorage && HitStorage->IsOwnedBy(Key) && HitStorage->GetKind() == EStorageKind::Crate
+	const bool bFurniture = !bCart && ErewhonPlaceables::IsFurniture(Kind);
+	if (!bCart && Kind == EStorageKind::Mortar && HitStorage && HitStorage->IsOwnedBy(Key) && HitStorage->GetKind() == EStorageKind::Table
+		&& !HitStorage->GetAbove() && !HitStorage->GetCarrier())
+	{
+		// Le mortier sur la table.
+		Placement.Type = 1;
+		Placement.Target = HitStorage;
+		At = FTransform(HitStorage->GetActorRotation(), HitStorage->GetActorLocation() + FVector(0, 0, ErewhonPlaceables::Height(EStorageKind::Table)));
+	}
+	else if (!bCart && Kind == EStorageKind::Crate && HitStorage && HitStorage->IsOwnedBy(Key) && HitStorage->GetKind() == EStorageKind::Crate
 		&& HitStorage->TopOfStack()->StackSize() < ErewhonPlaceables::MaxStack && !HitStorage->TopOfStack()->GetCarrier())
 	{
 		// Sur le haut de la pile.
@@ -1020,7 +1121,7 @@ void AErewhonCharacter::UpdatePlacement()
 		Placement.Target = Top;
 		At = FTransform(Top->GetActorRotation(), Top->GetActorLocation() + FVector(0, 0, ErewhonPlaceables::Height(Top->GetKind())));
 	}
-	else if (!bCart && HitCart && HitCart->IsOwnedBy(Key) && HitCart->FreeSlotNear(Hit.ImpactPoint) != INDEX_NONE)
+	else if (!bCart && !bFurniture && HitCart && HitCart->IsOwnedBy(Key) && HitCart->FreeSlotNear(Hit.ImpactPoint) != INDEX_NONE)
 	{
 		// Dans la charrette : l'emplacement libre le plus proche s'éclaire.
 		Placement.Type = 2;
@@ -1030,9 +1131,13 @@ void AErewhonCharacter::UpdatePlacement()
 	}
 	else if (Hit.ImpactNormal.Z > 0.6f && !HitStorage && !HitCart)
 	{
-		// Au sol, face au joueur (les brancards de la charrette vers lui).
+		// Au sol, face au joueur (les brancards de la charrette vers lui, la façade d'un meuble aussi).
 		Placement.Type = 0;
-		At = FTransform(FRotator(0.f, GetActorRotation().Yaw, 0.f), Hit.ImpactPoint);
+		At = FTransform(FRotator(0.f, GetActorRotation().Yaw, 0.f), Hit.ImpactPoint);   // la façade d'un meuble (−X) vers soi
+		if (const TOptional<FTransform> Hook = bCart ? TOptional<FTransform>() : ErewhonPlaceables::HookFor(this, Kind, Hit.ImpactPoint))
+		{
+			At = *Hook;   // le chaudron s'accroche à la crémaillère
+		}
 	}
 	else
 	{
@@ -1042,9 +1147,11 @@ void AErewhonCharacter::UpdatePlacement()
 		}
 		return;
 	}
-	Placement.bValid = true;
 	Placement.Location = At.GetLocation();
 	Placement.Yaw = At.Rotator().Yaw;
+	// Hors de ses secteurs, on ne pose que la charrette, ou une cagette dans une charrette : l'aperçu rougit.
+	Placement.bForbidden = !ErewhonPlaceables::CanPlaceAt(this, Key, bCart, Kind, Placement.Type, Placement.Location);
+	Placement.bValid = !Placement.bForbidden;
 
 	// L'aperçu : le modèle de ce qu'on pose, en halo translucide.
 	if (!PlacementGhost)
@@ -1063,7 +1170,28 @@ void AErewhonCharacter::UpdatePlacement()
 	if (!GhostMesh)
 	{
 		GhostMesh = GetShape(EShape::Cube);
-		Fit = FTransform(FRotator::ZeroRotator, FVector(0, 0, 30), bCart ? FVector(2.6f, 1.f, 0.8f) : FVector(0.6f, 0.4f, 0.4f));
+		FVector Size = bCart ? FVector(260.f, 100.f, 80.f) : FVector(60.f, 40.f, 36.f);
+		if (!bCart && Kind == EStorageKind::Shelf)
+		{
+			Size = FVector(36.f, 120.f, 190.f);
+		}
+		else if (!bCart && Kind == EStorageKind::Table)
+		{
+			Size = FVector(84.f, 190.f, 82.f);
+		}
+		else if (!bCart && Kind == EStorageKind::DryingRack)
+		{
+			Size = FVector(50.f, 150.f, 170.f);
+		}
+		else if (!bCart && Kind == EStorageKind::Workbench)
+		{
+			Size = FVector(70.f, 160.f, 120.f);
+		}
+		else if (!bCart && Kind == EStorageKind::Potpourri)
+		{
+			Size = FVector(28.f, 28.f, 14.f);
+		}
+		Fit = FTransform(FRotator::ZeroRotator, FVector(0, 0, Size.Z * 0.5f), Size / 100.f);
 	}
 	if (PlacementGhost->GetStaticMesh() != GhostMesh)
 	{
@@ -1079,6 +1207,16 @@ void AErewhonCharacter::UpdatePlacement()
 	}
 	PlacementGhost->SetWorldTransform(Fit * At);
 	PlacementGhost->SetVisibility(true);
+	// Rouge si l'on ne peut pas le poser là.
+	if (!ForbiddenMaterial && HighlightMaterial)
+	{
+		ForbiddenMaterial = UMaterialInstanceDynamic::Create(HighlightMaterial, this);
+		ForbiddenMaterial->SetVectorParameterValue(TEXT("GlowColor"), FLinearColor(1.f, 0.15f, 0.1f));
+	}
+	for (int32 Slot = 0; Slot < PlacementGhost->GetNumMaterials(); ++Slot)
+	{
+		PlacementGhost->SetMaterial(Slot, Placement.bForbidden && ForbiddenMaterial ? static_cast<UMaterialInterface*>(ForbiddenMaterial) : HighlightMaterial.Get());
+	}
 }
 
 void AErewhonCharacter::UpdateHighlight()

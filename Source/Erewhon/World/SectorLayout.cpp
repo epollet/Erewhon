@@ -230,9 +230,9 @@ void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
 	{
 		Layout.PathPaved.Add(bPaved);
 		// Du centre du secteur jusqu'à son bord, dans la direction du voisin.
-		const FVector2D Edge = Center + FVector2D(Toward) * (Size * 0.5f);
-		const FVector2D Min(FMath::Min(Center.X, Edge.X), FMath::Min(Center.Y, Edge.Y));
-		const FVector2D Max(FMath::Max(Center.X, Edge.X), FMath::Max(Center.Y, Edge.Y));
+		const FVector2D Rim = Center + FVector2D(Toward) * (Size * 0.5f);
+		const FVector2D Min(FMath::Min(Center.X, Rim.X), FMath::Min(Center.Y, Rim.Y));
+		const FVector2D Max(FMath::Max(Center.X, Rim.X), FMath::Max(Center.Y, Rim.Y));
 		Layout.Paths.Add(FBox2D(Min - FVector2D(Toward.Y != 0 ? Half : 0.f, Toward.X != 0 ? Half : 0.f),
 			Max + FVector2D(Toward.Y != 0 ? Half : 0.f, Toward.X != 0 ? Half : 0.f)));
 	};

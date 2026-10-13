@@ -309,18 +309,17 @@ void AErewhonPlayerController::NextAutoShot()
 			else if (ShotMenu == TEXT("cheats")) { OpenCheats(); }
 			else if (ShotMenu == TEXT("village")) { StoreKind = EShopKind::SectorManager; ShowMenu(SNew(SStorePanel).Controller(this).Kind(EShopKind::SectorManager).bVillageTab(true), true); }
 			else if (ShotMenu == TEXT("inventory")) { ToggleInventory(); }
-			else if (ShotMenu == TEXT("shelves"))
+			else if (ShotMenu == TEXT("shelves") || ShotMenu == TEXT("mortar") || ShotMenu == TEXT("cauldron"))
 			{
-				if (TActorIterator<AApothecary> It(GetWorld()); It)
+				// Le premier meuble de ce genre.
+				const EStorageKind Wanted = ShotMenu == TEXT("shelves") ? EStorageKind::Shelf : ShotMenu == TEXT("mortar") ? EStorageKind::Mortar : EStorageKind::Cauldron;
+				for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It)
 				{
-					OpenShelves(*It, 0);
-				}
-			}
-			else if (ShotMenu == TEXT("mortar") || ShotMenu == TEXT("cauldron"))
-			{
-				if (TActorIterator<AApothecary> It(GetWorld()); It)
-				{
-					OpenApothecary(*It, ShotMenu == TEXT("cauldron") ? EApothecaryStation::Cauldron : EApothecaryStation::Mortar);
+					if (It->GetKind() == Wanted)
+					{
+						Wanted == EStorageKind::Shelf ? OpenStorage(*It) : OpenApothecary(*It, static_cast<uint8>(Wanted == EStorageKind::Cauldron ? ErewhonApothecary::ECraft::Cauldron : ErewhonApothecary::ECraft::Mortar));
+						break;
+					}
 				}
 			}
 			else if (ShotMenu == TEXT("behind") || ShotMenu == TEXT("front"))
@@ -458,18 +457,10 @@ void AErewhonPlayerController::OpenStore(EShopKind Kind)
 	ShowMenu(SNew(SStorePanel).Controller(this).Kind(Kind), true);
 }
 
-void AErewhonPlayerController::OpenApothecary(AApothecary* House, EApothecaryStation Station)
+void AErewhonPlayerController::OpenApothecary(AStorageActor* Station, uint8 Craft)
 {
-	OpenedHouse = House;
-	const TSharedRef<SWidget> Panel = SNew(SApothecaryPanel).Controller(this).House(House).Station(Station);
-	ApothecaryWidget = Panel;
-	ShowMenu(Panel, false);
-}
-
-void AErewhonPlayerController::OpenShelves(AApothecary* House, int32 Shelf)
-{
-	OpenedHouse = House;
-	const TSharedRef<SWidget> Panel = SNew(SInventoryPanel).Controller(this).Shelves(House).ShelfIndex(Shelf);
+	OpenedStation = Station;
+	const TSharedRef<SWidget> Panel = SNew(SApothecaryPanel).Controller(this).Station(Station).Craft(Craft);
 	ApothecaryWidget = Panel;
 	ShowMenu(Panel, false);
 }
@@ -480,15 +471,16 @@ void AErewhonPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 	DOREPLIFETIME_CONDITION(AErewhonPlayerController, CraftJob, COND_OwnerOnly);
 }
 
-void AErewhonPlayerController::SetCraftJob(const FErewhonCraftJob& Job, AApothecary* House)
+void AErewhonPlayerController::SetCraftJob(const FErewhonCraftJob& Job, AStorageActor* Station)
 {
 	CraftJob = Job;
-	CraftHouse = House;
+	CraftStation = Station;
 	OnCraftChanged.Broadcast();   // l'hôte d'une partie en écoute ne reçoit pas d'OnRep
 }
 
-void AErewhonPlayerController::ClientCraftStep_Implementation(bool bCauldron)
+void AErewhonPlayerController::ClientCraftStep_Implementation(uint8 Craft)
 {
+	const bool bCauldron = Craft == static_cast<uint8>(ErewhonApothecary::ECraft::Cauldron);
 	if (const APawn* MyPawn = GetPawn())
 	{
 		ErewhonSound::PlayAt(this, ErewhonSound::Load(bCauldron ? TEXT("cauldron_bubble") : TEXT("mortar_grind")),
@@ -512,27 +504,19 @@ void AErewhonPlayerController::ServerFeedFire_Implementation(AApothecary* House)
 	}
 }
 
-void AErewhonPlayerController::ServerStartCraft_Implementation(AApothecary* House, FName Output, int32 Count)
+void AErewhonPlayerController::ServerStartCraft_Implementation(AStorageActor* Station, FName Output, int32 Count)
 {
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
 	{
-		ReportResult(Mode->TryStartCraft(this, House, Output, Count));
+		ReportResult(Mode->TryStartCraft(this, Station, Output, Count));
 	}
 }
 
-void AErewhonPlayerController::ServerMoveShelfItem_Implementation(AApothecary* House, uint8 Shelf, bool bFromShelf, int32 From, bool bToShelf, int32 To)
+void AErewhonPlayerController::ServerBuyStoreroom_Implementation(FIntPoint Sector)
 {
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
 	{
-		ReportResult(Mode->TryMoveShelfItem(this, House, Shelf, bFromShelf, From, bToShelf, To));
-	}
-}
-
-void AErewhonPlayerController::ServerStashInShelves_Implementation(AApothecary* House, uint8 Shelf)
-{
-	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
-	{
-		ReportResult(Mode->TryStashInShelves(this, House, Shelf));
+		ReportResult(Mode->TryBuyStoreroom(this, Sector));
 	}
 }
 
@@ -547,10 +531,10 @@ void AErewhonPlayerController::PlayerTick(float DeltaTime)
 	Super::PlayerTick(DeltaTime);
 
 	// On ne laisse pas le mortier ouvert en sortant de l'apothicairerie.
-	if (const APawn* Walker = GetPawn(); Walker && OpenedHouse.IsValid() && OpenMenu.IsValid() && OpenMenu == ApothecaryWidget.Pin()
-		&& FVector::Dist2D(Walker->GetActorLocation(), OpenedHouse->GetActorLocation()) > ErewhonApothecary::UseReach + 150.f)
+	if (const APawn* Walker = GetPawn(); Walker && OpenedStation.IsValid() && OpenMenu.IsValid() && OpenMenu == ApothecaryWidget.Pin()
+		&& FVector::Dist2D(Walker->GetActorLocation(), OpenedStation->GetActorLocation()) > ErewhonApothecary::UseReach + 150.f)
 	{
-		OpenedHouse.Reset();
+		OpenedStation.Reset();
 		CloseMenu();
 	}
 

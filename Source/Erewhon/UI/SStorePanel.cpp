@@ -375,6 +375,26 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 				]
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[BuildAction]
 			];
+			// Puis sa remise, une petite pièce accolée à droite.
+			if (bBuilt)
+			{
+				const bool bStore = (World->GetBuildings(Sector) & ESectorBuilding::Storeroom) != 0;
+				TSharedRef<SWidget> StoreAction = bStore
+					? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("Built", "✓ Construit")).Font(Font(11, true)).ColorAndOpacity(Leaf))
+					: Button(FText::Format(LOCTEXT("BuildStoreroom", "Construire · {0}"), CoinsText(Settings.StoreroomPrice)),
+						[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerBuyStoreroom(Sector); } },
+						EButton::Primary, State->GetCoins() >= Settings.StoreroomPrice, 150.f);
+				Upgrades->AddSlot().AutoHeight().Padding(0, 0, 0, 6)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+					[
+						SNew(STextBlock).Text(LOCTEXT("StoreroomUpgrade", "Remise de l'apothicairerie (une pièce de plus, à droite)"))
+						.Font(Font(11)).ColorAndOpacity(Ink).AutoWrapText(true)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[StoreAction]
+				];
+			}
 		}
 		if (Upgrades->NumSlots() == 1)
 		{
