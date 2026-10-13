@@ -5,6 +5,8 @@
 #include "CelestialSystem.generated.h"
 
 class UDirectionalLightComponent;
+class UInstancedStaticMeshComponent;
+class UStaticMeshComponent;
 class UExponentialHeightFogComponent;
 class UMaterialInstanceDynamic;
 class UPostProcessComponent;
@@ -59,6 +61,9 @@ private:
 	void UpdateClouds(double WorldClock);
 	void SetupCloudMaterial();
 	void ApplyUserSettings();
+	/** La Lune et les étoiles, des images lointaines qui suivent la caméra. */
+	void BuildNightSky();
+	void UpdateNightSky(double WorldClock);
 
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> Root;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USkyAtmosphereComponent> Atmosphere;
@@ -77,6 +82,12 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Sky") float SunLux = 10.f;
 	UPROPERTY(EditAnywhere, Category = "Sky") float UshaLux = 2.f;
 	UPROPERTY(EditAnywhere, Category = "Sky") float MoonLux = 0.35f;
+
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> MoonDisc;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> MoonGlow;
+	UPROPERTY(Transient) TObjectPtr<USceneComponent> StarDome;
+	UPROPERTY(Transient) TObjectPtr<UInstancedStaticMeshComponent> Stars;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> StarGlow;
 
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> CloudMaterial;
 	FName CloudCoverageParam;

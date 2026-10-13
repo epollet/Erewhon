@@ -8,11 +8,27 @@
 #include "Components/VolumetricCloudComponent.h"
 #include "Core/ErewhonGameState.h"
 #include "Core/ErewhonSettings.h"
+#include "World/ErewhonLights.h"
 #include "EngineUtils.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Sky/ErewhonWind.h"
 #include "World/ErewhonMaterials.h"
 #include "Core/ErewhonUserSettings.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/Texture.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/PlayerController.h"
+#include "World/ErewhonVisuals.h"
+
+namespace
+{
+	/** Distance des astres dessinés (cm) : loin derrière tout le reste, devant rien. */
+	constexpr float GSkyDistance = 800000.f;
+	/** Diamètre apparent de la Lune (degrés) : plus grosse que la vraie, comme dans un conte. */
+	constexpr float GMoonDegrees = 3.2f;
+	constexpr int32 GStarCount = 900;
+}
 
 DEFINE_LOG_CATEGORY_STATIC(LogErewhonSky, Log, All);
 
@@ -120,6 +136,9 @@ ACelestialSystem::ACelestialSystem()
 	PP.ColorContrast = FVector4(0.96f, 0.96f, 0.96f, 1.f);
 	PP.bOverride_BloomIntensity = true;
 	PP.BloomIntensity = 0.9f;
+	// Pas de flou de mouvement : une image nette, comme peinte (et des étoiles qui restent des points).
+	PP.bOverride_MotionBlurAmount = true;
+	PP.MotionBlurAmount = 0.f;
 	PP.bOverride_VignetteIntensity = true;
 	PP.VignetteIntensity = 0.25f;
 	// Exposition adaptative bornée : nuits sombres mais lisibles.
@@ -148,6 +167,7 @@ void ACelestialSystem::BeginPlay()
 	Super::BeginPlay();
 	SetupCloudMaterial();
 	ApplyUserSettings();
+	BuildNightSky();
 	if (UErewhonUserSettings* User = UErewhonUserSettings::Get())
 	{
 		User->OnWorldDetailChanged.AddUObject(this, &ACelestialSystem::ApplyUserSettings);
@@ -221,6 +241,112 @@ void ACelestialSystem::Tick(float DeltaSeconds)
 	UpdateBody(Usha, UshaOrbit, UshaLux, Clock);
 	UpdateBody(Moon, MoonOrbit, MoonLux, Clock);
 	UpdateClouds(Clock);
+	UpdateNightSky(Clock);
+	// Les lanternes du village s'allument quand le Soleil passe sous l'horizon.
+	if (UErewhonLights* Lights = GetWorld()->GetSubsystem<UErewhonLights>())
+	{
+		Lights->SetNight(1.f - FMath::SmoothStep(-0.06f, 0.08f, static_cast<float>(SunOrbit.Direction(Clock).Z)));
+	}
+}
+
+void ACelestialSystem::BuildNightSky()
+{
+	using namespace ErewhonVisuals;
+	UMaterialInterface* SkyDisc = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_SkyDisc"));
+	UStaticMesh* Quad = GetShape(EShape::Plane);
+	if (!SkyDisc || !Quad)
+	{
+		UE_LOG(LogErewhonSky, Warning, TEXT("Lune et étoiles : M_SkyDisc introuvable (relancer import_generated.py)"));
+		return;
+	}
+
+	// La Lune : un disque peint (T_moon), face à la caméra.
+	MoonDisc = NewObject<UStaticMeshComponent>(this);
+	MoonDisc->SetupAttachment(Root);
+	MoonDisc->SetStaticMesh(Quad);
+	MoonGlow = UMaterialInstanceDynamic::Create(SkyDisc, this);
+	MoonGlow->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.95f, 0.95f, 1.f));
+	MoonDisc->SetMaterial(0, MoonGlow);
+	MoonDisc->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MoonDisc->SetCastShadow(false);
+	MoonDisc->SetBoundsScale(1000.f);
+	MoonDisc->RegisterComponent();
+
+	// Les étoiles : des points doux (T_star) semés sur la voûte, qui tournent avec elle.
+	StarDome = NewObject<USceneComponent>(this);
+	StarDome->SetupAttachment(Root);
+	StarDome->RegisterComponent();
+	Stars = NewObject<UInstancedStaticMeshComponent>(this);
+	Stars->SetupAttachment(StarDome);
+	Stars->SetStaticMesh(Quad);
+	StarGlow = UMaterialInstanceDynamic::Create(SkyDisc, this);
+	if (UTexture* Star = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_star")))
+	{
+		StarGlow->SetTextureParameterValue(TEXT("Tex"), Star);
+	}
+	StarGlow->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.9f, 0.93f, 1.f));
+	Stars->SetMaterial(0, StarGlow);
+	Stars->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Stars->SetCastShadow(false);
+	Stars->SetBoundsScale(1000.f);
+	Stars->RegisterComponent();
+	FRandomStream Rand(20261012);
+	for (int32 i = 0; i < GStarCount; ++i)
+	{
+		// Tout le ciel (la voûte tourne : celles d'en dessous se lèveront) ; quelques-unes plus grosses.
+		const FVector Dir = Rand.GetUnitVector();
+		const float Degrees = Rand.FRand() < 0.06f ? Rand.FRandRange(0.45f, 0.6f) : Rand.FRandRange(0.2f, 0.34f);
+		const float Size = 2.f * GSkyDistance * FMath::Tan(FMath::DegreesToRadians(Degrees * 0.5f)) / 100.f;
+		Stars->AddInstance(FTransform(FRotationMatrix::MakeFromZ(-Dir).ToQuat(), Dir * GSkyDistance, FVector(Size)));
+	}
+	MoonDisc->SetVisibility(false);
+	Stars->SetVisibility(false);
+}
+
+void ACelestialSystem::UpdateNightSky(double WorldClock)
+{
+	if (!MoonDisc || !Stars)
+	{
+		return;
+	}
+	const APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	const FVector Eye = PC && PC->PlayerCameraManager ? PC->PlayerCameraManager->GetCameraLocation() : FVector::ZeroVector;
+
+	// Part de nuit : le Soleil couché, et Usha aussi (son ciel orangé efface les étoiles).
+	const float SunUp = FMath::SmoothStep(-0.16f, 0.04f, static_cast<float>(SunOrbit.Direction(WorldClock).Z));
+	const float UshaUp = FMath::SmoothStep(-0.1f, 0.1f, static_cast<float>(UshaOrbit.Direction(WorldClock).Z));
+	const float Night = (1.f - SunUp) * (1.f - 0.85f * UshaUp);
+
+	// La Lune, en face du Soleil, bien plus pâle que lui.
+	const FVector ToMoon = MoonOrbit.Direction(WorldClock);
+	const float MoonUp = FMath::SmoothStep(-0.06f, 0.04f, static_cast<float>(ToMoon.Z));
+	const float MoonLevel = MoonUp * FMath::Lerp(0.25f, 1.f, Night);
+	MoonDisc->SetVisibility(MoonLevel > 0.01f);
+	if (MoonLevel > 0.01f)
+	{
+		const float Size = 2.f * GSkyDistance * FMath::Tan(FMath::DegreesToRadians(GMoonDegrees * 0.5f)) / 100.f;
+		MoonDisc->SetWorldLocationAndRotation(Eye + ToMoon * GSkyDistance, FRotationMatrix::MakeFromZ(-ToMoon).ToQuat());
+		MoonDisc->SetWorldScale3D(FVector(Size));
+		MoonGlow->SetScalarParameterValue(TEXT("Intensity"), 2.2f);
+		MoonGlow->SetScalarParameterValue(TEXT("Fade"), MoonLevel);
+	}
+
+	// Les étoiles tournent avec la voûte, autour de l'axe de l'orbite du Soleil.
+	Stars->SetVisibility(Night > 0.01f);
+	if (Night > 0.01f)
+	{
+		const float Tilt = FMath::DegreesToRadians(SunOrbit.TiltDegrees);
+		const FVector Axis(FMath::Cos(Tilt), 0.f, FMath::Sin(Tilt));
+		// Par petits pas seulement (100 m de marche, moins d'un pixel de rotation) : déplacées à chaque image,
+		// les instances laissent des traînées à l'anticrénelage temporel.
+		const FQuat Turn(Axis, SunOrbit.Angle(WorldClock));
+		if (FVector::Dist(StarDome->GetComponentLocation(), Eye) > 10000.f || StarDome->GetComponentQuat().AngularDistance(Turn) > FMath::DegreesToRadians(0.08f))
+		{
+			StarDome->SetWorldLocationAndRotation(Eye, Turn);
+		}
+		StarGlow->SetScalarParameterValue(TEXT("Intensity"), 3.f);
+		StarGlow->SetScalarParameterValue(TEXT("Fade"), Night);
+	}
 }
 
 void ACelestialSystem::UpdateBody(UDirectionalLightComponent* Light, const FOrbit& Orbit, float MaxIntensity, double WorldClock) const

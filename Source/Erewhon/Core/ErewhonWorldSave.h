@@ -73,6 +73,49 @@ struct FSavedSectorOwner
 
 	UPROPERTY()
 	uint8 RoadLinks = 0;
+
+	UPROPERTY()
+	uint8 PavedLinks = 0;
+
+	/** Bâtiments (ESectorBuilding) et, pour l'apothicairerie, l'horloge du monde jusqu'à laquelle son feu brûle. */
+	UPROPERTY()
+	uint8 Buildings = 0;
+
+	UPROPERTY()
+	double FireUntil = 0.0;
+
+	/** Les potions rangées sur ses étagères. */
+	UPROPERTY()
+	TArray<FInventorySlot> Shelves;
+};
+
+/** Une charrette posée dans le monde. */
+USTRUCT()
+struct FSavedCart
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString OwnerKey;
+	UPROPERTY() FString OwnerName;
+	UPROPERTY() FTransform Transform;
+};
+
+/** Une cagette ou un tonneau, posé au sol, sur une pile ou dans une charrette. */
+USTRUCT()
+struct FSavedStorage
+{
+	GENERATED_BODY()
+
+	UPROPERTY() uint8 Kind = 0;
+	UPROPERTY() FString OwnerKey;
+	UPROPERTY() FString OwnerName;
+	UPROPERTY() FTransform Transform;
+	UPROPERTY() TArray<FInventorySlot> Slots;
+	/** Index dans Carts (−1 : pas dans une charrette) et emplacement. */
+	UPROPERTY() int32 Cart = INDEX_NONE;
+	UPROPERTY() int32 CartSlot = INDEX_NONE;
+	/** Index (dans Storages, toujours plus petit) de la cagette sur laquelle elle est posée. */
+	UPROPERTY() int32 Below = INDEX_NONE;
 };
 
 /** Sauvegarde serveur du monde (Saved/SaveGames/<WorldSaveSlot>.sav). */
@@ -90,6 +133,16 @@ public:
 
 	UPROPERTY()
 	TArray<FSavedSectorOwner> SectorOwners;
+
+	UPROPERTY()
+	TArray<FSavedCart> Carts;
+
+	UPROPERTY()
+	TArray<FSavedStorage> Storages;
+
+	/** Améliorations du village (un bit par EVillageUpgrade). */
+	UPROPERTY()
+	int32 VillageUpgrades = 0;
 
 	UPROPERTY()
 	TArray<FSavedHarvest> Harvests;

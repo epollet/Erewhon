@@ -60,7 +60,8 @@ bool UBackpackComponent::IsAccessibleFrom(const APawn* Pawn, float Reach) const
 	{
 		return false;
 	}
-	return bWorn || (Dropped && FVector::Dist(Pawn->GetActorLocation(), Dropped->GetActorLocation()) <= Reach);
+	// Sur le dos, on n'y a pas accès : il faut le poser pour y fouiller.
+	return !bWorn && Dropped && FVector::Dist(Pawn->GetActorLocation(), Dropped->GetActorLocation()) <= Reach;
 }
 
 void UBackpackComponent::EnsureSlots()
@@ -151,7 +152,7 @@ int32 UBackpackComponent::StoreItem(FName ItemId, int32 Count, bool bToolSlotsFi
 			}
 		}
 	};
-	if (bToolSlotsFirst && Def->IsEquipable())
+	if (bToolSlotsFirst && Def->Category == EItemCategory::Tool)
 	{
 		Fill(ESlotKind::Equipment);
 	}

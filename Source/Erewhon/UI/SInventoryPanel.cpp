@@ -16,6 +16,8 @@
 #include "Widgets/SToolTip.h"
 #include "Widgets/Text/STextBlock.h"
 #include "World/Backpack.h"
+#include "World/Storage.h"
+#include "World/Apothecary.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonInventoryPanel"
 
@@ -176,6 +178,17 @@ void SInventoryPanel::Construct(const FArguments& InArgs)
 {
 	Controller = InArgs._Controller;
 	OpenedBag = InArgs._Bag;
+	OpenedStorage = InArgs._Storage;
+	OpenedShelves = InArgs._Shelves;
+	ShelfIndex = InArgs._ShelfIndex;
+	if (AStorageActor* Storage = OpenedStorage.Get())
+	{
+		Storage->OnStorageChanged.AddSP(this, &SInventoryPanel::Rebuild);
+	}
+	if (AApothecary* House = OpenedShelves.Get())
+	{
+		House->OnShelvesChanged.AddSP(this, &SInventoryPanel::Rebuild);
+	}
 
 	if (UInventoryComponent* Inventory = GetInventory())
 	{
@@ -191,11 +204,14 @@ void SInventoryPanel::Construct(const FArguments& InArgs)
 	}
 
 	const float Width = ColumnWidth(GInventoryColumns) + ColumnWidth(GClothingColumns) + ColumnWidth(GEquipmentColumns) + 2 * GColumnGap + 70.f
-		+ (ShowsBag() ? ColumnWidth(GBagColumns) + 2 * GColumnGap + 10.f : 0.f);
+		+ (ShowsBag() ? ColumnWidth(OpenedStorage.IsValid() && OpenedStorage->GetKind() == EStorageKind::Barrel ? 5
+			: OpenedShelves.IsValid() ? 4 : GBagColumns) + 2 * GColumnGap + 10.f : 0.f);
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	ChildSlot
 	[
-		Window(ShowsBag() ? LOCTEXT("TitleBag", "Inventaire et sac à dos") : LOCTEXT("Title", "Inventaire"), SAssignNew(Body, SBox),
+		Window(OpenedShelves.IsValid() ? FText::Format(LOCTEXT("TitleShelves", "Inventaire et étagère {0}"), FText::AsNumber(ShelfIndex + 1))
+			: OpenedStorage.IsValid() ? FText::Format(LOCTEXT("TitleStorage", "Inventaire et {0}"), ErewhonPlaceables::KindName(OpenedStorage->GetKind()).ToLower())
+			: ShowsBag() ? LOCTEXT("TitleBag", "Inventaire et sac à dos") : LOCTEXT("Title", "Inventaire"), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
 			Width)
 	];
@@ -214,10 +230,50 @@ UBackpackComponent* SInventoryPanel::GetBackpack() const
 	return State ? State->GetBackpack() : nullptr;
 }
 
+const TArray<FInventorySlot>& SInventoryPanel::OtherSlots() const
+{
+	static const TArray<FInventorySlot> None;
+	if (const AApothecary* House = OpenedShelves.Get())
+	{
+		return House->GetShelves();
+	}
+	if (const AStorageActor* Storage = OpenedStorage.Get())
+	{
+		return Storage->GetSlots();
+	}
+	const UBackpackComponent* Backpack = GetBackpack();
+	return Backpack ? Backpack->GetSlots() : None;
+}
+
+void SInventoryPanel::MoveItem(bool bFromOther, int32 From, bool bToOther, int32 To) const
+{
+	if (!Controller.IsValid())
+	{
+		return;
+	}
+	if (AApothecary* House = OpenedShelves.Get())
+	{
+		Controller->ServerMoveShelfItem(House, static_cast<uint8>(ShelfIndex), bFromOther, From, bToOther, To);
+	}
+	else if (AStorageActor* Storage = OpenedStorage.Get())
+	{
+		Controller->ServerMoveStorageItem(Storage, bFromOther, From, bToOther, To);
+	}
+	else
+	{
+		Controller->ServerMoveItem(bFromOther, From, bToOther, To);
+	}
+}
+
 bool SInventoryPanel::ShowsBag() const
 {
+	if (OpenedStorage.IsValid() || OpenedShelves.IsValid())
+	{
+		return true;   // la colonne de droite montre le conteneur ou les étagères
+	}
 	const UBackpackComponent* Backpack = GetBackpack();
-	return Backpack && Backpack->IsOwned() && (Backpack->IsWorn() || (OpenedBag.IsValid() && Backpack->GetDropped() == OpenedBag.Get()));
+	// Sur le dos, le sac reste fermé : il faut le poser pour y fouiller.
+	return Backpack && Backpack->IsOwned() && !Backpack->IsWorn() && OpenedBag.IsValid() && Backpack->GetDropped() == OpenedBag.Get();
 }
 
 FReply SInventoryPanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
@@ -230,15 +286,67 @@ FReply SInventoryPanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& 
 	}
 	if (Key == EKeys::G && ShowsBag() && Controller.IsValid())
 	{
-		Controller->ServerStashAll();
+		if (AApothecary* House = OpenedShelves.Get())
+		{
+			Controller->ServerStashInShelves(House, static_cast<uint8>(ShelfIndex));
+		}
+		else if (AStorageActor* Storage = OpenedStorage.Get())
+		{
+			Controller->ServerStashInStorage(Storage);
+		}
+		else
+		{
+			Controller->ServerStashAll();
+		}
+		return FReply::Handled();
+	}
+	if (Key == EKeys::A)
+	{
+		for (const FSlotRef& Ref : SlotWidgets)
+		{
+			const TSharedPtr<SWidget> Widget = Ref.Widget.Pin();
+			if (Widget.IsValid() && Widget->IsHovered())
+			{
+				Discard(Ref.bBag, Ref.Index);
+				break;
+			}
+		}
 		return FReply::Handled();
 	}
 	return FReply::Unhandled();
 }
 
+void SInventoryPanel::Discard(bool bBag, int32 SlotIndex)
+{
+	if (bBag && OpenedShelves.IsValid())
+	{
+		return;   // rien ne se jette depuis les étagères : on le reprend d'abord
+	}
+	const TArray<FInventorySlot>& Slots = bBag ? OtherSlots() : GetInventory()->GetSlots();
+	const UItemDatabase* Items = UItemDatabase::Get(Controller.Get());
+	const FItemDef* Def = Slots.IsValidIndex(SlotIndex) && !Slots[SlotIndex].IsEmpty() && Items ? Items->Find(Slots[SlotIndex].ItemId) : nullptr;
+	if (!Def || !Controller.IsValid())
+	{
+		return;
+	}
+	if (Slots[SlotIndex].Kind == ESlotKind::Clothing)
+	{
+		Controller->ShowToast(LOCTEXT("TakeOffFirst", "Retirez d'abord ce vêtement."));
+		return;
+	}
+	// Un outil ne se jette pas par mégarde : on demande confirmation.
+	if (Def->IsEquipable())
+	{
+		PendingDiscard = FSlotRef{ nullptr, bBag, SlotIndex };
+		Rebuild();
+		return;
+	}
+	Controller->ServerDiscard(bBag, SlotIndex, bBag ? OpenedStorage.Get() : nullptr);
+}
+
 TSharedRef<SWidget> SInventoryPanel::BuildSlot(bool bBag, int32 SlotIndex, const FLinearColor& Accent, const FText& EmptyLabel) const
 {
-	const TArray<FInventorySlot>& Slots = bBag ? GetBackpack()->GetSlots() : GetInventory()->GetSlots();
+	const TArray<FInventorySlot>& Slots = bBag ? OtherSlots() : GetInventory()->GetSlots();
 	const FInventorySlot& Slot = Slots[SlotIndex];
 	const UItemDatabase* Items = UItemDatabase::Get(Controller.Get());
 	const FItemDef* Def = Slot.IsEmpty() || !Items ? nullptr : Items->Find(Slot.ItemId);
@@ -276,7 +384,7 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(bool bBag, int32 SlotIndex, const
 		.bDraggable(bExchange)
 		.bDropTarget(bExchange)
 		.Accent(Accent)
-		.OnClicked_Lambda([WeakController, bBag, SlotIndex]()
+		.OnClicked_Lambda([this, WeakController, bBag, SlotIndex]()
 		{
 			AErewhonPlayerController* PC = WeakController.Get();
 			const AErewhonPlayerState* State = PC ? PC->GetPlayerState<AErewhonPlayerState>() : nullptr;
@@ -286,19 +394,20 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(bool bBag, int32 SlotIndex, const
 			}
 			if (bBag)
 			{
-				PC->ServerMoveItem(true, SlotIndex, false, INDEX_NONE);   // reprendre dans ses poches
+				MoveItem(true, SlotIndex, false, INDEX_NONE);   // reprendre dans ses poches
+			}
+			else if (OpenedShelves.IsValid())
+			{
+				MoveItem(false, SlotIndex, true, INDEX_NONE);   // devant les étagères, un clic y range l'objet (on ne boit pas par mégarde)
 			}
 			else
 			{
 				State->GetInventory()->ServerUseSlot(SlotIndex);       // équiper / ranger
 			}
 		})
-		.OnItemDropped_Lambda([WeakController, bBag, SlotIndex](bool bFromBag, int32 From)
+		.OnItemDropped_Lambda([this, bBag, SlotIndex](bool bFromBag, int32 From)
 		{
-			if (WeakController.IsValid())
-			{
-				WeakController->ServerMoveItem(bFromBag, From, bBag, SlotIndex);
-			}
+			MoveItem(bFromBag, From, bBag, SlotIndex);
 		})
 		[
 			Content
@@ -307,11 +416,94 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(bool bBag, int32 SlotIndex, const
 	{
 		Widget->SetToolTip(ItemTooltip(*Def));
 	}
+	SlotWidgets.Add({ Widget, bBag, SlotIndex });
 	return Widget;
 }
 
 TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 {
+	if (const AApothecary* House = OpenedShelves.Get())
+	{
+		// L'étagère ouverte, dessinée comme elle est : ses étages de haut en bas, une pile par étage.
+		using namespace ErewhonApothecary;
+		const UItemDatabase* Items = UItemDatabase::Get(Controller.Get());
+		TSharedRef<SVerticalBox> Floors = SNew(SVerticalBox);
+		for (int32 Row = ShelfRows - 1; Row >= 0; --Row)
+		{
+			const int32 Index = FirstSlotOf(ShelfIndex) + Row;
+			const FInventorySlot* Slot = House->GetShelves().IsValidIndex(Index) ? &House->GetShelves()[Index] : nullptr;
+			const FItemDef* Def = Slot && !Slot->IsEmpty() && Items ? Items->Find(Slot->ItemId) : nullptr;
+			Floors->AddSlot().AutoHeight().Padding(0, 0, 0, 4)
+			[
+				// Une planche par étage : le numéro, la pile, ce qu'il y a dessus.
+				SNew(SBorder).BorderImage(Rounded(Mix(Card, Edge, 0.18f), 6.f, Mix(Card, Edge, 0.5f), 1.f)).Padding(FMargin(6.f, 4.f))
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+					[
+						SNew(SBox).WidthOverride(44.f)
+						[
+							SNew(STextBlock)
+							.Text(FText::Format(LOCTEXT("FloorN", "Étage {0}"), FText::AsNumber(Row + 1)))
+							.Font(Font(9, true)).ColorAndOpacity(MutedInk)
+						]
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[BuildSlot(true, Index, BagAccent, FText::GetEmpty())]
+					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(8, 0, 0, 0)
+					[
+						SNew(STextBlock)
+						.Text(Def ? FText::Format(LOCTEXT("FloorStack", "{0}\n{1} / {2}"), Def->Name, FText::AsNumber(Slot->Count), FText::AsNumber(PotionsPerSlot))
+							: LOCTEXT("FloorEmpty", "Vide"))
+						.Font(Font(9)).ColorAndOpacity(Def ? Ink : MutedInk).AutoWrapText(true)
+					]
+				]
+			];
+		}
+		return SNew(SBox).WidthOverride(ColumnWidth(4))
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+				[
+					SNew(STextBlock).Text(FText::Format(LOCTEXT("ShelfHeader", "Étagère {0}"), FText::AsNumber(ShelfIndex + 1)))
+					.Font(Font(11, true)).ColorAndOpacity(BagAccent)
+				]
+				+ SVerticalBox::Slot().AutoHeight()[Separator()]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)[Floors]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("ShelvesHint", "Potions, bases et écrasés : une pile de 10 par étage. Glissez-les sur l'étage voulu ; [G] tout ranger ici."))
+					.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
+				]
+			];
+	}
+	if (const AStorageActor* Opened = OpenedStorage.Get())
+	{
+		// Cagette ou tonneau : des plantes seulement, sur 3 ou 5 colonnes.
+		const int32 Columns = Opened->GetKind() == EStorageKind::Barrel ? 5 : GBagColumns;
+		TSharedRef<SUniformGridPanel> Grid = SNew(SUniformGridPanel).SlotPadding(3.f);
+		for (int32 i = 0; i < Opened->GetSlots().Num(); ++i)
+		{
+			Grid->AddSlot(i % Columns, i / Columns)[BuildSlot(true, i, BagAccent, FText::GetEmpty())];
+		}
+		return SNew(SBox).WidthOverride(ColumnWidth(Columns))
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+				[
+					SNew(STextBlock).Text(ErewhonPlaceables::KindName(Opened->GetKind())).Font(Font(11, true)).ColorAndOpacity(BagAccent)
+				]
+				+ SVerticalBox::Slot().AutoHeight()[Separator()]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+				[
+					SNew(SBox).MaxDesiredHeight(430.f)[SNew(SScrollBox) + SScrollBox::Slot()[Grid]]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("StorageHint", "Des plantes seulement. [G] y ranger toutes vos plantes."))
+					.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
+				]
+			];
+	}
 	const TArray<FInventorySlot>& Slots = GetBackpack()->GetSlots();
 	TSharedRef<SUniformGridPanel> Storage = SNew(SUniformGridPanel).SlotPadding(3.f);
 	TSharedRef<SUniformGridPanel> Tools = SNew(SUniformGridPanel).SlotPadding(3.f);
@@ -348,7 +540,7 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 			[
 				SNew(STextBlock)
-				.Text(bWorn ? LOCTEXT("BagWorn", "Sur votre dos. [F] le poser au sol.") : LOCTEXT("BagDropped", "[G] y ranger toutes vos poches."))
+				.Text(bWorn ? LOCTEXT("BagWorn", "Sur votre dos. [F] le poser au sol.") : LOCTEXT("BagDropped", "[G] y ranger toutes vos poches. Hors du menu, [F] remet le sac sur le dos."))
 				.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
 			]
 		];
@@ -369,6 +561,7 @@ void SInventoryPanel::Rebuild()
 		return;
 	}
 	const TArray<FInventorySlot>& Slots = Inventory->GetSlots();
+	SlotWidgets.Reset();
 
 	// Ligne « Base » puis une ligne par vêtement porté qui apporte des slots.
 	TArray<FRow> Rows;
@@ -479,19 +672,61 @@ void SInventoryPanel::Rebuild()
 		Columns->AddSlot().AutoWidth().Padding(GColumnGap * 2.f, 0, 0, 0)[BuildBagColumn()];
 	}
 
+	// Confirmation avant de jeter un outil.
+	TSharedRef<SWidget> Confirm = SNew(SBox);
+	if (PendingDiscard.IsSet())
+	{
+		const FSlotRef Pending = PendingDiscard.GetValue();
+		const TArray<FInventorySlot>& Source = Pending.bBag ? OtherSlots() : Slots;
+		const FItemDef* Def = Source.IsValidIndex(Pending.Index) && !Source[Pending.Index].IsEmpty() ? Items->Find(Source[Pending.Index].ItemId) : nullptr;
+		if (Def)
+		{
+			TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
+			Confirm = CardBox(
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock).Text(FText::Format(LOCTEXT("ConfirmDiscard", "Jeter « {0} » ? Il sera perdu."), Def->Name))
+					.Font(Font(11, true)).ColorAndOpacity(Danger)
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(8, 0, 0, 0)
+				[
+					Button(LOCTEXT("DiscardYes", "Jeter"), [this, WeakController, Pending]()
+					{
+						if (WeakController.IsValid())
+						{
+							WeakController->ServerDiscard(Pending.bBag, Pending.Index, Pending.bBag ? OpenedStorage.Get() : nullptr);
+						}
+						PendingDiscard.Reset();
+						Rebuild();
+					}, EButton::Danger, true, 90.f, 11)
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(6, 0, 0, 0)
+				[
+					Button(LOCTEXT("DiscardNo", "Garder"), [this]() { PendingDiscard.Reset(); Rebuild(); }, EButton::Secondary, true, 90.f, 11)
+				],
+				8.f);
+		}
+		else
+		{
+			PendingDiscard.Reset();
+		}
+	}
+
 	Body->SetContent(
 		SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
 		[
 			SNew(SBox).HAlign(HAlign_Left)[CoinBadge(State->GetCoins(), 14)]
 		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, PendingDiscard.IsSet() ? 10 : 0)[Confirm]
 		+ SVerticalBox::Slot().AutoHeight()[Columns]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 		[
 			SNew(STextBlock)
 			.Text(bBag
-				? LOCTEXT("HelpBag", "Glisser-déposer : échanger avec le sac. Clic : équiper / ranger, ou reprendre un objet du sac.")
-				: LOCTEXT("Help", "Clic : équiper / ranger. Survol : description."))
+				? LOCTEXT("HelpBag", "Glisser-déposer : échanger avec le sac. Clic : équiper / ranger, ou reprendre un objet du sac. A : jeter.")
+				: LOCTEXT("Help", "Clic : équiper / ranger. Survol : description. A : jeter."))
 			.Font(Font(9)).ColorAndOpacity(MutedInk)
 		]);
 }

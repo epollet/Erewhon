@@ -2,8 +2,14 @@
 
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Animation/AnimSequence.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Inventory/BackpackComponent.h"
 #include "World/Backpack.h"
+#include "World/Village.h"
+#include "World/Storage.h"
+#include "Net/UnrealNetwork.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/ErewhonGameState.h"
@@ -21,6 +27,7 @@
 #include "World/ErewhonVisuals.h"
 #include "World/ErewhonSound.h"
 #include "World/SpawnLayout.h"
+#include "World/Apothecary.h"
 #include "World/Sector.h"
 #include "World/SectorManager.h"
 #include "Materials/MaterialInterface.h"
@@ -36,6 +43,12 @@ namespace
 	const FVector GHeldFirstPersonOffset(38.f, 24.f, -22.f);
 	const FRotator GHeldFirstPersonRotation(-20.f, 0.f, 10.f);
 	const FVector GHeldThirdPersonOffset(22.f, 28.f, 0.f);
+
+	/** Rotation du modèle animé pour qu'il regarde vers +X (l'avant du personnage). */
+	constexpr float GBodyMeshYaw = -90.f;
+	/** Les animations du joueur (importées en A_player_<nom>) et leur vitesse au sol nominale (cm/s). */
+	const TCHAR* GBodyAnimations[] = { TEXT("idle"), TEXT("walk"), TEXT("run"), TEXT("jump"), TEXT("sit"), TEXT("crouch"),
+		TEXT("carry"), TEXT("push"), TEXT("pickup") };
 }
 
 AErewhonCharacter::AErewhonCharacter()
@@ -94,11 +107,158 @@ void AErewhonCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	BuildBody();
+	BuildAnimatedBody();
 	BuildWornBackpack();
 	BindAppearance();
 	// Le PlayerState a pu être lié avant que le corps n'existe : on applique son état maintenant.
 	ApplyAppearance();
 	ApplyBackpack();
+}
+
+void AErewhonCharacter::BuildAnimatedBody()
+{
+	USkeletalMesh* Model = LoadGenerated<USkeletalMesh>(TEXT("Characters/player"), TEXT("SK_player"));
+	if (!Model)
+	{
+		return;
+	}
+	AnimatedBody = NewObject<USkeletalMeshComponent>(this, TEXT("AnimatedBody"));
+	AnimatedBody->SetupAttachment(GetCapsuleComponent());
+	// Les pieds au bas de la capsule, le regard vers l'avant.
+	AnimatedBody->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -GetCapsuleComponent()->GetScaledCapsuleHalfHeight()), FRotator(0.f, GBodyMeshYaw, 0.f));
+	AnimatedBody->SetSkeletalMesh(Model);
+	AnimatedBody->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	AnimatedBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	AnimatedBody->RegisterComponent();
+	AddInstanceComponent(AnimatedBody);
+	for (const TCHAR* Name : GBodyAnimations)
+	{
+		if (UAnimSequence* Sequence = LoadGenerated<UAnimSequence>(TEXT("Characters/player"), FString::Printf(TEXT("A_player_%s"), Name)))
+		{
+			BodyAnimations.Add(Name, Sequence);
+		}
+	}
+	// La silhouette provisoire s'efface devant le vrai personnage.
+	for (UStaticMeshComponent* Part : { Legs.Get(), Torso.Get(), Head.Get() })
+	{
+		if (Part)
+		{
+			Part->SetVisibility(false);
+		}
+	}
+	// L'objet tenu suit la main droite du squelette.
+	for (const FName Bone : { FName(TEXT("RightHand")), FName(TEXT("hand_r")), FName(TEXT("Hand_R")), FName(TEXT("mixamorig:RightHand")) })
+	{
+		if (AnimatedBody->GetBoneIndex(Bone) != INDEX_NONE)
+		{
+			HeldThirdPerson->AttachToComponent(AnimatedBody, FAttachmentTransformRules::KeepRelativeTransform, Bone);
+			HeldThirdPersonBase = FVector(0.f, 4.f, 0.f);
+			break;
+		}
+	}
+	// Le bassin, pour garder sur place les animations qui avancent (porter, pousser, accroupi).
+	for (int32 Bone = 0; Bone < AnimatedBody->GetNumBones(); ++Bone)
+	{
+		const FString Name = AnimatedBody->GetBoneName(Bone).ToString();
+		if (Name.Contains(TEXT("hips"), ESearchCase::IgnoreCase) || Name.Contains(TEXT("pelvis"), ESearchCase::IgnoreCase))
+		{
+			HipsBone = AnimatedBody->GetBoneName(Bone);
+			break;
+		}
+	}
+	PlayBodyAnimation(TEXT("idle"), true);
+}
+
+void AErewhonCharacter::KeepBodyInPlace()
+{
+	if (!AnimatedBody || HipsBone.IsNone())
+	{
+		return;
+	}
+	// Assis ou en l'air, le bassin se déplace pour de bon ; sinon il reste à l'aplomb de la capsule.
+	FVector Offset = FVector::ZeroVector;
+	if (CurrentAnimation != TEXT("sit") && CurrentAnimation != TEXT("jump"))
+	{
+		const FVector Hips = AnimatedBody->GetSocketTransform(HipsBone, RTS_Component).GetLocation();
+		Offset = AnimatedBody->GetRelativeRotation().RotateVector(FVector(Hips.X, Hips.Y, 0.f));
+	}
+	AnimatedBody->SetRelativeLocation(FVector(0.f, 0.f, -GetCapsuleComponent()->GetScaledCapsuleHalfHeight()) - Offset);
+}
+
+void AErewhonCharacter::PlayBodyAnimation(FName Name, bool bLoop, float PlayRate)
+{
+	if (!AnimatedBody)
+	{
+		return;
+	}
+	if (Name != CurrentAnimation)
+	{
+		const TObjectPtr<UAnimSequence>* Sequence = BodyAnimations.Find(Name);
+		if (!Sequence || !*Sequence)
+		{
+			return;
+		}
+		CurrentAnimation = Name;
+		AnimatedBody->PlayAnimation(Sequence->Get(), bLoop);
+	}
+	AnimatedBody->SetPlayRate(PlayRate);
+}
+
+void AErewhonCharacter::UpdateAnimation(float DeltaSeconds)
+{
+	// Le geste du moment, déduit de ce que tout le monde voit (vitesse, banc, charrette, conteneur porté).
+	if (!AnimatedBody)
+	{
+		return;
+	}
+	KeepBodyInPlace();
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	const float Speed = GetVelocity().Size2D();
+	if (GetWorld()->GetTimeSeconds() < OneShotUntil)
+	{
+		return;
+	}
+#if !UE_BUILD_SHIPPING
+	// -ErewhonTestAnim=<nom> : captures, une animation imposée.
+	FString Forced;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ErewhonTestAnim="), Forced))
+	{
+		PlayBodyAnimation(*Forced, true);
+		return;
+	}
+#endif
+	if (IsSeated())
+	{
+		PlayBodyAnimation(TEXT("sit"), true);
+	}
+	else if (Movement->IsFalling())
+	{
+		PlayBodyAnimation(TEXT("jump"), false);
+	}
+	else if (DrivenCart && Speed > 20.f && FVector::DotProduct(GetVelocity(), DrivenCart->GetActorLocation() - GetActorLocation()) > 0.f)
+	{
+		PlayBodyAnimation(TEXT("push"), true, FMath::Clamp(Speed / 200.f, 0.5f, 1.6f));   // on recule vers elle : on la pousse
+	}
+	else if (Carried && Speed > 20.f)
+	{
+		PlayBodyAnimation(TEXT("carry"), true, FMath::Clamp(Speed / 200.f, 0.5f, 1.6f));
+	}
+	else if (bIsCrouched)
+	{
+		PlayBodyAnimation(TEXT("crouch"), true, Speed > 20.f ? FMath::Clamp(Speed / 150.f, 0.5f, 1.5f) : 0.f);
+	}
+	else if (Speed > 520.f)
+	{
+		PlayBodyAnimation(TEXT("run"), true, FMath::Clamp(Speed / 600.f, 0.6f, 1.5f));
+	}
+	else if (Speed > 20.f)
+	{
+		PlayBodyAnimation(TEXT("walk"), true, FMath::Clamp(Speed / 300.f, 0.5f, 1.6f));
+	}
+	else
+	{
+		PlayBodyAnimation(TEXT("idle"), true);
+	}
 }
 
 void AErewhonCharacter::BuildBody()
@@ -150,6 +310,75 @@ void AErewhonCharacter::ApplyBackpack()
 	ApplyView();
 }
 
+void AErewhonCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AErewhonCharacter, SeatIndex);
+	DOREPLIFETIME(AErewhonCharacter, Carried);
+	DOREPLIFETIME(AErewhonCharacter, DrivenCart);
+	DOREPLIFETIME(AErewhonCharacter, PotionUntil);
+}
+
+void AErewhonCharacter::ServerSit_Implementation(int32 Seat)
+{
+	const TArray<FTransform>& Seats = ErewhonVillage::BenchSeats();
+	if (!Seats.IsValidIndex(Seat) || FVector::Dist2D(GetActorLocation(), Seats[Seat].GetLocation()) > 350.f)
+	{
+		return;
+	}
+	SeatIndex = Seat;
+	ApplySeat();
+}
+
+void AErewhonCharacter::ServerStand_Implementation()
+{
+	if (SeatIndex == INDEX_NONE)
+	{
+		return;
+	}
+	const FTransform Seat = ErewhonVillage::BenchSeats()[SeatIndex];
+	SeatIndex = INDEX_NONE;
+	ApplySeat();
+	// On se relève devant le banc.
+	SetActorLocation(Seat.GetLocation() + Seat.GetRotation().GetForwardVector() * 70.f + FVector(0.f, 0.f, 60.f));
+}
+
+void AErewhonCharacter::OnRep_Seat()
+{
+	ApplySeat();
+}
+
+void AErewhonCharacter::ApplySeat()
+{
+	// Assis : immobile, le bassin sur le siège, les jambes tendues vers l'avant.
+	bStandRequested = false;
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (SeatIndex != INDEX_NONE && ErewhonVillage::BenchSeats().IsValidIndex(SeatIndex))
+	{
+		const FTransform Seat = ErewhonVillage::BenchSeats()[SeatIndex];
+		Movement->DisableMovement();
+		const float SeatedZ = AnimatedBody ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() - 45.f : 14.f;
+		SetActorLocationAndRotation(Seat.GetLocation() + FVector(0.f, 0.f, SeatedZ), Seat.Rotator());
+		if (Legs && !AnimatedBody)
+		{
+			Legs->SetRelativeLocationAndRotation(FVector(26.f, 0.f, -18.f), FRotator(-90.f, 0.f, 0.f));
+		}
+		if (IsLocallyControlled() && Controller)
+		{
+			Controller->SetControlRotation(Seat.Rotator());
+		}
+		return;
+	}
+	if (Movement->MovementMode == MOVE_None)
+	{
+		Movement->SetMovementMode(MOVE_Walking);
+	}
+	if (Legs)
+	{
+		Legs->SetRelativeLocationAndRotation(FVector(0, 0, -50), FRotator::ZeroRotator);
+	}
+}
+
 void AErewhonCharacter::CycleView()
 {
 	ViewMode = ViewMode == EViewMode::FirstPerson ? EViewMode::Behind
@@ -177,7 +406,7 @@ void AErewhonCharacter::ApplyView()
 	}
 
 	// À la première personne, on ne voit pas son propre corps ; sinon si.
-	TArray<USceneComponent*> SelfParts = { Torso.Get(), Legs.Get(), Head.Get(), HeldThirdPerson.Get() };
+	TArray<USceneComponent*> SelfParts = { Torso.Get(), Legs.Get(), Head.Get(), HeldThirdPerson.Get(), AnimatedBody.Get() };
 	if (WornBackpack)
 	{
 		TArray<USceneComponent*> BagParts;
@@ -264,8 +493,9 @@ void AErewhonCharacter::ApplyAppearance()
 	const FItemDef* Hand = Items->Find(Look.HandItem);
 	for (UStaticMeshComponent* Held : { HeldFirstPerson.Get(), HeldThirdPerson.Get() })
 	{
-		Held->SetVisibility(Hand != nullptr);
-		if (!Hand)
+		// Ce qui se pose (charrette, cagette, tonneau) ne se tient pas : on en voit l'aperçu au sol.
+		Held->SetVisibility(Hand != nullptr && !Hand->IsPlaceable());
+		if (!Hand || Hand->IsPlaceable())
 		{
 			continue;
 		}
@@ -273,7 +503,7 @@ void AErewhonCharacter::ApplyAppearance()
 		{
 			// Modèle généré : ramené à ~45 cm, la base (le manche) au creux de la main.
 			const FTransform Fit = FitToHeight(HandMesh, 45.f);
-			const FVector Base = Held == HeldFirstPerson.Get() ? GHeldFirstPersonOffset : GHeldThirdPersonOffset;
+			const FVector Base = Held == HeldFirstPerson.Get() ? GHeldFirstPersonOffset : (AnimatedBody ? HeldThirdPersonBase : GHeldThirdPersonOffset);
 			Held->SetStaticMesh(HandMesh);
 			Held->SetRelativeLocation(Base + Held->GetRelativeRotation().RotateVector(Fit.GetLocation()));
 			Held->SetRelativeScale3D(Fit.GetScale3D());
@@ -328,6 +558,16 @@ bool AErewhonCharacter::IsMenuOpen() const
 void AErewhonCharacter::Move(const FInputActionValue& Value)
 {
 	const FVector2D Axis = Value.Get<FVector2D>();
+	if (IsSeated())
+	{
+		// Un pas en avant suffit à se relever.
+		if (!bStandRequested && !Axis.IsNearlyZero() && !IsMenuOpen())
+		{
+			bStandRequested = true;
+			ServerStand();
+		}
+		return;
+	}
 	const FRotator Yaw(0.f, GetControlRotation().Yaw, 0.f);
 	AddMovementInput(FRotationMatrix(Yaw).GetUnitAxis(EAxis::X), Axis.Y);
 	AddMovementInput(FRotationMatrix(Yaw).GetUnitAxis(EAxis::Y), Axis.X);
@@ -375,6 +615,14 @@ void AErewhonCharacter::UpdateGroundSpeed()
 		const FVector Location = GetActorLocation();
 		Factor = Layouts->GetLayout(ErewhonSector::FromWorld(Location), State->GetWorldSeed())->SpeedFactor(FVector2D(Location));
 	}
+	if ((DrivenCart || (Carried && Carried->GetKind() == EStorageKind::Barrel)) && !HasPotion(EPotionEffect::Strength))
+	{
+		Factor *= 0.5f;   // on pousse une charrette, on porte un tonneau (sauf avec la potion de force)
+	}
+	if (HasPotion(EPotionEffect::Speed))
+	{
+		Factor *= 1.6f;
+	}
 	const float Base = bIsRunning ? Settings.RunSpeedMetersPerSecond : Settings.WalkSpeedMetersPerSecond;
 	GetCharacterMovement()->MaxWalkSpeed = Base * Factor * 100.f;
 	GetCharacterMovement()->MaxWalkSpeedCrouched = Settings.WalkSpeedMetersPerSecond * 0.5f * Factor * 100.f;
@@ -395,18 +643,40 @@ void AErewhonCharacter::ToggleInventory()
 
 void AErewhonCharacter::BagAction()
 {
-	// F : en visant son sac posé, on l'ouvre ; sinon, on pose celui qu'on porte.
+	// F : en visant son sac posé, on le remet sur le dos ; sinon, on pose celui qu'on porte.
 	AErewhonPlayerController* PC = GetController<AErewhonPlayerController>();
 	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
 	if (!PC || !State || PC->IsMenuOpen())
 	{
 		return;
 	}
+	if (DrivenCart)
+	{
+		PC->ServerToggleDrive(nullptr);   // lâcher la charrette
+		return;
+	}
+	if (AStorageActor* Storage = Cast<AStorageActor>(Target.Interactable.Get()))
+	{
+		if (Storage->IsOwnedBy(State->GetPlayerKey()))
+		{
+			PC->OpenStorage(Storage);
+		}
+		else
+		{
+			PC->ShowToast(LOCTEXT("NotYours", "Ce n'est pas à vous."));
+		}
+		return;
+	}
+	if (ACart* Cart = Cast<ACart>(Target.Interactable.Get()))
+	{
+		PC->ServerToggleDrive(Cart);
+		return;
+	}
 	if (ABackpack* Aimed = Cast<ABackpack>(Target.Interactable.Get()))
 	{
 		if (Aimed->IsOwnedBy(State->GetPlayerKey()))
 		{
-			PC->OpenInventory(Aimed);
+			PC->ServerPickUpBackpack(Aimed);
 		}
 		else
 		{
@@ -435,6 +705,11 @@ void AErewhonCharacter::StashAction()
 	{
 		PC->ServerStashAll();
 	}
+	AStorageActor* Storage = Cast<AStorageActor>(Target.Interactable.Get());
+	if (PC && State && !PC->IsMenuOpen() && Storage && Storage->IsOwnedBy(State->GetPlayerKey()))
+	{
+		PC->ServerStashInStorage(Storage);
+	}
 }
 
 void AErewhonCharacter::StartCrouch()
@@ -454,6 +729,11 @@ void AErewhonCharacter::Use()
 	{
 		return;
 	}
+	if (IsSeated())
+	{
+		ServerStand();
+		return;
+	}
 	if (IErewhonInteractable* Interactable = Cast<IErewhonInteractable>(Target.Interactable.Get()))
 	{
 		Interactable->Interact(PC);
@@ -468,6 +748,18 @@ void AErewhonCharacter::Primary()
 		return;
 	}
 
+	if (IsPlacing())
+	{
+		if (Placement.bValid)
+		{
+			PC->ServerPlace(Placement.Type, Placement.Location, Placement.Yaw, Placement.Target.Get(), Placement.Slot);
+		}
+		else
+		{
+			PC->ShowToast(LOCTEXT("NoPlace", "Visez le sol (ou une cagette, une charrette) pour le poser."));
+		}
+		return;
+	}
 	if (IErewhonInteractable* Interactable = Cast<IErewhonInteractable>(Target.Interactable.Get()))
 	{
 		Interactable->Interact(PC);
@@ -485,6 +777,11 @@ void AErewhonCharacter::Primary()
 	}
 	PC->ServerHarvest(Target.Plant.Sector, Target.Plant.PlantIndex);
 	PendingHarvests.Add({ Target.Plant.Sector, Target.Plant.PlantIndex }, GetWorld()->GetTimeSeconds());
+	if (AnimatedBody && GetVelocity().Size2D() < 20.f && BodyAnimations.Contains(TEXT("pickup")))
+	{
+		PlayBodyAnimation(TEXT("pickup"), false, 1.8f);
+		OneShotUntil = GetWorld()->GetTimeSeconds() + BodyAnimations[TEXT("pickup")]->GetPlayLength() / 1.8f;
+	}
 	SwingTime = GSwingDuration;
 }
 
@@ -497,8 +794,10 @@ void AErewhonCharacter::Tick(float DeltaSeconds)
 	{
 		UpdateGroundSpeed();
 	}
+	UpdatePotions(DeltaSeconds);
 	if (GetNetMode() != NM_DedicatedServer)
 	{
+		UpdateAnimation(DeltaSeconds);
 		UpdateFootsteps(DeltaSeconds);
 	}
 	if (!IsLocallyControlled())
@@ -507,6 +806,7 @@ void AErewhonCharacter::Tick(float DeltaSeconds)
 	}
 	UpdateTarget();
 	UpdateHighlight();
+	UpdatePlacement();
 
 	// Coup de l'objet tenu : un aller-retour vers le bas.
 	if (SwingTime > 0.f)
@@ -515,6 +815,88 @@ void AErewhonCharacter::Tick(float DeltaSeconds)
 		const float Progress = 1.f - SwingTime / GSwingDuration;
 		const float Arc = FMath::Sin(Progress * UE_PI) * 55.f;
 		HeldFirstPerson->SetRelativeRotation(GHeldFirstPersonRotation + FRotator(-Arc, -Arc * 0.4f, 0.f));
+	}
+}
+
+float AErewhonCharacter::PotionRemaining(EPotionEffect Effect) const
+{
+	const int32 Index = static_cast<int32>(Effect);
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	if (!State || !PotionUntil.IsValidIndex(Index))
+	{
+		return 0.f;
+	}
+	return FMath::Max(0.f, static_cast<float>(PotionUntil[Index] - State->GetWorldClock()));
+}
+
+void AErewhonCharacter::DrinkPotion(EPotionEffect Effect)
+{
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	if (!State || Effect == EPotionEffect::None)
+	{
+		return;
+	}
+	PotionUntil.SetNum(static_cast<int32>(EPotionEffect::Count));
+	// Rapetisser et grandir s'annulent : la dernière potion bue l'emporte.
+	if (Effect == EPotionEffect::Shrink || Effect == EPotionEffect::Grow)
+	{
+		PotionUntil[static_cast<int32>(EPotionEffect::Shrink)] = 0.0;
+		PotionUntil[static_cast<int32>(EPotionEffect::Grow)] = 0.0;
+	}
+	PotionUntil[static_cast<int32>(Effect)] = State->GetWorldClock() + ErewhonApothecary::PotionSeconds;
+	MulticastPotionDrunk();
+}
+
+void AErewhonCharacter::MulticastPotionDrunk_Implementation()
+{
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		ErewhonSound::PlayAt(this, ErewhonSound::Load(TEXT("potion_drink")), GetActorLocation(), 0.8f, 150.f, 1200.f);
+	}
+}
+
+void AErewhonCharacter::UpdatePotions(float DeltaSeconds)
+{
+	// Taille : on rapetisse ou on grandit en une seconde environ, et on revient de même.
+	const float TargetScale = HasPotion(EPotionEffect::Shrink) ? 0.45f : HasPotion(EPotionEffect::Grow) ? 1.8f : 1.f;
+	if (!FMath::IsNearlyEqual(BodyScale, TargetScale, 0.001f))
+	{
+		BodyScale = FMath::FInterpTo(BodyScale, TargetScale, DeltaSeconds, 3.f);
+		if (FMath::IsNearlyEqual(BodyScale, TargetScale, 0.002f))
+		{
+			BodyScale = TargetScale;
+		}
+		SetActorScale3D(FVector(BodyScale));
+	}
+	if (HasAuthority() || IsLocallyControlled())
+	{
+		// Saut : la hauteur croît comme le carré de l'élan (×1,55 → un peu plus de 2 m).
+		GetCharacterMovement()->JumpZVelocity = 450.f * (HasPotion(EPotionEffect::Jump) ? 1.55f : 1.f);
+	}
+
+	// Nyctalopie (pour soi seulement) : l'œil s'ouvre grand dans le noir, les couleurs pâlissent un peu.
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	const float Wanted = HasPotion(EPotionEffect::Night) ? 1.f : 0.f;
+	if (FMath::IsNearlyEqual(NightVision, Wanted) && Wanted == 0.f)
+	{
+		return;
+	}
+	NightVision = FMath::FInterpConstantTo(NightVision, Wanted, DeltaSeconds, 0.7f);
+	for (UCameraComponent* View : { Camera.Get(), ThirdCamera.Get() })
+	{
+		FPostProcessSettings& PP = View->PostProcessSettings;
+		PP.bOverride_AutoExposureMinBrightness = NightVision > 0.f;
+		PP.AutoExposureMinBrightness = FMath::Lerp(-1.5f, -7.f, NightVision);
+		PP.bOverride_AutoExposureBias = NightVision > 0.f;
+		PP.AutoExposureBias = FMath::Lerp(-0.5f, 1.2f, NightVision);
+		PP.bOverride_ColorSaturation = NightVision > 0.f;
+		PP.ColorSaturation = FVector4(1.f, 1.f, 1.f, FMath::Lerp(1.12f, 0.8f, NightVision));
+		PP.bOverride_ColorGain = NightVision > 0.f;
+		PP.ColorGain = FVector4(FMath::Lerp(1.f, 0.92f, NightVision), FMath::Lerp(1.f, 1.04f, NightVision), FMath::Lerp(1.f, 1.08f, NightVision), 1.f);
+		View->PostProcessBlendWeight = 1.f;
 	}
 }
 
@@ -546,6 +928,11 @@ void AErewhonCharacter::UpdateFootsteps(float DeltaSeconds)
 		Prefix = TEXT("step_stone");
 		Count = 2;
 	}
+	else if (ErewhonApothecary::IsInside(this, Feet))
+	{
+		Prefix = TEXT("step_wood");   // le plancher de l'apothicairerie
+		Count = 2;
+	}
 	else if (ErewhonSpawn::IsOnPorch(Feet))
 	{
 		Prefix = TEXT("step_wood");
@@ -554,13 +941,144 @@ void AErewhonCharacter::UpdateFootsteps(float DeltaSeconds)
 	else if (const AErewhonGameState* State = AErewhonGameState::Get(this))
 	{
 		const TSharedRef<const FSectorLayout> Layout = GetWorld()->GetSubsystem<USectorLayoutSubsystem>()->GetLayout(ErewhonSector::FromWorld(Feet), State->GetWorldSeed());
-		if (Layout->DirtAmount(FVector2D(Feet)) > 0.4f)
+		if (Layout->PavedAmount(FVector2D(Feet)) > 0.4f)
+		{
+			Prefix = TEXT("step_stone");
+			Count = 2;
+		}
+		else if (Layout->DirtAmount(FVector2D(Feet)) > 0.4f)
 		{
 			Prefix = TEXT("step_dirt");
 		}
 	}
 	const float Volume = (bIsCrouched ? 0.25f : Speed > 500.f ? 0.7f : 0.5f) * (IsLocallyControlled() ? 0.8f : 1.f);
 	ErewhonSound::PlayAt(this, ErewhonSound::LoadVariant(Prefix, Count), Feet, Volume, 200.f, 2200.f);
+}
+
+bool AErewhonCharacter::IsPlacing() const
+{
+	if (Carried)
+	{
+		return true;
+	}
+	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	const UItemDatabase* Items = UItemDatabase::Get(this);
+	const FItemDef* Hand = State && Items ? Items->Find(State->GetInventory()->GetHandItem()) : nullptr;
+	return Hand && Hand->IsPlaceable();
+}
+
+void AErewhonCharacter::UpdatePlacement()
+{
+	Placement = FPlacement();
+	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	if (!IsLocallyControlled() || !State || !IsPlacing() || IsMenuOpen())
+	{
+		if (PlacementGhost)
+		{
+			PlacementGhost->SetVisibility(false);
+		}
+		return;
+	}
+
+	// Ce qu'on pose : la charrette, ou un conteneur (porté, ou neuf depuis la main).
+	const FName HandItem = State->GetInventory()->GetHandItem();
+	const bool bCart = !Carried && ErewhonPlaceables::IsCart(HandItem);
+	const TOptional<EStorageKind> HandKind = ErewhonPlaceables::StorageForItem(HandItem);
+	const EStorageKind Kind = Carried ? Carried->GetKind() : HandKind.Get(EStorageKind::Crate);
+
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(ErewhonPlacement), false, this);
+	if (Carried)
+	{
+		Params.AddIgnoredActor(Carried);
+	}
+	const FVector Eye = Camera->GetComponentLocation();
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, Eye, Eye + GetControlRotation().Vector() * 600.f, ECC_Visibility, Params))
+	{
+		if (PlacementGhost)
+		{
+			PlacementGhost->SetVisibility(false);
+		}
+		return;
+	}
+
+	FTransform At;
+	AActor* HitActor = Hit.GetActor();
+	AStorageActor* HitStorage = Cast<AStorageActor>(HitActor);
+	ACart* HitCart = Cast<ACart>(HitActor);
+	if (HitStorage && HitStorage->GetCart())
+	{
+		HitCart = HitStorage->GetCart();   // viser un conteneur dans la charrette, c'est viser la charrette
+	}
+	const FString& Key = State->GetPlayerKey();
+	if (!bCart && Kind == EStorageKind::Crate && HitStorage && HitStorage->IsOwnedBy(Key) && HitStorage->GetKind() == EStorageKind::Crate
+		&& HitStorage->TopOfStack()->StackSize() < ErewhonPlaceables::MaxStack && !HitStorage->TopOfStack()->GetCarrier())
+	{
+		// Sur le haut de la pile.
+		AStorageActor* Top = HitStorage->TopOfStack();
+		Placement.Type = 1;
+		Placement.Target = Top;
+		At = FTransform(Top->GetActorRotation(), Top->GetActorLocation() + FVector(0, 0, ErewhonPlaceables::Height(Top->GetKind())));
+	}
+	else if (!bCart && HitCart && HitCart->IsOwnedBy(Key) && HitCart->FreeSlotNear(Hit.ImpactPoint) != INDEX_NONE)
+	{
+		// Dans la charrette : l'emplacement libre le plus proche s'éclaire.
+		Placement.Type = 2;
+		Placement.Target = HitCart;
+		Placement.Slot = HitCart->FreeSlotNear(Hit.ImpactPoint);
+		At = ACart::SlotTransform(Placement.Slot) * HitCart->GetActorTransform();
+	}
+	else if (Hit.ImpactNormal.Z > 0.6f && !HitStorage && !HitCart)
+	{
+		// Au sol, face au joueur (les brancards de la charrette vers lui).
+		Placement.Type = 0;
+		At = FTransform(FRotator(0.f, GetActorRotation().Yaw, 0.f), Hit.ImpactPoint);
+	}
+	else
+	{
+		if (PlacementGhost)
+		{
+			PlacementGhost->SetVisibility(false);
+		}
+		return;
+	}
+	Placement.bValid = true;
+	Placement.Location = At.GetLocation();
+	Placement.Yaw = At.Rotator().Yaw;
+
+	// L'aperçu : le modèle de ce qu'on pose, en halo translucide.
+	if (!PlacementGhost)
+	{
+		PlacementGhost = NewObject<UStaticMeshComponent>(this);
+		PlacementGhost->SetUsingAbsoluteLocation(true);
+		PlacementGhost->SetUsingAbsoluteRotation(true);
+		PlacementGhost->SetUsingAbsoluteScale(true);
+		PlacementGhost->SetupAttachment(GetRootComponent());
+		PlacementGhost->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		PlacementGhost->SetCastShadow(false);
+		PlacementGhost->RegisterComponent();
+	}
+	FTransform Fit;
+	UStaticMesh* GhostMesh = bCart ? ErewhonPlaceables::CartMesh(Fit) : ErewhonPlaceables::StorageMesh(Kind, Fit);
+	if (!GhostMesh)
+	{
+		GhostMesh = GetShape(EShape::Cube);
+		Fit = FTransform(FRotator::ZeroRotator, FVector(0, 0, 30), bCart ? FVector(2.6f, 1.f, 0.8f) : FVector(0.6f, 0.4f, 0.4f));
+	}
+	if (PlacementGhost->GetStaticMesh() != GhostMesh)
+	{
+		PlacementGhost->SetStaticMesh(GhostMesh);
+		if (!HighlightMaterial)
+		{
+			HighlightMaterial = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_Highlight"));
+		}
+		for (int32 Slot = 0; Slot < PlacementGhost->GetNumMaterials(); ++Slot)
+		{
+			PlacementGhost->SetMaterial(Slot, HighlightMaterial);
+		}
+	}
+	PlacementGhost->SetWorldTransform(Fit * At);
+	PlacementGhost->SetVisibility(true);
 }
 
 void AErewhonCharacter::UpdateHighlight()

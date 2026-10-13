@@ -8,6 +8,8 @@
 #include "World/SectorManager.h"
 #include "World/MusicPlayer.h"
 #include "World/SpawnCabin.h"
+#include "World/Village.h"
+#include "Items/ItemTypes.h"
 #include "World/SpawnLayout.h"
 #include "World/Wildlife.h"
 
@@ -68,6 +70,7 @@ void AErewhonGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(AErewhonGameState, WorldAgeAtStart);
 	DOREPLIFETIME(AErewhonGameState, Harvests);
 	DOREPLIFETIME(AErewhonGameState, SectorOwners);
+	DOREPLIFETIME(AErewhonGameState, VillageUpgrades);
 }
 
 AErewhonGameState* AErewhonGameState::Get(const UObject* WorldContext)
@@ -101,19 +104,85 @@ void AErewhonGameState::SpawnLocalWorldActors()
 
 	// Le serveur dédié a besoin du sol (collisions) mais pas du ciel.
 	World->SpawnActor<ASectorManager>(Params);
-	for (const EShopKind Kind : ErewhonSpawn::ShopKinds)
-	{
-		// Les deux commerces de la place : le General Store et le Sector Manager.
-		ASpawnCabin* Cabin = World->SpawnActorDeferred<ASpawnCabin>(ASpawnCabin::StaticClass(), ErewhonSpawn::CabinTransform(Kind),
-			nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-		Cabin->Kind = Kind;
-		Cabin->FinishSpawning(ErewhonSpawn::CabinTransform(Kind));
-	}
+	// Les commerces de la place ; le tailleur ne vient qu'une fois sa boutique construite.
+	SpawnCabin(EShopKind::GeneralStore);
+	SpawnCabin(EShopKind::SectorManager);
+	ApplyVillage();
 	if (GetNetMode() != NM_DedicatedServer)
 	{
 		World->SpawnActor<ACelestialSystem>(Params);
 		World->SpawnActor<AWildlife>(Params);
 		World->SpawnActor<AMusicPlayer>(Params);
+	}
+}
+
+void AErewhonGameState::SpawnCabin(EShopKind Kind)
+{
+	ASpawnCabin* Cabin = GetWorld()->SpawnActorDeferred<ASpawnCabin>(ASpawnCabin::StaticClass(), ErewhonSpawn::CabinTransform(Kind),
+		nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	Cabin->Kind = Kind;
+	Cabin->FinishSpawning(ErewhonSpawn::CabinTransform(Kind));
+}
+
+void AErewhonGameState::ApplyVillage()
+{
+	if (!bLocalActorsSpawned)
+	{
+		return;   // tout se construira avec les acteurs locaux
+	}
+	if (HasVillageUpgrade(EVillageUpgrade::Tailor) && !bTailorSpawned)
+	{
+		bTailorSpawned = true;
+		SpawnCabin(EShopKind::Tailor);
+	}
+	if (VillageDecor)
+	{
+		VillageDecor->Destroy();
+	}
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	VillageDecor = GetWorld()->SpawnActor<AVillageDecor>(Params);
+}
+
+void AErewhonGameState::SetVillageUpgrades(int32 Upgrades)
+{
+	check(HasAuthority());
+	VillageUpgrades = Upgrades;
+	OnRep_Village();
+}
+
+void AErewhonGameState::AddVillageUpgrade(EVillageUpgrade Upgrade)
+{
+	SetVillageUpgrades(VillageUpgrades | (1 << static_cast<int32>(Upgrade)));
+}
+
+void AErewhonGameState::OnRep_Village()
+{
+	ApplyVillage();
+	OnVillageChanged.Broadcast();
+}
+
+EShopKind AErewhonGameState::ShopFor(const FItemDef& Item) const
+{
+	const EShopKind Shop = Item.ShopFor();
+	return Shop == EShopKind::Tailor && !HasVillageUpgrade(EVillageUpgrade::Tailor) ? EShopKind::GeneralStore : Shop;
+}
+
+uint8 AErewhonGameState::GetPavedLinks(const FIntPoint& Sector) const
+{
+	const FSectorOwnerEntry* Entry = OwnerBySector.Find(Sector);
+	return Entry ? Entry->PavedLinks : 0;
+}
+
+void AErewhonGameState::AddPavedLink(const FIntPoint& Sector, int32 Side)
+{
+	check(HasAuthority());
+	FSectorOwnerEntry* Entry = SectorOwners.Items.FindByPredicate([&](const FSectorOwnerEntry& E) { return E.Sector == Sector; });
+	if (Entry && Side >= 0 && Side < 4)
+	{
+		Entry->PavedLinks |= 1 << Side;
+		SectorOwners.MarkItemDirty(*Entry);
+		NotifyOwner(*Entry, true);
 	}
 }
 
@@ -200,6 +269,24 @@ uint8 AErewhonGameState::GetRoadLinks(const FIntPoint& Sector) const
 	return Entry ? Entry->RoadLinks : 0;
 }
 
+uint8 AErewhonGameState::GetBuildings(const FIntPoint& Sector) const
+{
+	const FSectorOwnerEntry* Entry = OwnerBySector.Find(Sector);
+	return Entry ? Entry->Buildings : 0;
+}
+
+void AErewhonGameState::AddBuilding(const FIntPoint& Sector, uint8 Building)
+{
+	check(HasAuthority());
+	FSectorOwnerEntry* Entry = SectorOwners.Items.FindByPredicate([&](const FSectorOwnerEntry& E) { return E.Sector == Sector; });
+	if (Entry)
+	{
+		Entry->Buildings |= Building;
+		SectorOwners.MarkItemDirty(*Entry);
+		NotifyOwner(*Entry, true);
+	}
+}
+
 void AErewhonGameState::AddRoadLink(const FIntPoint& Sector, int32 Side)
 {
 	check(HasAuthority());
@@ -212,7 +299,7 @@ void AErewhonGameState::AddRoadLink(const FIntPoint& Sector, int32 Side)
 	}
 }
 
-void AErewhonGameState::SetSectorOwner(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName, uint8 RoadLinks)
+void AErewhonGameState::SetSectorOwner(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName, uint8 RoadLinks, uint8 PavedLinks, uint8 Buildings)
 {
 	check(HasAuthority());
 	FSectorOwnerEntry* Entry = SectorOwners.Items.FindByPredicate([&](const FSectorOwnerEntry& E) { return E.Sector == Sector; });
@@ -224,6 +311,8 @@ void AErewhonGameState::SetSectorOwner(const FIntPoint& Sector, const FString& O
 	Entry->OwnerKey = OwnerKey;
 	Entry->OwnerName = OwnerName;
 	Entry->RoadLinks = RoadLinks;
+	Entry->PavedLinks = PavedLinks;
+	Entry->Buildings = Buildings;
 	SectorOwners.MarkItemDirty(*Entry);
 	NotifyOwner(*Entry, true);
 }

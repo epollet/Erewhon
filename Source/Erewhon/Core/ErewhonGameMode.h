@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "World/SectorTypes.h"
+#include "Inventory/InventoryComponent.h"
 #include "ErewhonGameMode.generated.h"
 
 class AErewhonPlayerController;
@@ -35,12 +36,37 @@ public:
 	FText TrySellSector(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 	FText TryBuyRoadLink(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 Side);
 
+	// Apothicairerie
+	FText TryBuyApothecary(AErewhonPlayerController* Controller, const FIntPoint& Sector);
+	FText TryFeedFire(AErewhonPlayerController* Controller, class AApothecary* House);
+	FText TryStartCraft(AErewhonPlayerController* Controller, class AApothecary* House, FName Output, int32 Count);
+	/** Entre ses poches et une étagère (Shelf) : les piles de l'étagère sont celles de ses étages. */
+	FText TryMoveShelfItem(AErewhonPlayerController* Controller, class AApothecary* House, int32 Shelf, bool bFromShelf, int32 From, bool bToShelf, int32 To);
+	FText TryStashInShelves(AErewhonPlayerController* Controller, class AApothecary* House, int32 Shelf);
+
 	// Sac à dos
 	FText TryDropBackpack(AErewhonPlayerController* Controller);
 	FText TryPickUpBackpack(AErewhonPlayerController* Controller, class ABackpack* Backpack);
 	/** Déplace un objet entre l'inventaire et le sac (To = INDEX_NONE : là où il trouve de la place). */
 	FText TryMoveItem(AErewhonPlayerController* Controller, bool bFromBag, int32 From, bool bToBag, int32 To);
 	FText TryStashAll(AErewhonPlayerController* Controller);
+	FText TryDiscard(AErewhonPlayerController* Controller, bool bFromBag, int32 SlotIndex, class AStorageActor* Storage = nullptr);
+
+	// Charrette et conteneurs
+	FText TryPickUpStorage(AErewhonPlayerController* Controller, class AStorageActor* Storage);
+	/** Pose ce qu'on tient : au sol (Type 0), sur une cagette (1), dans une charrette (2). */
+	FText TryPlace(AErewhonPlayerController* Controller, uint8 Type, const FVector& Location, float Yaw, AActor* Target, int32 Slot);
+	FText TryToggleDrive(AErewhonPlayerController* Controller, class ACart* Cart);
+	FText TryMoveStorageItem(AErewhonPlayerController* Controller, class AStorageActor* Storage, bool bFromStorage, int32 From, bool bToStorage, int32 To);
+	FText TryStashInStorage(AErewhonPlayerController* Controller, class AStorageActor* Storage);
+
+	// Triche (hôte, ou build de développement)
+	FText TryCheatSetCoins(AErewhonPlayerController* Controller, int32 Coins);
+	FText TryCheatAdvanceTime(AErewhonPlayerController* Controller, float Seconds);
+
+	// Village
+	FText TryBuyVillageUpgrade(AErewhonPlayerController* Controller, uint8 Upgrade);
+	FText TryBuyPavedLink(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 Side);
 	FText TryBuyItem(AErewhonPlayerController* Controller, FName ItemId);
 	FText TrySellItem(AErewhonPlayerController* Controller, FName ItemId, int32 Count);
 
@@ -49,6 +75,22 @@ public:
 private:
 	bool IsNearMerchant(const AController* Controller, EShopKind Kind) const;
 	void CapturePlayer(const AErewhonPlayerState* PlayerState);
+	/** Les portes des cabanes, dont celle du tailleur une fois construit. */
+	void SpawnDoors();
+	void SpawnSavedObjects();
+	void CaptureObjects();
+	/** Un joueur qui part lâche ce qu'il porte et la charrette qu'il conduit. */
+	void ReleaseHeld(APawn* Pawn);
+	TSet<EShopKind> DoorsSpawned;
+
+	class AApothecary* SpawnApothecary(const FIntPoint& Sector, double FireUntil, const TArray<FInventorySlot>& Shelves = TArray<FInventorySlot>());
+	/** Un exemplaire de la préparation en cours est prêt : on l'échange contre ses ingrédients. */
+	void StepCraft(AErewhonPlayerController* Controller);
+	/** Le joueur est-il chez lui, assez près de sa maison pour s'en servir ? */
+	FText CheckAtHouse(AErewhonPlayerController* Controller, const class AApothecary* House) const;
+
+	UPROPERTY()
+	TMap<FIntPoint, TObjectPtr<class AApothecary>> Apothecaries;
 
 	UPROPERTY()
 	TObjectPtr<UErewhonWorldSave> WorldSave;

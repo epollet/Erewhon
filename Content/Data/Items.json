@@ -68,6 +68,93 @@
     },
 
     {
+      "id": "crushed_grass", "name": "Écrasé d'herbe", "category": "resource",
+      "description": "Herbe pilée au mortier de l'apothicairerie.",
+      "sell_price": 2, "max_stack": 30, "color": [56,  136,  44]
+    },
+    {
+      "id": "crushed_flower_white", "name": "Écrasé de fleur blanche", "category": "resource",
+      "description": "Fleur blanche pilée au mortier de l'apothicairerie.",
+      "sell_price": 5, "max_stack": 30, "color": [193,  193,  188]
+    },
+    {
+      "id": "crushed_flower_blue", "name": "Écrasé de fleur bleue", "category": "resource",
+      "description": "Fleur bleue pilée au mortier de l'apothicairerie.",
+      "sell_price": 5, "max_stack": 30, "color": [57,  106,  188]
+    },
+    {
+      "id": "crushed_flower_purple", "name": "Écrasé de fleur violette", "category": "resource",
+      "description": "Fleur violette pilée au mortier de l'apothicairerie.",
+      "sell_price": 5, "max_stack": 30, "color": [126,  44,  159]
+    },
+    {
+      "id": "crushed_herb", "name": "Écrasé d'herbe aromatique", "category": "resource",
+      "description": "Herbe aromatique pilée au mortier de l'apothicairerie.",
+      "sell_price": 2, "max_stack": 30, "color": [48,  124,  32]
+    },
+    {
+      "id": "crushed_fern", "name": "Écrasé de fougère", "category": "resource",
+      "description": "Fougère pilée au mortier de l'apothicairerie.",
+      "sell_price": 3, "max_stack": 30, "color": [56,  112,  48]
+    },
+    {
+      "id": "crushed_broadleaf", "name": "Écrasé de plantain", "category": "resource",
+      "description": "Plantain pilée au mortier de l'apothicairerie.",
+      "sell_price": 2, "max_stack": 30, "color": [72,  120,  48]
+    },
+    {
+      "id": "crushed_weed_dock", "name": "Écrasé de patience", "category": "resource",
+      "description": "Patience pilée au mortier de l'apothicairerie.",
+      "sell_price": 3, "max_stack": 30, "color": [88,  112,  48]
+    },
+    {
+      "id": "crushed_weed_nettle", "name": "Écrasé d'ortie", "category": "resource",
+      "description": "Ortie pilée au mortier de l'apothicairerie.",
+      "sell_price": 3, "max_stack": 30, "color": [48,  104,  40]
+    },
+    {
+      "id": "potion_base", "name": "Base de potion", "category": "resource",
+      "description": "Deux écrasés d'herbe mijotés au chaudron.\nAvec deux écrasés d'une autre plante, elle devient potion.",
+      "sell_price": 4, "max_stack": 10, "color": [170, 200, 140]
+    },
+    {
+      "id": "potion_speed", "name": "Potion de vitesse", "category": "potion", "potion_effect": "speed",
+      "description": "On court bien plus vite pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
+      "sell_price": 28, "max_stack": 10, "color": [60,  140,  255]
+    },
+    {
+      "id": "potion_night", "name": "Potion de nyctalopie", "category": "potion", "potion_effect": "night",
+      "description": "On voit clair dans la nuit pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
+      "sell_price": 28, "max_stack": 10, "color": [130,  60,  200]
+    },
+    {
+      "id": "potion_strength", "name": "Potion de force", "category": "potion", "potion_effect": "strength",
+      "description": "Les charges ne ralentissent plus pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
+      "sell_price": 20, "max_stack": 10, "color": [40,  140,  60]
+    },
+    {
+      "id": "potion_jump", "name": "Potion de saut", "category": "potion", "potion_effect": "jump",
+      "description": "On saute bien plus haut pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
+      "sell_price": 20, "max_stack": 10, "color": [150,  220,  60]
+    },
+    {
+      "id": "potion_shrink", "name": "Potion de rapetissement", "category": "potion", "potion_effect": "shrink",
+      "description": "On devient tout petit pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
+      "sell_price": 16, "max_stack": 10, "color": [240,  160,  200]
+    },
+    {
+      "id": "potion_grow", "name": "Potion de grandissement", "category": "potion", "potion_effect": "grow",
+      "description": "On devient très grand pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
+      "sell_price": 20, "max_stack": 10, "color": [240,  150,  50]
+    },
+
+    {
+      "id": "firewood", "name": "Petit bois", "category": "resource",
+      "description": "Une brassée de petit bois sec, pour allumer la cheminée de l'apothicairerie.\nChaque brassée la fait brûler cinq minutes.",
+      "buy_price": 10, "max_stack": 10, "color": [150, 105, 60]
+    },
+
+    {
       "id": "cerpe", "name": "Cerpe", "category": "tool",
       "description": "Faucille pour récolter plus efficacement : vise les plantes dans un cône devant soi.",
       "buy_price": 50, "max_stack": 1, "color": [180, 140, 60], "harvest_tool": true
@@ -77,6 +164,22 @@
       "id": "backpack", "name": "Sac à dos", "category": "backpack",
       "description": "Sac de toile robuste : 12 places de rangement et deux outils accrochés sur les côtés.\nSe porte sur le dos ; [F] pour le poser, puis l'ouvrir.",
       "buy_price": 200, "max_stack": 1, "color": [112, 128, 72]
+    },
+
+    {
+      "id": "cart", "name": "Charrette", "category": "placeable",
+      "description": "Deux roues, deux brancards, deux places pour des cagettes ou des tonneaux.\nPrenez-la en main pour la poser ; [F] devant les brancards pour la conduire.",
+      "buy_price": 1000, "max_stack": 1, "color": [150, 110, 70]
+    },
+    {
+      "id": "crate", "name": "Cagette", "category": "placeable",
+      "description": "Pour ranger ses plantes : 12 places. Elles s'empilent par trois.\nEn main, cliquez au sol pour la poser ; [E] pour la reprendre, [F] pour l'ouvrir.",
+      "buy_price": 200, "max_stack": 3, "color": [200, 160, 100]
+    },
+    {
+      "id": "barrel", "name": "Tonneau", "category": "placeable",
+      "description": "Deux cagettes et demie de plantes : 30 places. Lourd : on avance moitié moins vite en le portant.",
+      "buy_price": 420, "max_stack": 1, "color": [120, 80, 50]
     },
 
     {

@@ -115,7 +115,7 @@ TSharedRef<SWidget> SGameMenu::BuildMain()
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 14, 0, 0).HAlign(HAlign_Center)
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("Controls", "ZQSD : marcher · Maj : courir · Ctrl : s'accroupir\nClic : récolter · E : interagir · I : inventaire"))
+			.Text(LOCTEXT("Controls", "ZQSD : marcher · Maj : courir · Ctrl : s'accroupir · V : vue\nClic : récolter · E : interagir · I : inventaire · A : jeter (inventaire)\nF : poser / reprendre le sac · E : l'ouvrir · G : tout y ranger"))
 			.Justification(ETextJustify::Center)
 			.Font(Font(9)).ColorAndOpacity(MutedInk)
 		];

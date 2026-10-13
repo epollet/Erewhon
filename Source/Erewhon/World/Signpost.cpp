@@ -15,6 +15,7 @@
 #include "Misc/Paths.h"
 #include "World/ErewhonVisuals.h"
 #include "World/SpawnLayout.h"
+#include "World/Village.h"
 
 using namespace ErewhonVisuals;
 
@@ -187,17 +188,26 @@ namespace ErewhonSigns
 		}
 	}
 
-	void AddSignpost(AActor* Owner, USceneComponent* Parent, const FVector& Location, const TArray<FArm>& Arms)
+	void AddSignpost(AActor* Owner, USceneComponent* Parent, const FVector& Location, const TArray<FArm>& Arms, bool bLantern)
 	{
 		if (!Owner || !Parent)
 		{
 			return;
 		}
+		// Avec une lanterne, le poteau monte plus haut : elle pend au-dessus des planches.
+		const float PostHeight = bLantern ? 320.f : GPostHeight;
+		if (bLantern)
+		{
+			const float ArmYaw = Arms.Num() > 0 ? Arms[0].Yaw : 0.f;
+			const float Yaw = ArmYaw + 90.f;   // à angle droit des planches, pour ne pas les heurter
+			const FVector Side = FRotator(0.f, Yaw, 0.f).Vector() * 5.5f;
+			ErewhonVillage::AddLantern(Owner, Parent, Location + Side + FVector(0.f, 0.f, 300.f), Yaw, true);
+		}
 		// Poteau de bois sombre, coiffé d'un petit chapeau.
-		UStaticMeshComponent* Post = AddShape(Owner, Parent, EShape::Cube, Location + FVector(0, 0, GPostHeight * 0.5f),
-			FVector(11, 11, GPostHeight), Palette::WoodDark);
+		UStaticMeshComponent* Post = AddShape(Owner, Parent, EShape::Cube, Location + FVector(0, 0, PostHeight * 0.5f),
+			FVector(11, 11, PostHeight), Palette::WoodDark);
 		Post->SetMaterial(0, MakePaintedMaterial(Post, TEXT("wood_trim"), 120.f, Palette::WoodDark));
-		AddShape(Owner, Parent, EShape::Cone, Location + FVector(0, 0, GPostHeight), FVector(18, 18, 12), Palette::WoodDark,
+		AddShape(Owner, Parent, EShape::Cone, Location + FVector(0, 0, PostHeight), FVector(18, 18, 12), Palette::WoodDark,
 			FRotator::ZeroRotator, false);
 
 		for (int32 Index = 0; Index < Arms.Num(); ++Index)

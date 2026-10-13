@@ -155,16 +155,25 @@ FText ABackpack::GetInteractionLabel() const
 	const AErewhonPlayerState* State = Local ? Local->GetPlayerState<AErewhonPlayerState>() : nullptr;
 	if (State && IsOwnedBy(State->GetPlayerKey()))
 	{
-		return LOCTEXT("Mine", "Remettre le sac sur le dos    [F] Ouvrir    [G] Tout y ranger");
+		return LOCTEXT("Mine", "Ouvrir le sac    [F] Le remettre sur le dos    [G] Tout y ranger");
 	}
 	return FText::Format(LOCTEXT("Theirs", "Sac à dos de {0}"), FText::FromString(OwnerName));
 }
 
 void ABackpack::Interact(AErewhonPlayerController* Controller)
 {
-	if (Controller)
+	const AErewhonPlayerState* State = Controller ? Controller->GetPlayerState<AErewhonPlayerState>() : nullptr;
+	if (!State)
 	{
-		Controller->ServerPickUpBackpack(this);
+		return;
+	}
+	if (IsOwnedBy(State->GetPlayerKey()))
+	{
+		Controller->OpenInventory(this);
+	}
+	else
+	{
+		Controller->ShowToast(LOCTEXT("NotYourBag", "Ce sac n'est pas à vous."));
 	}
 }
 

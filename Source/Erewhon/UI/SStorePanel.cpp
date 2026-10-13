@@ -20,6 +20,8 @@
 #include "Widgets/Text/STextBlock.h"
 #include "World/SectorTypes.h"
 #include "World/SpawnLayout.h"
+#include "World/Village.h"
+#include "World/Apothecary.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonStorePanel"
 
@@ -67,17 +69,18 @@ void SStorePanel::Construct(const FArguments& InArgs)
 	if (World)
 	{
 		World->OnSectorOwnerChanged.AddSP(this, &SStorePanel::OnSectorOwnerChanged);
+		World->OnVillageChanged.AddSP(this, &SStorePanel::OnVillageChanged);
 	}
 	// Le gérant ne parle que de secteurs ; ailleurs, rien à vendre ici ? On ouvre sur les achats.
 	const bool bManager = Kind == EShopKind::SectorManager;
 	if (bManager)
 	{
-		Tab = ETab::Sectors;
+		Tab = InArgs._bVillageTab ? ETab::Village : ETab::Sectors;
 	}
-	else if (State && !State->GetInventory()->GetSlots().ContainsByPredicate([this, State](const FInventorySlot& Slot)
+	else if (State && !State->GetInventory()->GetSlots().ContainsByPredicate([this, State, World](const FInventorySlot& Slot)
 	{
 		const FItemDef* Def = Slot.Kind == ESlotKind::Inventory && !Slot.IsEmpty() ? UItemDatabase::Get(Controller.Get())->Find(Slot.ItemId) : nullptr;
-		return Def && Def->ShopFor() == Kind && Def->ResalePrice(UErewhonSettings::Get().ResaleRatio) > 0;
+		return Def && World && World->ShopFor(*Def) == Kind && Def->ResalePrice(UErewhonSettings::Get().ResaleRatio) > 0;
 	}))
 	{
 		Tab = ETab::Buy;
@@ -114,7 +117,7 @@ void SStorePanel::Rebuild()
 	{
 		return;
 	}
-	TSharedRef<SWidget> Content = Tab == ETab::Sectors ? BuildSectors() : Tab == ETab::Buy ? BuildBuy() : BuildSell();
+	TSharedRef<SWidget> Content = Tab == ETab::Sectors ? BuildSectors() : Tab == ETab::Village ? BuildVillage() : Tab == ETab::Buy ? BuildBuy() : BuildSell();
 	Body->SetContent(
 		SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 12)
@@ -131,13 +134,14 @@ TSharedRef<SWidget> SStorePanel::BuildTabs()
 	TSharedRef<SHorizontalBox> Tabs = SNew(SHorizontalBox);
 	const TPair<ETab, FText> Entries[] = {
 		{ ETab::Sectors, LOCTEXT("TabSectors", "Secteurs") },
+		{ ETab::Village, LOCTEXT("TabVillage", "Village") },
 		{ ETab::Buy, LOCTEXT("TabBuy", "Acheter") },
 		{ ETab::Sell, LOCTEXT("TabSell", "Vendre") },
 	};
 	for (const TPair<ETab, FText>& Entry : Entries)
 	{
 		// Chaque commerce son métier : la carte chez le gérant, le reste au General Store.
-		if ((Entry.Key == ETab::Sectors) != (Kind == EShopKind::SectorManager))
+		if ((Entry.Key == ETab::Sectors || Entry.Key == ETab::Village) != (Kind == EShopKind::SectorManager))
 		{
 			continue;
 		}
@@ -329,6 +333,48 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 				]
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[UpgradeAction]
 			];
+			// Une fois le village pavé, l'accès de terre peut l'être à son tour.
+			if (bBuilt && World->IsVillagePaved())
+			{
+				const bool bPaved = (World->GetPavedLinks(Sector) & (1 << Side)) != 0;
+				TSharedRef<SWidget> PaveAction = bPaved
+					? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("Paved", "✓ Pavé")).Font(Font(11, true)).ColorAndOpacity(Leaf))
+					: Button(FText::Format(LOCTEXT("PaveLink", "Paver · {0}"), CoinsText(Settings.PavedLinkPrice)),
+						[WeakController, Sector, SideByte]() { if (WeakController.IsValid()) { WeakController->ServerBuyPavedLink(Sector, SideByte); } },
+						EButton::Primary, State->GetCoins() >= Settings.PavedLinkPrice, 150.f);
+				Upgrades->AddSlot().AutoHeight().Padding(0, 0, 0, 6)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(FText::Format(LOCTEXT("PaveUpgrade", "Accès {0} en pavés"), ErewhonSector::SideLabel(Side)))
+						.Font(Font(11)).ColorAndOpacity(Ink).AutoWrapText(true)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[PaveAction]
+				];
+			}
+		}
+		// L'apothicairerie, au centre d'une prairie.
+		if (Type == ESectorType::Prairie)
+		{
+			const bool bBuilt = (World->GetBuildings(Sector) & ESectorBuilding::Apothecary) != 0;
+			TSharedRef<SWidget> BuildAction = bBuilt
+				? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("Built", "✓ Construit")).Font(Font(11, true)).ColorAndOpacity(Leaf))
+				: Button(FText::Format(LOCTEXT("BuildApothecary", "Construire · {0}"), CoinsText(Settings.ApothecaryPrice)),
+					[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerBuyApothecary(Sector); } },
+					EButton::Primary, State->GetCoins() >= Settings.ApothecaryPrice, 150.f);
+			Upgrades->AddSlot().AutoHeight().Padding(0, 4, 0, 6)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("ApothecaryUpgrade", "Apothicairerie (cheminée, mortier, chaudron)"))
+					.Font(Font(11)).ColorAndOpacity(Ink).AutoWrapText(true)
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[BuildAction]
+			];
 		}
 		if (Upgrades->NumSlots() == 1)
 		{
@@ -391,7 +437,7 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 	int32 Index = 0;
 	for (const FItemDef* Def : Items->GetPurchasable())
 	{
-		if (Def->ShopFor() != Kind)
+		if (AErewhonGameState::Get(Controller.Get())->ShopFor(*Def) != Kind)
 		{
 			continue;   // chaque commerce ne vend que sa marchandise
 		}
@@ -452,7 +498,7 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 	for (const FName Id : Seen)
 	{
 		const FItemDef* Def = Items->Find(Id);
-		const int32 Price = Def && Def->ShopFor() == Kind ? Def->ResalePrice(ResaleRatio) : 0;
+		const int32 Price = Def && AErewhonGameState::Get(Controller.Get())->ShopFor(*Def) == Kind ? Def->ResalePrice(ResaleRatio) : 0;
 		if (Price <= 0)
 		{
 			continue;
@@ -503,6 +549,61 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 			SNew(STextBlock).Text(FText::Format(LOCTEXT("SellTotal", "Valeur de tout votre stock : {0}"), CoinsText(Total)))
 			.Font(Font(11, true)).ColorAndOpacity(Ink)
 		];
+}
+
+// ── Village ──────────────────────────────────────────────────────────────────
+
+TSharedRef<SWidget> SStorePanel::BuildVillage()
+{
+	// Les améliorations du village, offertes par un joueur à tous les autres.
+	const AErewhonGameState* World = AErewhonGameState::Get(Controller.Get());
+	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
+	TSharedRef<SVerticalBox> List = SNew(SVerticalBox);
+	if (!World || !State)
+	{
+		return List;
+	}
+	List->AddSlot().AutoHeight().Padding(4, 0, 0, 10)
+	[
+		SNew(STextBlock)
+		.Text(LOCTEXT("VillageIntro", "Le village, c'est la place et tous les secteurs autour. Ce que vous y construisez profite à tout le monde."))
+		.Font(Font(10)).ColorAndOpacity(MutedInk).AutoWrapText(true)
+	];
+	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
+	for (const ErewhonVillage::FUpgradeInfo& Info : ErewhonVillage::Upgrades())
+	{
+		const bool bBuilt = World->HasVillageUpgrade(Info.Id);
+		const bool bLocked = Info.Requires != EVillageUpgrade::Count && !World->HasVillageUpgrade(Info.Requires);
+		const uint8 Id = static_cast<uint8>(Info.Id);
+		TSharedRef<SWidget> Action = bBuilt
+			? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("VillageBuilt", "✓ Construit")).Font(Font(12, true)).ColorAndOpacity(Leaf))
+			: bLocked
+			? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(FText::Format(LOCTEXT("VillageLocked", "Après : {0}"), ErewhonVillage::Info(Info.Requires).Name))
+				.Font(Font(10)).ColorAndOpacity(MutedInk).AutoWrapText(true))
+			: Button(FText::Format(LOCTEXT("VillageBuild", "Construire · {0}"), CoinsText(Info.Price)),
+				[WeakController, Id]() { if (WeakController.IsValid()) { WeakController->ServerBuyVillageUpgrade(Id); } },
+				EButton::Primary, State->GetCoins() >= Info.Price, 170.f);
+		List->AddSlot().AutoHeight().Padding(0, 0, 0, 8)
+		[
+			CardBox(
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(Info.Name).Font(Font(13, true)).ColorAndOpacity(Ink)]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
+					[
+						SNew(STextBlock).Text(Info.Description).Font(Font(10)).ColorAndOpacity(MutedInk).AutoWrapText(true)
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(14, 0, 0, 0)
+				[
+					SNew(SBox).WidthOverride(170.f).HAlign(HAlign_Right)[Action]
+				],
+				12.f)
+		];
+	}
+	return SNew(SScrollBox) + SScrollBox::Slot()[List];
 }
 
 #undef LOCTEXT_NAMESPACE

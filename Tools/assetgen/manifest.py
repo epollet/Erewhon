@@ -22,6 +22,7 @@ TEXTURES: dict[str, str] = {
     "stone_slabs": "a floor of large irregular flat flagstone slabs fitted together with thin dark joints, warm grey and beige stone, slightly worn",
     "plaster": "a smooth lime plaster cottage wall, warm off-white cream with very subtle soft patches and faint brush marks, no bricks, no cracks",
     "roof_slate": "overlapping rounded slate roof shingles in rows, soft blue-grey with a few lighter and greener shingles",
+    "cobbles": "a village path of rounded cobblestones seen from above, warm grey and ochre stones of varied sizes tightly fitted with thin earthy joints, a few tiny moss tufts",
     "floor_boards": "a wooden floor of long parallel planks running vertically, warm golden oak with darker thin joints and small knots",
 }
 
@@ -37,6 +38,9 @@ PAINTINGS: dict[str, tuple[str, str]] = {
     "sign_sector_manager": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the words \"Sector Manager\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
     "sign_tailor": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the words \"Tailor\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
     "map_wall": ("a hand-painted parchment map of a countryside divided into a grid of square plots, meadows, a crossroads of dirt roads and a small cottage at the center, compass rose, no readable text, the parchment fills the entire frame", "4:3"),
+    "sign_apothecary": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the word \"Apothecary\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
+    "flame": ("a single stylized hand-painted campfire flame shape seen from the front: one tall soft teardrop of fire with a few licking tongues, bright yellow-white core fading to orange then deep red at the tips, centered, filling the frame height, on a pure flat black background, nothing else", "1:1"),
+    "moon": ("a full moon seen through a telescope: a perfectly round pale cream and soft grey disc with gentle painted craters and maria, softly glowing edge, centered, filling about 90% of the frame, on a pure flat black background, nothing else", "1:1"),
 }
 
 PAINTING_PROMPT = "{subject}. {style}. No border outside the object, no extra text."
@@ -50,6 +54,9 @@ ICONS: dict[str, str] = {
     "flower_purple": "a purple bellflower stem",
     "herb": "a sprig of aromatic thyme herb with small green leaves",
     "cerpe": "a small hand sickle with a curved steel blade and a wooden handle",
+    "cart": "a rustic two-wheeled wooden hand cart with two long handles",
+    "crate": "an empty open wooden harvest crate made of light slats",
+    "barrel": "a sturdy oak barrel with dark iron hoops",
     "backpack": "a sturdy rustic canvas backpack in olive green with brown leather straps, a buckled flap and two side loops",
     "tshirt_orange": "a folded orange cotton t-shirt",
     "tshirt_blue": "a folded blue cotton t-shirt",
@@ -62,6 +69,23 @@ ICONS: dict[str, str] = {
     "broadleaf": "a large broad round green leaf",
     "weed_dock": "a bunch of dock leaves with a reddish seed stalk",
     "weed_nettle": "a small bunch of fresh nettle and mint sprigs",
+    "firewood": "a small bundle of dry firewood sticks and kindling tied with a twine string",
+    "crushed_grass": "a small wooden bowl of crushed green grass paste",
+    "crushed_flower_white": "a small wooden bowl of crushed white daisy petals with yellow specks",
+    "crushed_flower_blue": "a small wooden bowl of crushed bright blue cornflower petals",
+    "crushed_flower_purple": "a small wooden bowl of crushed violet bellflower petals",
+    "crushed_herb": "a small wooden bowl of crushed aromatic thyme leaves",
+    "crushed_fern": "a small wooden bowl of crushed dark green fern fronds",
+    "crushed_broadleaf": "a small wooden bowl of crushed broad green plantain leaves",
+    "crushed_weed_dock": "a small wooden bowl of crushed dock leaves with reddish seeds",
+    "crushed_weed_nettle": "a small wooden bowl of crushed deep green nettle leaves",
+    "potion_base": "a small round glass potion flask with a cork, filled with a pale cloudy green liquid",
+    "potion_speed": "a small round glass potion flask with a cork, filled with a glowing bright blue liquid, a tiny feather tied to its neck",
+    "potion_night": "a small round glass potion flask with a cork, filled with a glowing deep violet liquid with tiny star sparkles",
+    "potion_strength": "a small sturdy glass potion bottle with a cork, filled with a glowing deep green liquid, a tiny iron ring tied to its neck",
+    "potion_jump": "a small tall glass potion flask with a cork, filled with a glowing fresh lime green liquid with rising bubbles",
+    "potion_shrink": "a tiny glass potion vial with a cork, filled with a glowing pale pink liquid",
+    "potion_grow": "a big round glass potion flask with a cork, filled with a glowing warm amber orange liquid",
 }
 
 ICON_PROMPT = (
@@ -72,6 +96,102 @@ ICON_PROMPT = (
 # ── Modèles 3D (Gemini → Meshy) ─────────────────────────────────────────────
 # Une image de concept est générée d'abord, puis convertie en modèle par Meshy.
 MODELS: dict[str, dict] = {
+    "potion_base": {
+        "subject": "a small round glass potion flask with a cork stopper, filled with a pale cloudy green liquid, standing upright, isolated",
+        "polycount": 2000,
+        "ai_model": "meshy-6-lite",
+    },
+    "potion_speed": {
+        "subject": "a small round glass potion flask with a cork stopper, filled with a glowing bright blue liquid, a small white feather tied to its neck with string, standing upright, isolated",
+        "polycount": 2000,
+        "ai_model": "meshy-6-lite",
+    },
+    "potion_night": {
+        "subject": "a small round glass potion flask with a cork stopper, filled with a glowing deep violet liquid with tiny golden star sparkles, standing upright, isolated",
+        "polycount": 2000,
+        "ai_model": "meshy-6-lite",
+    },
+    "potion_strength": {
+        "subject": "a small sturdy square glass potion bottle with a cork stopper, filled with a deep green liquid, a small iron ring tied to its neck, standing upright, isolated",
+        "polycount": 2000,
+        "ai_model": "meshy-6-lite",
+    },
+    "potion_jump": {
+        "subject": "a tall thin glass potion vial with a cork stopper, filled with a glowing lime green liquid with bubbles, standing upright, isolated",
+        "polycount": 2000,
+        "ai_model": "meshy-6-lite",
+    },
+    "potion_shrink": {
+        "subject": "a tiny short glass potion vial with a cork stopper, filled with a pale pink liquid, standing upright, isolated",
+        "polycount": 2000,
+        "ai_model": "meshy-6-lite",
+    },
+    "potion_grow": {
+        "subject": "a big round-bellied glass potion flask with a cork stopper, filled with a glowing warm amber orange liquid, standing upright, isolated",
+        "polycount": 2000,
+        "ai_model": "meshy-6-lite",
+    },
+    "bowl": {
+        "subject": "a small empty round carved wooden bowl, simple and smooth, standing upright, isolated",
+        "polycount": 1500,
+        "ai_model": "meshy-6-lite",
+    },
+    "cauldron": {
+        "subject": "a small round black cast iron witch cauldron on three short legs, with two small side handles, half filled with a bubbling green potion",
+        "polycount": 4000,
+        "ai_model": "meshy-6-lite",
+    },
+    "mortar": {
+        "subject": "a small grey stone mortar bowl with a stone pestle resting inside it, a few green leaves in the bowl",
+        "polycount": 3000,
+        "ai_model": "meshy-6-lite",
+    },
+    "firewood": {
+        "subject": "a small neat pile of four chopped firewood logs with bark, stacked crosswise for a campfire",
+        "polycount": 3000,
+        "ai_model": "meshy-6-lite",
+    },
+    "bench": {
+        "subject": "a rustic wooden park bench for a village square, three thick seat planks and a curved backrest on dark wrought iron legs and armrests, seen from the front three-quarter",
+        "polycount": 5000,
+        "ai_model": "meshy-6-lite",
+    },
+    "flower_pot": {
+        "subject": "a round terracotta flower pot overflowing with colorful cottage flowers, red geraniums, white daisies and trailing ivy",
+        "polycount": 6000,
+    },
+    "tree_willow": {
+        "subject": "a large majestic weeping willow tree with a thick gnarled trunk and a huge dome of long drooping leafy branches reaching almost to the ground, lush green foliage, isolated tree",
+        "polycount": 20000,
+    },
+    "tree_linden": {
+        "subject": "a large old linden tree with a sturdy trunk and a wide, dense, rounded canopy of bright green leaves, isolated village square tree",
+        "polycount": 20000,
+    },
+    "tree_oak": {
+        "subject": "a large old village oak tree with a short sturdy trunk and a very wide, dense, rounded crown of deep green leaves, a classic shade tree for a village square, isolated tree",
+        "polycount": 20000,
+    },
+    "cart_body": {
+        "subject": "the wooden body of a rustic two-wheeled hand cart WITHOUT ANY WHEELS: a completely empty open flat wooden bed with low plank sides and nothing inside, a bare wooden axle beam sticking out on both sides under the middle of the bed, two short wooden legs at the back to rest on, and two long wooden handles extending forward, side view three-quarter, no wheels at all",
+        "polycount": 8000,
+    },
+    "cart_wheel": {
+        "subject": "a single large rustic wooden cart wheel with twelve spokes, a thick wooden hub and an iron rim, seen straight from the side, standing upright",
+        "polycount": 4000,
+    },
+    "cart": {
+        "subject": "a rustic wooden two-wheeled hand cart for farm goods: a completely empty open flat wooden bed with low plank sides and nothing inside, two large spoked wooden wheels with iron rims at the middle, and two long wooden handles extending forward, side view three-quarter",
+        "polycount": 10000,
+    },
+    "crate": {
+        "subject": "a single empty open-top wooden harvest crate made of light slatted planks with hand-hold cut-outs on the short sides, stackable",
+        "polycount": 3000,
+    },
+    "player": {
+        "subject": "a young countryside adventurer standing in a relaxed T-pose, short brown hair, cream linen shirt with rolled sleeves, olive trousers, brown leather boots, friendly face, full body, arms stretched horizontally",
+        "polycount": 12000,
+    },
     "tailor": {
         "subject": "a cheerful middle-aged countryside tailor woman standing upright, yellow measuring tape draped around her neck, rolled-up sleeves on a white blouse, a teal patterned headscarf, a long rust-red skirt with a small apron holding pins, kind smile, arms relaxed along the body, full body",
         "polycount": 12000,
@@ -192,6 +312,17 @@ CONCEPT_PROMPT = (
 )
 
 
+# ── Personnages animés (Meshy : squelette puis animations de la bibliothèque) ──
+# modèle → hauteur (m) et animations {nom: action_id}. Fichiers : SourceArt/Generated/models/<modèle>_rigged.fbx,
+# SourceArt/Generated/models/anims/<modèle>_<nom>.fbx.
+RIGS: dict[str, dict] = {
+    "player": {
+        "height": 1.72,
+        "animations": {"idle": 0, "walk": 30, "run": 14, "jump": 466, "sit": 33, "crouch": 524,
+                       "carry": 551, "push": 261, "pickup": 276},
+    },
+}
+
 # ── Sons (ElevenLabs) ───────────────────────────────────────────────────────
 # nom → (description, durée en s ou None, boucle). Fichiers : SourceArt/Generated/sounds/<nom>.wav
 # Un 4e élément facultatif ne garde qu'un seul impact (durée en s) : un son de pas = un pas.
@@ -215,4 +346,8 @@ SOUNDS: dict[str, tuple] = {
     "bird_chirp_3": ("a single sparrow chirp, clear, distant countryside", 0.8, False),
     "bird_song_1": ("a skylark singing a short melodic song high above a meadow", 4.0, False),
     "bird_song_2": ("a blackbird singing a short gentle phrase in the countryside", 3.5, False),
+    "amb_fire": ("a cozy small wood fire crackling softly in a stone fireplace, gentle pops and hiss, steady", 12.0, True),
+    "mortar_grind": ("a stone pestle grinding and crushing fresh herbs in a stone mortar, two short grinding strokes", 1.0, False),
+    "cauldron_bubble": ("a small cauldron of thick potion bubbling and blooping gently, short", 2.5, False),
+    "potion_drink": ("a person uncorking a small glass bottle with a pop and drinking a gulp, then a small satisfied breath", 1.6, False),
 }

@@ -24,7 +24,7 @@ namespace ErewhonBackpack
 /**
  * Un sac à dos posé au sol. Son contenu reste sur le PlayerState de son propriétaire
  * (UBackpackComponent) ; l'acteur ne porte que l'apparence et l'interaction :
- * [E] le remettre sur le dos, [F] l'ouvrir, [G] y ranger tout son inventaire.
+ * [E] l'ouvrir, [F] le remettre sur le dos, [G] y ranger tout son inventaire.
  */
 UCLASS()
 class EREWHON_API ABackpack : public AActor, public IErewhonInteractable

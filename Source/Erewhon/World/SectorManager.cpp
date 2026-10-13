@@ -31,6 +31,12 @@ void ASectorManager::BeginPlay()
 	{
 		HarvestHandle = State->OnPlantHarvestChanged.AddUObject(this, &ASectorManager::OnPlantHarvestChanged);
 		OwnerHandle = State->OnSectorOwnerChanged.AddUObject(this, &ASectorManager::OnSectorOwnerChanged);
+		VillageHandle = State->OnVillageChanged.AddWeakLambda(this, [this]()
+		{
+			// Pavés, tailleur, panneaux, lanternes : tous les secteurs se refont.
+			GetWorld()->GetSubsystem<USectorLayoutSubsystem>()->InvalidateAll();
+			RebuildAll();
+		});
 	}
 	if (UErewhonUserSettings* User = UErewhonUserSettings::Get())
 	{
@@ -57,6 +63,7 @@ void ASectorManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		State->OnPlantHarvestChanged.Remove(HarvestHandle);
 		State->OnSectorOwnerChanged.Remove(OwnerHandle);
+		State->OnVillageChanged.Remove(VillageHandle);
 	}
 	if (UErewhonUserSettings* User = UErewhonUserSettings::Get())
 	{

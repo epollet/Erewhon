@@ -12,6 +12,8 @@
 #include "World/ErewhonVisuals.h"
 #include "World/SectorLayout.h"
 #include "World/Signpost.h"
+#include "World/Village.h"
+#include "Core/ErewhonGameState.h"
 #include "World/SpawnLayout.h"
 #include "World/Terrain.h"
 
@@ -99,16 +101,37 @@ void ASector::Initialize(const TSharedRef<const FSectorLayout>& InLayout, bool b
 
 void ASector::BuildSignposts()
 {
-	// Aux carrefours de la route : la direction et la distance de chaque commerce.
+	// Aux carrefours de la route : la direction et la distance de chaque commerce (amélioration
+	// « panneaux »), et une lanterne au coin d'en face (amélioration « lanternes »).
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	const bool bSigns = State && State->HasVillageUpgrade(EVillageUpgrade::Signposts);
+	const bool bLanterns = State && State->HasVillageUpgrade(EVillageUpgrade::Lanterns);
 	for (const FSignpostSpot& Spot : Layout->Signposts)
 	{
+		if (!ErewhonVillage::IsInVillage(Layout->Coord))
+		{
+			continue;
+		}
+		if (bLanterns && !bSigns)
+		{
+			// Sans panneau, la lanterne a son propre poteau ; sinon elle s'accroche au sien.
+			const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Spot.TowardShops.Y, Spot.TowardShops.X));
+			ErewhonVillage::AddLantern(this, Root, Spot.Location - GetActorLocation(), Yaw, false);
+		}
+		if (!bSigns)
+		{
+			continue;
+		}
 		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Spot.TowardShops.Y, Spot.TowardShops.X));
 		TArray<ErewhonSigns::FArm> Arms;
 		for (const EShopKind Kind : ErewhonSpawn::ShopKinds)
 		{
-			Arms.Add(ErewhonSigns::ShopArm(Kind, Spot.Location, Yaw));
+			if (Kind != EShopKind::Tailor || State->HasVillageUpgrade(EVillageUpgrade::Tailor))
+			{
+				Arms.Add(ErewhonSigns::ShopArm(Kind, Spot.Location, Yaw));
+			}
 		}
-		ErewhonSigns::AddSignpost(this, Root, Spot.Location - GetActorLocation(), Arms);
+		ErewhonSigns::AddSignpost(this, Root, Spot.Location - GetActorLocation(), Arms, bLanterns);
 	}
 }
 
@@ -174,6 +197,11 @@ void ASector::BuildGround(bool bVisual)
 		Material->SetTextureParameterValue(TEXT("AlbedoDirt"), DirtTexture);
 		Material->SetScalarParameterValue(TEXT("DirtTileSize"), DirtTileSize);
 		Material->SetTextureParameterValue(TEXT("DirtMask"), DirtMask);
+		if (UTexture* Cobbles = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_cobbles")))
+		{
+			Material->SetTextureParameterValue(TEXT("AlbedoPaved"), Cobbles);
+			Material->SetScalarParameterValue(TEXT("PavedTileSize"), PavedTileSize);
+		}
 		Ground->SetMaterial(0, Material);
 		return;
 	}
@@ -182,7 +210,8 @@ void ASector::BuildGround(bool bVisual)
 
 UTexture2D* ASector::BuildDirtMask() const
 {
-	UTexture2D* Texture = UTexture2D::CreateTransient(GMaskResolution, GMaskResolution, PF_G8);
+	// R : part de terre, G : part de pavés.
+	UTexture2D* Texture = UTexture2D::CreateTransient(GMaskResolution, GMaskResolution, PF_B8G8R8A8);
 	Texture->SRGB = false;
 	Texture->Filter = TF_Bilinear;
 	Texture->AddressX = TA_Clamp;
@@ -198,7 +227,11 @@ UTexture2D* ASector::BuildDirtMask() const
 		{
 			// Texel (X, Y) ↔ monde (X, Y) : le matériau échantillonne avec les mêmes axes.
 			const FVector2D World = Origin + FVector2D(X + 0.5f, Y + 0.5f) * (Size / GMaskResolution);
-			Texels[Y * GMaskResolution + X] = static_cast<uint8>(FMath::RoundToInt32(Layout->DirtAmount(World) * 255.f));
+			uint8* Texel = Texels + (Y * GMaskResolution + X) * 4;   // B, G, R, A
+			Texel[0] = 0;
+			Texel[1] = static_cast<uint8>(FMath::RoundToInt32(Layout->PavedAmount(World) * 255.f));
+			Texel[2] = static_cast<uint8>(FMath::RoundToInt32(Layout->DirtAmount(World) * 255.f));
+			Texel[3] = 255;
 		}
 	}
 	Mip.BulkData.Unlock();

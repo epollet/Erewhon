@@ -12,6 +12,22 @@ enum class EItemCategory : uint8
 	Clothing,  // équipable dans un slot de vêtement, peut ajouter des poches
 	Resource,
 	Backpack,  // se porte sur le dos, contient d'autres objets
+	Placeable, // se prend en main pour être posé dans le monde (charrette, cagette, tonneau)
+	Potion,    // se boit depuis l'inventaire (clic) : un effet pendant quelques minutes
+};
+
+/** Effets des potions de l'apothicairerie. */
+UENUM(BlueprintType)
+enum class EPotionEffect : uint8
+{
+	None,
+	Speed,      // on court plus vite
+	Night,      // on voit clair la nuit
+	Strength,   // les charges ne ralentissent plus
+	Jump,       // on saute plus haut
+	Shrink,     // on rapetisse
+	Grow,       // on grandit
+	Count UMETA(Hidden)
 };
 
 UENUM(BlueprintType)
@@ -143,6 +159,10 @@ struct FItemDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	bool bShortLegs = false;
 
+	// ── Potions ──
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	EPotionEffect PotionEffect = EPotionEffect::None;
+
 	// ── Plantes ──
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	FPlantSpawnDef Plant;
@@ -164,8 +184,10 @@ struct FItemDef
 	FSoftObjectPath Material;
 
 	bool IsValid() const { return !Id.IsNone(); }
-	bool IsEquipable() const { return Category == EItemCategory::Tool; }
+	bool IsEquipable() const { return Category == EItemCategory::Tool || Category == EItemCategory::Placeable; }
+	bool IsPlaceable() const { return Category == EItemCategory::Placeable; }
 	bool IsClothing() const { return Category == EItemCategory::Clothing; }
+	bool IsPotion() const { return Category == EItemCategory::Potion && PotionEffect != EPotionEffect::None; }
 
 	/** Le commerce qui vend et rachète cet objet : les vêtements chez le tailleur, le reste au General Store. */
 	EShopKind ShopFor() const { return IsClothing() ? EShopKind::Tailor : EShopKind::GeneralStore; }

@@ -43,7 +43,7 @@ private:
 /**
  * Une cabane de la place du village (General Store ou Sector Manager) : structure procédurale
  * (pour garder un intérieur où se tient le marchand), habillée des textures peintes générées,
- * plus des accessoires Meshy. Le General Store plante aussi les panneaux de la place.
+ * plus des accessoires Meshy.
  * Acteur local (non répliqué) : chaque machine la construit à l'identique.
  */
 UCLASS()
@@ -62,7 +62,7 @@ public:
 
 private:
 	/** Ce que porte une étagère. */
-	enum class EShelfGoods : uint8 { Pantry, Office, Fabric };
+	enum class EShelfGoods : uint8 { Pantry, Office, Fabric, None };
 
 	void BuildCabin();
 	void BuildWindow(float Side, float Y0, float Y1);
@@ -70,7 +70,7 @@ private:
 	void BuildStoreInterior();
 	void BuildManagerInterior();
 	void BuildTailorInterior();
-	void BuildPlazaSignposts();
+	void BuildApothecaryInterior();
 	FVector AddCounter();
 	void AddShelf(const FVector& Location, float Yaw, int32 Variant, EShelfGoods Goods);
 	class UStaticMeshComponent* AddBox(USceneComponent* Parent, const FVector& Min, const FVector& Max, const FLinearColor& Color,
@@ -86,6 +86,9 @@ private:
 	/** Rotation du comptoir généré pour que sa façade regarde la porte. */
 	UPROPERTY(EditAnywhere)
 	float CounterMeshYaw = 0.f;
+
+	/** Profondeur du remblai et du perron sous le plancher (plus grande sur un terrain en pente). */
+	float FoundationDepth = 20.f;
 
 	/** Rotation du bureau aux cartes généré, même règle. */
 	UPROPERTY(EditAnywhere)

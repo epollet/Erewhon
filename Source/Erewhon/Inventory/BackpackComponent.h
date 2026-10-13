@@ -38,7 +38,7 @@ public:
 	/** Exemplaires rangés (hors slots d'outils). */
 	int32 CountStored(FName ItemId) const;
 
-	/** Le sac est à portée : sur le dos, ou posé à moins de Reach du pion. */
+	/** Le sac est posé à moins de Reach du pion (sur le dos, on ne peut pas y fouiller). */
 	bool IsAccessibleFrom(const APawn* Pawn, float Reach = 400.f) const;
 
 	// ── Serveur ──

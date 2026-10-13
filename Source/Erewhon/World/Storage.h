@@ -1,0 +1,222 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Inventory/InventoryComponent.h"
+#include "Player/Interactable.h"
+#include "Storage.generated.h"
+
+class ACart;
+class UStaticMesh;
+class UStaticMeshComponent;
+
+/** Les conteneurs qu'on pose dans le monde. */
+UENUM()
+enum class EStorageKind : uint8
+{
+	Crate,    // cagette : des plantes, 12 places, s'empile par 3
+	Barrel,   // tonneau : des plantes, 30 places, lourd à porter
+};
+
+/** Ce qu'on peut poser dans le monde depuis ses mains (objet de l'inventaire). */
+namespace ErewhonPlaceables
+{
+	/** Le type de conteneur que représente un objet de l'inventaire (« crate », « barrel »), s'il en est un. */
+	EREWHON_API TOptional<EStorageKind> StorageForItem(FName ItemId);
+	EREWHON_API FName ItemForStorage(EStorageKind Kind);
+	EREWHON_API bool IsCart(FName ItemId);
+
+	EREWHON_API int32 Capacity(EStorageKind Kind);
+	EREWHON_API float Height(EStorageKind Kind);
+	EREWHON_API FText KindName(EStorageKind Kind);
+
+	/** Le modèle d'un conteneur ou de la charrette, et sa mise à l'échelle (posé sur Z = 0, grand côté sur Y). */
+	EREWHON_API UStaticMesh* StorageMesh(EStorageKind Kind, FTransform& OutFit);
+	EREWHON_API UStaticMesh* CartMesh(FTransform& OutFit);
+
+	/** Nombre de cagettes au plus dans une pile. */
+	constexpr int32 MaxStack = 3;
+}
+
+/**
+ * Une cagette ou un tonneau posé dans le monde, avec son contenu. On le prend dans ses mains
+ * (E), on le repose d'un clic (au sol, sur une autre cagette, dans la charrette), on l'ouvre (F).
+ * Seul son propriétaire peut le déplacer ou l'ouvrir.
+ */
+UCLASS()
+class EREWHON_API AStorageActor : public AActor, public IErewhonInteractable
+{
+	GENERATED_BODY()
+
+public:
+	AStorageActor();
+
+	virtual void BeginPlay() override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	virtual FText GetInteractionLabel() const override;
+	virtual void Interact(AErewhonPlayerController* Controller) override;
+
+	EStorageKind GetKind() const { return Kind; }
+	bool IsOwnedBy(const FString& Key) const { return !Key.IsEmpty() && Key == OwnerKey; }
+	const FString& GetOwnerKey() const { return OwnerKey; }
+	const FString& GetOwnerName() const { return OwnerName; }
+	const TArray<FInventorySlot>& GetSlots() const { return Slots; }
+	APawn* GetCarrier() const { return Carrier; }
+	ACart* GetCart() const { return Cart; }
+	int32 GetCartSlot() const { return CartSlot; }
+	AStorageActor* GetBelow() const { return Below; }
+	AStorageActor* GetAbove() const { return Above; }
+
+	/** Le haut de la pile dont fait partie ce conteneur, et sa hauteur (1 à 3). */
+	AStorageActor* TopOfStack();
+	int32 StackSize() const;
+
+	/** Peut-on ranger cet objet dedans ? (des plantes seulement) */
+	bool Accepts(const struct FItemDef& Def) const;
+	int32 CountStored(FName ItemId) const;
+
+	// ── Serveur ──
+
+	void Setup(EStorageKind InKind, const FString& InOwnerKey, const FString& InOwnerName);
+	TArray<FInventorySlot>& EditSlots() { return Slots; }
+	void Commit() { OnStorageChanged.Broadcast(); }
+	int32 StoreItem(FName ItemId, int32 Count);
+
+	/** Se détache de tout (sol, pile, charrette, mains) avant d'aller ailleurs. */
+	void Release();
+	void PlaceOnGround(const FVector& Location, float Yaw);
+	bool StackOn(AStorageActor* Base);
+	bool LoadInto(ACart* InCart, int32 Slot);
+	void CarryBy(APawn* Pawn);
+
+	FOnInventoryChanged OnStorageChanged;
+
+private:
+	void ApplyCollision();
+
+	UFUNCTION()
+	void OnRep_State();
+
+	UFUNCTION()
+	void OnRep_Slots() { OnStorageChanged.Broadcast(); }
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<USceneComponent> Root;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> Body;
+
+	UPROPERTY(Replicated)
+	EStorageKind Kind = EStorageKind::Crate;
+
+	UPROPERTY(Replicated)
+	FString OwnerKey;
+
+	UPROPERTY(Replicated)
+	FString OwnerName;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Slots)
+	TArray<FInventorySlot> Slots;
+
+	UPROPERTY(ReplicatedUsing = OnRep_State)
+	TObjectPtr<APawn> Carrier;
+
+	UPROPERTY(ReplicatedUsing = OnRep_State)
+	TObjectPtr<ACart> Cart;
+
+	UPROPERTY(Replicated)
+	int32 CartSlot = INDEX_NONE;
+
+	UPROPERTY(ReplicatedUsing = OnRep_State)
+	TObjectPtr<AStorageActor> Below;
+
+	UPROPERTY(ReplicatedUsing = OnRep_State)
+	TObjectPtr<AStorageActor> Above;
+};
+
+/**
+ * La charrette : deux roues, deux brancards, et deux emplacements pour des conteneurs.
+ * Devant ses brancards, F pour la conduire (on avance moitié moins vite) ; F encore pour la lâcher.
+ */
+UCLASS()
+class EREWHON_API ACart : public AActor, public IErewhonInteractable
+{
+	GENERATED_BODY()
+
+public:
+	static constexpr int32 SlotCount = 2;
+
+	ACart();
+
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void PostNetReceiveLocationAndRotation() override;
+
+	virtual FText GetInteractionLabel() const override;
+	virtual void Interact(AErewhonPlayerController* Controller) override;
+
+	bool IsOwnedBy(const FString& Key) const { return !Key.IsEmpty() && Key == OwnerKey; }
+	const FString& GetOwnerKey() const { return OwnerKey; }
+	const FString& GetOwnerName() const { return OwnerName; }
+	APawn* GetDriver() const { return Driver; }
+
+	/** Repère local : l'essieu (milieu entre les roues) et le bout des brancards, sur l'axe X. */
+	static constexpr float AxleX = 9.f;
+	static constexpr float GripX = -140.f;
+	/** Les roues : diamètre, écartement (demi-voie), hauteur de l'essieu. */
+	static constexpr float WheelDiameter = 92.f;
+	static constexpr float WheelHalfTrack = 75.f;
+	static constexpr float AxleZ = WheelDiameter * 0.5f;
+	AStorageActor* GetLoad(int32 Slot) const { return Loads.IsValidIndex(Slot) ? Loads[Slot].Get() : nullptr; }
+
+	/** Repère (local) d'un emplacement de la plate-forme. */
+	static FTransform SlotTransform(int32 Slot);
+
+	/** L'emplacement libre le plus proche d'un point monde, ou INDEX_NONE. */
+	int32 FreeSlotNear(const FVector& World) const;
+
+	/** Le joueur se tient-il devant les brancards (pour prendre la charrette) ? */
+	bool IsAtHandles(const FVector& World) const;
+
+	// ── Serveur ──
+
+	void Setup(const FString& InOwnerKey, const FString& InOwnerName);
+	void SetLoad(int32 Slot, AStorageActor* Storage);
+	void StartDriving(APawn* Pawn);
+	void StopDriving();
+
+private:
+	UFUNCTION()
+	void OnRep_Driver();
+
+	void ApplyDriverCollision(APawn* Pawn, bool bIgnore);
+	/** La charrette suit son conducteur : les brancards dans ses mains, elle pivote autour de l'essieu. */
+	void FollowDriver();
+	float GroundAt(const FVector& World) const;
+	/** Les roues tournent selon le chemin parcouru par chacune (en pivotant, l'une avance, l'autre recule). */
+	void SpinWheels();
+
+	/** Pivot de chaque roue (à l'essieu), qu'on fait tourner autour de l'axe Y. */
+	TArray<TWeakObjectPtr<USceneComponent>> WheelPivots;
+	TArray<FVector> LastWheelPositions;
+	TArray<float> WheelAngles;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<USceneComponent> Root;
+
+	UPROPERTY(Replicated)
+	FString OwnerKey;
+
+	UPROPERTY(Replicated)
+	FString OwnerName;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Driver)
+	TObjectPtr<APawn> Driver;
+
+	TWeakObjectPtr<APawn> AppliedDriver;
+
+	UPROPERTY(Replicated)
+	TArray<TObjectPtr<AStorageActor>> Loads;
+};

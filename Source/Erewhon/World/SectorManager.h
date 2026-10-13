@@ -42,4 +42,5 @@ private:
 	FDelegateHandle HarvestHandle;
 	FDelegateHandle DetailHandle;
 	FDelegateHandle OwnerHandle;
+	FDelegateHandle VillageHandle;
 };

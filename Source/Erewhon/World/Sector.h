@@ -38,6 +38,7 @@ public:
 	/** Taille d'une répétition des textures de sol (cm). */
 	static constexpr float GroundTileSize = 450.f;
 	static constexpr float DirtTileSize = 260.f;
+	static constexpr float PavedTileSize = 300.f;
 
 private:
 	struct FPlantKind

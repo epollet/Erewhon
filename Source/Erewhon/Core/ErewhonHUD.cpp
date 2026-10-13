@@ -1,4 +1,5 @@
 #include "Core/ErewhonHUD.h"
+#include "Inventory/BackpackComponent.h"
 
 #include "Core/ErewhonGameState.h"
 #include "Core/ErewhonPlayerController.h"
@@ -98,6 +99,33 @@ void AErewhonHUD::DrawHUD()
 		const FString Line = FString::Printf(TEXT("Soleil %s   Usha %s"),
 			*ACelestialSystem::ClockString(Sky->GetSunOrbit(), Clock), *ACelestialSystem::ClockString(Sky->GetUshaOrbit(), Clock));
 		DrawShadowedText(Line, 20.f, Y + 24.f, GTextColor, 0.9f);
+	}
+
+	// Le sac sur le dos : on rappelle comment le poser.
+	if (const UBackpackComponent* Bag = PlayerState ? PlayerState->GetBackpack() : nullptr; Bag && Bag->IsWorn())
+	{
+		DrawShadowedText(TEXT("Sac sur le dos : [F] pour le poser"), 20.f, Y + 48.f, GTextColor, 0.8f);
+	}
+
+	// Potions bues : leur effet et le temps qui reste, en haut à droite sous les images par seconde.
+	if (Character)
+	{
+		static const TCHAR* const Names[] = { TEXT(""), TEXT("Vitesse"), TEXT("Nyctalopie"), TEXT("Force"), TEXT("Saut"), TEXT("Rapetissement"), TEXT("Grandissement") };
+		float PotionY = 48.f;
+		for (int32 Effect = 1; Effect < static_cast<int32>(EPotionEffect::Count); ++Effect)
+		{
+			const float Remaining = Character->PotionRemaining(static_cast<EPotionEffect>(Effect));
+			if (Remaining <= 0.f)
+			{
+				continue;
+			}
+			const int32 Seconds = FMath::CeilToInt32(Remaining);
+			const FString Line = FString::Printf(TEXT("%s  %d:%02d"), Names[Effect], Seconds / 60, Seconds % 60);
+			float Width = 0.f, Height = 0.f;
+			GetTextSize(Line, Width, Height, GEngine->GetMediumFont(), 0.9f);
+			DrawShadowedText(Line, Canvas->ClipX - Width - 20.f, PotionY, GCoinColor, 0.9f);
+			PotionY += 22.f;
+		}
 	}
 
 	// Images par seconde, lissées, en haut à droite.

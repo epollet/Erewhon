@@ -136,9 +136,21 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Meadow", meta = (ClampMin = 0))
 	float PathBlendMeters = 1.5f;
 
+	/** Les pavés accélèrent la marche. */
+	UPROPERTY(Config, EditAnywhere, Category = "Player", meta = (ClampMin = 1))
+	float PavedSpeedFactor = 1.2f;
+
+	/** Prix d'un chemin d'accès pavé (après le pavage du village). */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
+	int32 PavedLinkPrice = 50;
+
 	/** Prix d'une amélioration « chemin jusqu'à la route » (pièces). */
 	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
 	int32 RoadLinkPrice = 50;
+
+	/** Prix de l'apothicairerie, construite au centre d'une prairie à soi. */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
+	int32 ApothecaryPrice = 2000;
 
 	// ── Récolte ──────────────────────────────────────────────────────────────
 

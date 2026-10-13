@@ -13,8 +13,12 @@
 #include "Misc/Paths.h"
 #include "UI/SInventoryPanel.h"
 #include "UI/SStorePanel.h"
+#include "UI/SCheatPanel.h"
+#include "Framework/Application/IInputProcessor.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Player/ErewhonCharacter.h"
 #include "World/Backpack.h"
+#include "World/Storage.h"
 #include "UI/SGameMenu.h"
 #include "Core/ErewhonUserSettings.h"
 #include "World/Door.h"
@@ -26,6 +30,11 @@
 #include "UnrealClient.h"
 #include "World/SectorTypes.h"
 #include "World/SpawnLayout.h"
+#include "World/Apothecary.h"
+#include "World/ErewhonSound.h"
+#include "UI/SApothecaryPanel.h"
+#include "Net/UnrealNetwork.h"
+#include "EngineUtils.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonPlayerController"
 
@@ -53,6 +62,49 @@ namespace
 			Mapping.Modifiers.Add(NewObject<UInputModifierNegate>(Context));
 		}
 	}
+}
+
+namespace
+{
+	/**
+	 * Raccourci de triche en deux temps : Ctrl+Alt+ù, puis Ctrl+Maj+* dans les 5 secondes.
+	 * Les touches sont reconnues par le caractère qu'elles portent (clavier AZERTY).
+	 */
+	class FErewhonCheatKeys : public IInputProcessor
+	{
+	public:
+		explicit FErewhonCheatKeys(AErewhonPlayerController* InController) : Controller(InController) {}
+
+		virtual void Tick(const float DeltaTime, FSlateApplication& SlateApp, TSharedRef<ICursor> Cursor) override {}
+
+		virtual bool HandleKeyDownEvent(FSlateApplication& SlateApp, const FKeyEvent& Event) override
+		{
+			const uint32 Character = Event.GetCharacter();
+			const double Now = FPlatformTime::Seconds();
+			if (Event.IsControlDown() && Event.IsAltDown() && Character == 0x00F9)   // ù
+			{
+				ArmedAt = Now;
+				return true;
+			}
+			if (Event.IsControlDown() && Event.IsShiftDown() && (Character == TEXT('*') || Event.GetKey() == EKeys::Multiply)
+				&& Now - ArmedAt < 5.0)
+			{
+				ArmedAt = -100.0;
+				if (Controller.IsValid())
+				{
+					Controller->OpenCheats();
+				}
+				return true;
+			}
+			return false;
+		}
+
+		virtual const TCHAR* GetDebugName() const override { return TEXT("ErewhonCheatKeys"); }
+
+	private:
+		TWeakObjectPtr<AErewhonPlayerController> Controller;
+		double ArmedAt = -100.0;
+	};
 }
 
 const FErewhonInputActions& AErewhonPlayerController::GetInputActions()
@@ -130,6 +182,11 @@ void AErewhonPlayerController::BeginPlay()
 	}
 	SetInputMode(FInputModeGameOnly());
 	SetShowMouseCursor(false);
+	if (FSlateApplication::IsInitialized())
+	{
+		CheatKeys = MakeShared<FErewhonCheatKeys>(this);
+		FSlateApplication::Get().RegisterInputPreProcessor(CheatKeys);
+	}
 
 	// Premier lancement sur ce poste : un court test matériel choisit la qualité graphique,
 	// un cran en dessous de sa recommandation — la prairie dense pèse plus que sa mesure.
@@ -156,6 +213,11 @@ void AErewhonPlayerController::BeginPlay()
 
 void AErewhonPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (CheatKeys.IsValid() && FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().UnregisterInputPreProcessor(CheatKeys);
+		CheatKeys.Reset();
+	}
 	CloseMenu();
 	Super::EndPlay(EndPlayReason);
 }
@@ -244,7 +306,23 @@ void AErewhonPlayerController::NextAutoShot()
 			if (ShotMenu == TEXT("store")) { OpenStore(EShopKind::GeneralStore); }
 			else if (ShotMenu == TEXT("sectors")) { OpenStore(EShopKind::SectorManager); }
 			else if (ShotMenu == TEXT("tailor")) { OpenStore(EShopKind::Tailor); }
+			else if (ShotMenu == TEXT("cheats")) { OpenCheats(); }
+			else if (ShotMenu == TEXT("village")) { StoreKind = EShopKind::SectorManager; ShowMenu(SNew(SStorePanel).Controller(this).Kind(EShopKind::SectorManager).bVillageTab(true), true); }
 			else if (ShotMenu == TEXT("inventory")) { ToggleInventory(); }
+			else if (ShotMenu == TEXT("shelves"))
+			{
+				if (TActorIterator<AApothecary> It(GetWorld()); It)
+				{
+					OpenShelves(*It, 0);
+				}
+			}
+			else if (ShotMenu == TEXT("mortar") || ShotMenu == TEXT("cauldron"))
+			{
+				if (TActorIterator<AApothecary> It(GetWorld()); It)
+				{
+					OpenApothecary(*It, ShotMenu == TEXT("cauldron") ? EApothecaryStation::Cauldron : EApothecaryStation::Mortar);
+				}
+			}
 			else if (ShotMenu == TEXT("behind") || ShotMenu == TEXT("front"))
 			{
 				if (AErewhonCharacter* Me = GetPawn<AErewhonCharacter>())
@@ -344,7 +422,15 @@ void AErewhonPlayerController::ToggleInventory()
 void AErewhonPlayerController::OpenInventory(ABackpack* Bag)
 {
 	OpenedBag = Bag;
+	OpenedStorage.Reset();
 	ShowMenu(SNew(SInventoryPanel).Controller(this).Bag(Bag), false);
+}
+
+void AErewhonPlayerController::OpenStorage(AStorageActor* Storage)
+{
+	OpenedBag.Reset();
+	OpenedStorage = Storage;
+	ShowMenu(SNew(SInventoryPanel).Controller(this).Storage(Storage), false);
 }
 
 void AErewhonPlayerController::HandleEscape()
@@ -357,22 +443,125 @@ void AErewhonPlayerController::HandleEscape()
 	ShowMenu(SNew(SGameMenu).Controller(this), false);
 }
 
+void AErewhonPlayerController::OpenCheats()
+{
+	if (IsMenuOpen())
+	{
+		CloseMenu();
+	}
+	ShowMenu(SNew(SCheatPanel).Controller(this), false);
+}
+
 void AErewhonPlayerController::OpenStore(EShopKind Kind)
 {
 	StoreKind = Kind;
 	ShowMenu(SNew(SStorePanel).Controller(this).Kind(Kind), true);
 }
 
+void AErewhonPlayerController::OpenApothecary(AApothecary* House, EApothecaryStation Station)
+{
+	OpenedHouse = House;
+	const TSharedRef<SWidget> Panel = SNew(SApothecaryPanel).Controller(this).House(House).Station(Station);
+	ApothecaryWidget = Panel;
+	ShowMenu(Panel, false);
+}
+
+void AErewhonPlayerController::OpenShelves(AApothecary* House, int32 Shelf)
+{
+	OpenedHouse = House;
+	const TSharedRef<SWidget> Panel = SNew(SInventoryPanel).Controller(this).Shelves(House).ShelfIndex(Shelf);
+	ApothecaryWidget = Panel;
+	ShowMenu(Panel, false);
+}
+
+void AErewhonPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME_CONDITION(AErewhonPlayerController, CraftJob, COND_OwnerOnly);
+}
+
+void AErewhonPlayerController::SetCraftJob(const FErewhonCraftJob& Job, AApothecary* House)
+{
+	CraftJob = Job;
+	CraftHouse = House;
+	OnCraftChanged.Broadcast();   // l'hôte d'une partie en écoute ne reçoit pas d'OnRep
+}
+
+void AErewhonPlayerController::ClientCraftStep_Implementation(bool bCauldron)
+{
+	if (const APawn* MyPawn = GetPawn())
+	{
+		ErewhonSound::PlayAt(this, ErewhonSound::Load(bCauldron ? TEXT("cauldron_bubble") : TEXT("mortar_grind")),
+			MyPawn->GetActorLocation(), bCauldron ? 0.6f : 0.8f, 200.f, 1500.f);
+	}
+}
+
+void AErewhonPlayerController::ServerBuyApothecary_Implementation(FIntPoint Sector)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryBuyApothecary(this, Sector));
+	}
+}
+
+void AErewhonPlayerController::ServerFeedFire_Implementation(AApothecary* House)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryFeedFire(this, House));
+	}
+}
+
+void AErewhonPlayerController::ServerStartCraft_Implementation(AApothecary* House, FName Output, int32 Count)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryStartCraft(this, House, Output, Count));
+	}
+}
+
+void AErewhonPlayerController::ServerMoveShelfItem_Implementation(AApothecary* House, uint8 Shelf, bool bFromShelf, int32 From, bool bToShelf, int32 To)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryMoveShelfItem(this, House, Shelf, bFromShelf, From, bToShelf, To));
+	}
+}
+
+void AErewhonPlayerController::ServerStashInShelves_Implementation(AApothecary* House, uint8 Shelf)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryStashInShelves(this, House, Shelf));
+	}
+}
+
+void AErewhonPlayerController::ServerStopCraft_Implementation()
+{
+	GetWorldTimerManager().ClearTimer(CraftTimer);
+	SetCraftJob(FErewhonCraftJob(), nullptr);
+}
+
 void AErewhonPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
+	// On ne laisse pas le mortier ouvert en sortant de l'apothicairerie.
+	if (const APawn* Walker = GetPawn(); Walker && OpenedHouse.IsValid() && OpenMenu.IsValid() && OpenMenu == ApothecaryWidget.Pin()
+		&& FVector::Dist2D(Walker->GetActorLocation(), OpenedHouse->GetActorLocation()) > ErewhonApothecary::UseReach + 150.f)
+	{
+		OpenedHouse.Reset();
+		CloseMenu();
+	}
+
 	// On ne repart pas avec la boutique ouverte, ni avec un sac posé derrière soi.
 	const APawn* MyPawn = GetPawn();
-	if (OpenedBag.IsValid() && OpenMenu.IsValid() && !bStoreOpen && MyPawn
-		&& FVector::Dist(MyPawn->GetActorLocation(), OpenedBag->GetActorLocation()) > 450.f)
+	const AActor* Opened = OpenedBag.IsValid() ? static_cast<const AActor*>(OpenedBag.Get()) : OpenedStorage.Get();
+	if (Opened && OpenMenu.IsValid() && !bStoreOpen && MyPawn
+		&& FVector::Dist(MyPawn->GetActorLocation(), Opened->GetActorLocation()) > 450.f)
 	{
 		OpenedBag.Reset();
+		OpenedStorage.Reset();
 		CloseMenu();
 	}
 	if (bStoreOpen && OpenMenu.IsValid() && MyPawn
@@ -465,6 +654,86 @@ void AErewhonPlayerController::ServerMoveItem_Implementation(bool bFromBag, int3
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
 	{
 		ReportResult(Mode->TryMoveItem(this, bFromBag, From, bToBag, To));
+	}
+}
+
+void AErewhonPlayerController::ServerDiscard_Implementation(bool bFromBag, int32 SlotIndex, AStorageActor* Storage)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryDiscard(this, bFromBag, SlotIndex, Storage));
+	}
+}
+
+void AErewhonPlayerController::ServerPickUpStorage_Implementation(AStorageActor* Storage)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryPickUpStorage(this, Storage));
+	}
+}
+
+void AErewhonPlayerController::ServerPlace_Implementation(uint8 Type, FVector Location, float Yaw, AActor* Target, int32 Slot)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryPlace(this, Type, Location, Yaw, Target, Slot));
+	}
+}
+
+void AErewhonPlayerController::ServerToggleDrive_Implementation(ACart* Cart)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryToggleDrive(this, Cart));
+	}
+}
+
+void AErewhonPlayerController::ServerMoveStorageItem_Implementation(AStorageActor* Storage, bool bFromStorage, int32 From, bool bToStorage, int32 To)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryMoveStorageItem(this, Storage, bFromStorage, From, bToStorage, To));
+	}
+}
+
+void AErewhonPlayerController::ServerStashInStorage_Implementation(AStorageActor* Storage)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryStashInStorage(this, Storage));
+	}
+}
+
+void AErewhonPlayerController::ServerBuyVillageUpgrade_Implementation(uint8 Upgrade)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryBuyVillageUpgrade(this, Upgrade));
+	}
+}
+
+void AErewhonPlayerController::ServerBuyPavedLink_Implementation(FIntPoint Sector, uint8 Side)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryBuyPavedLink(this, Sector, Side));
+	}
+}
+
+void AErewhonPlayerController::ServerCheatSetCoins_Implementation(int32 Coins)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryCheatSetCoins(this, Coins));
+	}
+}
+
+void AErewhonPlayerController::ServerCheatAdvanceTime_Implementation(float Seconds)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryCheatAdvanceTime(this, Seconds));
 	}
 }
 

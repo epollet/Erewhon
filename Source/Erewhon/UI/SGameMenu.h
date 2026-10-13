@@ -13,7 +13,7 @@ class SBox;
 class SGameMenu : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SGameMenu) {}
+	SLATE_BEGIN_ARGS(SGameMenu) : _Controller(nullptr) {}
 		SLATE_ARGUMENT(AErewhonPlayerController*, Controller)
 	SLATE_END_ARGS()
 

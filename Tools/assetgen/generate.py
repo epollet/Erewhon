@@ -21,7 +21,7 @@ import manifest  # noqa: E402
 from common import OUTPUT_ROOT  # noqa: E402
 from gemini import generate_image  # noqa: E402
 
-STEPS = ("textures", "paintings", "icons", "concepts", "models", "grass", "sounds")
+STEPS = ("textures", "paintings", "icons", "concepts", "models", "rigs", "grass", "sounds")
 
 
 def _wanted(name: str, only: set[str]) -> bool:
@@ -85,7 +85,26 @@ def models(only: set[str], force: bool) -> None:
         path = OUTPUT_ROOT / "models" / f"{name}.glb"
         _run(f"modèle {name}", path, force,
              lambda p=path, c=concept, s=spec: image_to_3d(c, p, polycount=s["polycount"],
-                                                           texture_prompt=f"{s['subject']}. {manifest.STYLE}"))
+                                                           texture_prompt=f"{s['subject']}. {manifest.STYLE}",
+                                                           ai_model=s.get("ai_model", "latest")))
+
+
+def rigs(only: set[str], force: bool) -> None:
+    from meshy import animate, rig
+
+    for name, spec in manifest.RIGS.items():
+        if not _wanted(name, only):
+            continue
+        models = OUTPUT_ROOT / "models"
+        model_task = models / f"{name}.task.json"
+        if not model_task.exists():
+            print(f"  ! squelette {name} : générer d'abord le modèle")
+            continue
+        print(f"  + squelette {name}", flush=True)
+        rig_task = rig(model_task, models / f"{name}_rigged.fbx", height=spec["height"])
+        for anim, action in spec["animations"].items():
+            path = models / "anims" / f"{name}_{anim}.fbx"
+            _run(f"animation {name}_{anim}", path, force, lambda p=path, a=action: animate(rig_task, a, p))
 
 
 def sounds(only: set[str], force: bool) -> None:
@@ -113,7 +132,7 @@ def main() -> None:
 
     only = {name.strip() for name in args.only.split(",") if name.strip()}
     steps = STEPS if args.step == "all" else (args.step,)
-    runners = {"textures": textures, "paintings": paintings, "icons": icons, "concepts": concepts, "models": models, "grass": grass_step, "sounds": sounds}
+    runners = {"textures": textures, "paintings": paintings, "icons": icons, "concepts": concepts, "models": models, "rigs": rigs, "grass": grass_step, "sounds": sounds}
     for step in steps:
         print(f"[{step}]")
         runners[step](only, args.force)

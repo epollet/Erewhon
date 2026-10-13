@@ -16,9 +16,11 @@ class SBox;
 class SStorePanel : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SStorePanel) {}
+	SLATE_BEGIN_ARGS(SStorePanel) : _Controller(nullptr), _Kind(EShopKind::GeneralStore), _bVillageTab(false) {}
 		SLATE_ARGUMENT(AErewhonPlayerController*, Controller)
 		SLATE_ARGUMENT(EShopKind, Kind)
+		/** Chez le gérant : ouvrir directement l'onglet du village. */
+		SLATE_ARGUMENT(bool, bVillageTab)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -27,7 +29,7 @@ public:
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 
 private:
-	enum class ETab : uint8 { Sectors, Buy, Sell };
+	enum class ETab : uint8 { Sectors, Village, Buy, Sell };
 
 	void Rebuild();
 	void OnSectorOwnerChanged(const FIntPoint& Sector) { Rebuild(); }
@@ -36,6 +38,8 @@ private:
 	TSharedRef<SWidget> BuildSectorDetail();
 	TSharedRef<SWidget> BuildBuy();
 	TSharedRef<SWidget> BuildSell();
+	TSharedRef<SWidget> BuildVillage();
+	void OnVillageChanged() { Rebuild(); }
 
 	TWeakObjectPtr<AErewhonPlayerController> Controller;
 	TSharedPtr<SBox> Body;

@@ -13,6 +13,19 @@ enum class ESectorType : uint8
 	Road,     // prolonge les chemins du marchand vers les quatre horizons ; jamais à vendre
 };
 
+/** Améliorations du village, achetées chez le Sector Manager et partagées par tous. */
+UENUM()
+enum class EVillageUpgrade : uint8
+{
+	Tailor,        // la boutique du tailleur
+	Signposts,     // panneaux de direction
+	Lanterns,      // lanternes des boutiques, de la place et des carrefours
+	Decoration,    // bordures, fleurs, arbres et bancs de la place
+	PavedCenter,   // pavés sur la place et ses chemins
+	PavedVillage,  // pavés sur les routes du village (après le centre)
+	Count UMETA(Hidden)
+};
+
 /** Les commerces de la place du village. */
 UENUM()
 enum class EShopKind : uint8
@@ -20,6 +33,7 @@ enum class EShopKind : uint8
 	GeneralStore,    // vend outils et vêtements, rachète les récoltes
 	SectorManager,   // vend et reprend les secteurs, les aménage
 	Tailor,          // vend et rachète les vêtements
+	Apothecary,      // pas un commerce : la maison de l'apothicaire, sur un secteur acheté (voir AApothecary)
 };
 
 /**

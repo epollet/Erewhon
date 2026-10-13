@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
+#include "World/SectorTypes.h"
 #include "Net/Serialization/FastArraySerializer.h"
 #include "ErewhonGameState.generated.h"
 
@@ -70,6 +71,14 @@ struct FSectorOwnerEntry : public FFastArraySerializerItem
 	UPROPERTY()
 	uint8 RoadLinks = 0;
 
+	/** Chemins d'accès pavés (mêmes bits), une fois le village pavé. */
+	UPROPERTY()
+	uint8 PavedLinks = 0;
+
+	/** Bâtiments construits sur le secteur (bits de ESectorBuilding, voir World/Apothecary.h). */
+	UPROPERTY()
+	uint8 Buildings = 0;
+
 	void PostReplicatedAdd(const struct FSectorOwnerArray& Array);
 	void PostReplicatedChange(const struct FSectorOwnerArray& Array);
 	void PreReplicatedRemove(const struct FSectorOwnerArray& Array);
@@ -100,6 +109,8 @@ struct TStructOpsTypeTraits<FSectorOwnerArray> : public TStructOpsTypeTraitsBase
 
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnPlantHarvestChanged, const FIntPoint& /*Sector*/, int32 /*PlantIndex*/, bool /*bHarvested*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnSectorOwnerChanged, const FIntPoint& /*Sector*/);
+DECLARE_MULTICAST_DELEGATE(FOnVillageChanged);
+struct FItemDef;
 
 /**
  * État partagé du monde : seed, horloge, propriétés et récoltes.
@@ -139,11 +150,30 @@ public:
 	FString GetSectorOwnerName(const FIntPoint& Sector) const;
 	TArray<FIntPoint> GetSectorsOwnedBy(const FString& PlayerKey) const;
 
+	// ── Village ──
+
+	bool HasVillageUpgrade(EVillageUpgrade Upgrade) const { return (VillageUpgrades & (1 << static_cast<int32>(Upgrade))) != 0; }
+	int32 GetVillageUpgrades() const { return VillageUpgrades; }
+	bool IsVillagePaved() const { return HasVillageUpgrade(EVillageUpgrade::PavedCenter) && HasVillageUpgrade(EVillageUpgrade::PavedVillage); }
+
+	/** Le commerce qui vend et rachète cet objet (les vêtements restent au General Store tant que le tailleur n'est pas là). */
+	EShopKind ShopFor(const FItemDef& Item) const;
+
+	uint8 GetPavedLinks(const FIntPoint& Sector) const;
+	uint8 GetBuildings(const FIntPoint& Sector) const;
+
 	// ── Serveur uniquement ──
 
 	void InitializeWorld(int32 InSeed, double InWorldAge);
+
+	/** Triche : fait avancer l'horloge du monde (astres, repousse des plantes). */
+	void AdvanceClock(double Seconds) { WorldAgeAtStart += FMath::Max(0.0, Seconds); }
 	void AddHarvest(const FIntPoint& Sector, int32 PlantIndex, double HarvestTime);
-	void SetSectorOwner(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName, uint8 RoadLinks = 0);
+	void SetSectorOwner(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName, uint8 RoadLinks = 0, uint8 PavedLinks = 0, uint8 Buildings = 0);
+	void AddBuilding(const FIntPoint& Sector, uint8 Building);
+	void SetVillageUpgrades(int32 Upgrades);
+	void AddVillageUpgrade(EVillageUpgrade Upgrade);
+	void AddPavedLink(const FIntPoint& Sector, int32 Side);
 
 	/** Côtés du secteur reliés à la route par un chemin (0 s'il n'a pas de propriétaire). */
 	uint8 GetRoadLinks(const FIntPoint& Sector) const;
@@ -154,6 +184,7 @@ public:
 
 	FOnPlantHarvestChanged OnPlantHarvestChanged;
 	FOnSectorOwnerChanged OnSectorOwnerChanged;
+	FOnVillageChanged OnVillageChanged;
 
 	// Appelés par les fast arrays (et directement côté serveur).
 	void NotifyHarvest(const FHarvestEntry& Entry, bool bHarvested);
@@ -162,6 +193,18 @@ public:
 private:
 	void PruneHarvests();
 	void SpawnLocalWorldActors();
+	void SpawnCabin(EShopKind Kind);
+	/** Le village a changé : le tailleur s'installe, l'habillage de la place se refait. */
+	void ApplyVillage();
+
+	UFUNCTION()
+	void OnRep_Village();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Village)
+	int32 VillageUpgrades = 0;
+
+	UPROPERTY(Transient) TObjectPtr<AActor> VillageDecor;
+	bool bTailorSpawned = false;
 
 	UPROPERTY(Replicated)
 	int32 WorldSeed = 0;

@@ -78,6 +78,10 @@ namespace
 		Obj->TryGetNumberField(TEXT("pocket_slots"), Def.PocketSlots);
 		Obj->TryGetNumberField(TEXT("extra_equip_slots"), Def.ExtraEquipSlots);
 		Obj->TryGetBoolField(TEXT("short_legs"), Def.bShortLegs);
+		if (Obj->TryGetStringField(TEXT("potion_effect"), Text))
+		{
+			Def.PotionEffect = ParseEnum(Text, EPotionEffect::None);
+		}
 
 		if (Obj->TryGetStringField(TEXT("mesh"), Text))
 		{

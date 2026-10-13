@@ -7,6 +7,8 @@
 #include "World/SpawnLayout.h"
 #include "Core/ErewhonGameState.h"
 #include "World/Terrain.h"
+#include "World/Village.h"
+#include "World/Apothecary.h"
 
 namespace
 {
@@ -24,30 +26,61 @@ namespace
 	}
 }
 
+namespace
+{
+	/** Distance signée (cm) au plus proche chemin ou place, pavés seulement si demandé ; bord ondulé par le bruit. */
+	float DistanceToShapes(const FSectorLayout& Layout, const FVector2D& World, bool bPavedOnly)
+	{
+		float Distance = TNumericLimits<float>::Max();
+		for (int32 Index = 0; Index < Layout.Paths.Num(); ++Index)
+		{
+			if (!bPavedOnly || (Layout.PathPaved.IsValidIndex(Index) && Layout.PathPaved[Index]))
+			{
+				Distance = FMath::Min(Distance, SignedDistance(Layout.Paths[Index], World));
+			}
+		}
+		for (int32 Index = 0; Index < Layout.Clearings.Num(); ++Index)
+		{
+			// Une place n'est pas un cercle parfait : son bord ondule largement, différemment pour chacune.
+			const FClearing& Clearing = Layout.Clearings[Index];
+			if (bPavedOnly && !Clearing.bPaved)
+			{
+				continue;
+			}
+			const FVector2D Offset = World - Clearing.Center;
+			const float Angle = FMath::Atan2(Offset.Y, Offset.X);
+			const float Bulge = FMath::PerlinNoise1D(Angle * 1.7f + 11.3f + Index * 5.1f) * Clearing.Radius * 0.18f;
+			Distance = FMath::Min(Distance, Offset.Size() - (Clearing.Radius + Bulge));
+		}
+		return Distance;
+	}
+
+	float BlendAmount(float Distance, const FVector2D& World)
+	{
+		const float Blend = UErewhonSettings::Get().PathBlendMeters * 100.f;
+		// Deux octaves de bruit : de larges ondulations du bord, et un liseré plus fin.
+		const float Wobble = FMath::PerlinNoise2D(World / 260.f) * Blend * 0.9f + FMath::PerlinNoise2D(World / 55.f) * Blend * 0.3f;
+		return 1.f - FMath::SmoothStep(-Blend * 0.5f, Blend * 0.5f, Distance + Wobble);
+	}
+}
+
 float FSectorLayout::DirtAmount(const FVector2D& World) const
 {
 	if (Paths.IsEmpty() && Clearings.IsEmpty())
 	{
 		return 0.f;
 	}
-	const float Blend = UErewhonSettings::Get().PathBlendMeters * 100.f;
-	// Deux octaves de bruit : de larges ondulations du bord, et un liseré plus fin.
-	const float Wobble = FMath::PerlinNoise2D(World / 260.f) * Blend * 0.9f + FMath::PerlinNoise2D(World / 55.f) * Blend * 0.3f;
-	float Distance = TNumericLimits<float>::Max();
-	for (const FBox2D& Path : Paths)
+	return BlendAmount(DistanceToShapes(*this, World, false), World);
+}
+
+float FSectorLayout::PavedAmount(const FVector2D& World) const
+{
+	if (!PathPaved.Contains(true) && !Clearings.ContainsByPredicate([](const FClearing& C) { return C.bPaved; }))
 	{
-		Distance = FMath::Min(Distance, SignedDistance(Path, World));
+		return 0.f;
 	}
-	for (int32 Index = 0; Index < Clearings.Num(); ++Index)
-	{
-		// Une place n'est pas un cercle parfait : son bord ondule largement, différemment pour chacune.
-		const FClearing& Clearing = Clearings[Index];
-		const FVector2D Offset = World - Clearing.Center;
-		const float Angle = FMath::Atan2(Offset.Y, Offset.X);
-		const float Bulge = FMath::PerlinNoise1D(Angle * 1.7f + 11.3f + Index * 5.1f) * Clearing.Radius * 0.18f;
-		Distance = FMath::Min(Distance, Offset.Size() - (Clearing.Radius + Bulge));
-	}
-	return 1.f - FMath::SmoothStep(-Blend * 0.5f, Blend * 0.5f, Distance + Wobble);
+	// Les pavés s'arrêtent un peu avant le bord de la terre : un liseré de terre les borde.
+	return BlendAmount(DistanceToShapes(*this, World, true) + 25.f, World);
 }
 
 bool FSectorLayout::IsBare(const FVector2D& World, float DirtThreshold) const
@@ -66,6 +99,10 @@ bool FSectorLayout::IsInBush(const FVector2D& World) const
 float FSectorLayout::SpeedFactor(const FVector2D& World) const
 {
 	const UErewhonSettings& Settings = UErewhonSettings::Get();
+	if (PavedAmount(World) > 0.4f)
+	{
+		return Settings.PavedSpeedFactor;   // pavés : on y marche plus vite
+	}
 	if (DirtAmount(World) > 0.4f)
 	{
 		return 1.f;   // chemins, place, cabane
@@ -189,8 +226,9 @@ void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
 	const float Size = UErewhonSettings::Get().SectorSize();
 	const float Half = ErewhonSpawn::AccessPathWidth * 0.5f;
 	const FVector2D Center(ErewhonSector::Center(Layout.Coord));
-	const auto Corridor = [&](const FIntPoint& Toward)
+	const auto Corridor = [&](const FIntPoint& Toward, bool bPaved)
 	{
+		Layout.PathPaved.Add(bPaved);
 		// Du centre du secteur jusqu'à son bord, dans la direction du voisin.
 		const FVector2D Edge = Center + FVector2D(Toward) * (Size * 0.5f);
 		const FVector2D Min(FMath::Min(Center.X, Edge.X), FMath::Min(Center.Y, Edge.Y));
@@ -198,6 +236,21 @@ void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
 		Layout.Paths.Add(FBox2D(Min - FVector2D(Toward.Y != 0 ? Half : 0.f, Toward.X != 0 ? Half : 0.f),
 			Max + FVector2D(Toward.Y != 0 ? Half : 0.f, Toward.X != 0 ? Half : 0.f)));
 	};
+	// L'apothicairerie : une clairière autour de la maison, et un chemin jusqu'à elle depuis
+	// chaque route reliée (il prolonge celui de la route, jusqu'au centre du secteur).
+	if (Layout.Type == ESectorType::Prairie && ErewhonApothecary::HasHouse(State, Layout.Coord))
+	{
+		Layout.Clearings.Add({ Center, ErewhonApothecary::ClearingRadius, false });
+		const uint8 Links = State->GetRoadLinks(Layout.Coord);
+		for (int32 Side = 0; Side < 4; ++Side)
+		{
+			if (Links & (1 << Side))
+			{
+				Corridor(ErewhonSector::Sides[Side], State->IsVillagePaved() && (State->GetPavedLinks(Layout.Coord) & (1 << Side)));
+			}
+		}
+		return;
+	}
 	if (Layout.Type != ESectorType::Road)
 	{
 		return;
@@ -212,12 +265,15 @@ void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
 		{
 			continue;
 		}
-		Corridor(ErewhonSector::Sides[Side]);
-		// Un panneau au coin du carrefour, côté place du village.
+		// Pavé si le propriétaire a acheté cette amélioration (une fois le village pavé).
+		Corridor(ErewhonSector::Sides[Side], State->IsVillagePaved() && (State->GetPavedLinks(Neighbor) & (1 << Back)));
+		// Un panneau au coin du carrefour, côté place du village ; une lanterne au coin d'en face.
 		const FVector2D Road = FVector2D(-FMath::Sign(Layout.Coord.X), -FMath::Sign(Layout.Coord.Y));
-		const FVector2D Foot = Center + FVector2D(ErewhonSector::Sides[Side]) * (ErewhonSpawn::PathWidth * 0.5f + 60.f)
-			+ Road * (Half + 60.f);
-		Layout.Signposts.Add({ FVector(Foot, ErewhonTerrain::Height(Foot, Layout.WorldSeed)), Road });
+		const FVector2D Out = FVector2D(ErewhonSector::Sides[Side]) * (ErewhonSpawn::PathWidth * 0.5f + 60.f);
+		const FVector2D Foot = Center + Out + Road * (Half + 60.f);
+		const FVector2D Across = Center + Out - Road * (Half + 60.f);
+		Layout.Signposts.Add({ FVector(Foot, ErewhonTerrain::Height(Foot, Layout.WorldSeed)), Road,
+			FVector(Across, ErewhonTerrain::Height(Across, Layout.WorldSeed)) });
 	}
 }
 
@@ -232,13 +288,39 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 	const FVector Origin = ErewhonSector::Origin(Sector);
 
 	ErewhonSpawn::BuildPaths(Sector, Layout->Type, Layout->Paths);
+	// Pavés : la place et ses chemins (centre du village), puis les routes du village.
+	const AErewhonGameState* State = AErewhonGameState::Get(GetWorld());
+	const bool bPavedCenter = State && State->HasVillageUpgrade(EVillageUpgrade::PavedCenter);
+	const bool bPavedRoad = Layout->Type == ESectorType::Road && State && State->HasVillageUpgrade(EVillageUpgrade::PavedVillage)
+		&& ErewhonVillage::IsInVillage(Sector);
+	Layout->PathPaved.Init(Layout->Type == ESectorType::Spawn ? bPavedCenter : bPavedRoad, Layout->Paths.Num());
 	if (Layout->Type == ESectorType::Spawn)
 	{
-		// La place ronde du General Store, puis la clairière de chaque cabane du bord des routes.
-		Layout->Clearings.Add({ FVector2D(ErewhonSector::Center(Sector)), UErewhonSettings::Get().PlazaRadiusMeters * 100.f });
+		// La place ronde du General Store, puis la clairière de chaque cabane du bord des routes
+		// (celle du tailleur une fois sa boutique construite).
+		Layout->Clearings.Add({ FVector2D(ErewhonSector::Center(Sector)), UErewhonSettings::Get().PlazaRadiusMeters * 100.f, bPavedCenter });
 		for (const EShopKind Kind : { EShopKind::SectorManager, EShopKind::Tailor })
 		{
-			Layout->Clearings.Add({ FVector2D(ErewhonSpawn::CabinTransform(Kind).GetLocation()), ErewhonSpawn::ManagerClearingRadius });
+			if (Kind == EShopKind::Tailor && !(State && State->HasVillageUpgrade(EVillageUpgrade::Tailor)))
+			{
+				continue;
+			}
+			Layout->Clearings.Add({ FVector2D(ErewhonSpawn::CabinTransform(Kind).GetLocation()), ErewhonSpawn::ManagerClearingRadius, bPavedCenter });
+		}
+		if (State && State->HasVillageUpgrade(EVillageUpgrade::Decoration))
+		{
+			// Sous chaque banc, la terre battue, et un petit sentier qui y mène depuis la place.
+			const FVector2D Plaza(ErewhonSector::Center(Sector));
+			for (const FTransform& Seat : ErewhonVillage::BenchSeats())
+			{
+				const FVector2D Bench(Seat.GetLocation());
+				Layout->Clearings.Add({ Bench, 150.f, false });
+				const FVector2D Toward = (Plaza - Bench).GetSafeNormal();
+				for (float Step = 120.f; Step < 420.f; Step += 60.f)
+				{
+					Layout->Clearings.Add({ Bench + Toward * Step, 70.f, false });
+				}
+			}
 		}
 	}
 
@@ -313,7 +395,7 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 
 	// Les chemins d'accès viennent après les plantes : ils n'en décalent pas les index.
 	BuildAccessPaths(*Layout);
-	if (Layout->Paths.Num() > 0)
+	if (Layout->Paths.Num() > 0 || Layout->Clearings.Num() > 0)
 	{
 		for (int32 Index = 0; Index < Layout->Plants.Num(); ++Index)
 		{

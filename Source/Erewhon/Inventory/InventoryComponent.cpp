@@ -3,6 +3,8 @@
 #include "Core/ErewhonSettings.h"
 #include "Items/ItemDatabase.h"
 #include "Net/UnrealNetwork.h"
+#include "GameFramework/PlayerState.h"
+#include "Player/ErewhonCharacter.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonInventory"
 
@@ -302,6 +304,23 @@ FText UInventoryComponent::UseSlot(int32 SlotIndex)
 	const FItemDef* Def = FindDef(Slots[SlotIndex].ItemId);
 	if (!Def)
 	{
+		return FText::GetEmpty();
+	}
+	if (Slots[SlotIndex].Kind == ESlotKind::Inventory && Def->IsPotion())
+	{
+		// Une potion se boit : un exemplaire en moins, son effet pour quelques minutes.
+		const APlayerState* State = Cast<APlayerState>(GetOwner());
+		AErewhonCharacter* Character = State ? Cast<AErewhonCharacter>(State->GetPawn()) : nullptr;
+		if (!Character)
+		{
+			return FText::GetEmpty();
+		}
+		Character->DrinkPotion(Def->PotionEffect);
+		if (--Slots[SlotIndex].Count <= 0)
+		{
+			Slots[SlotIndex].Clear();
+		}
+		Commit();
 		return FText::GetEmpty();
 	}
 	if (Slots[SlotIndex].Kind == ESlotKind::Inventory)

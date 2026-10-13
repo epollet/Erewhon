@@ -33,6 +33,7 @@ struct FClearing
 {
 	FVector2D Center = FVector2D::ZeroVector;
 	float Radius = 0.f;
+	bool bPaved = false;
 };
 
 /** Un carrefour où planter un panneau indicateur (chemin d'accès qui rejoint la route). */
@@ -40,6 +41,7 @@ struct FSignpostSpot
 {
 	FVector Location = FVector::ZeroVector;   // pied du poteau, au coin du carrefour
 	FVector2D TowardShops = FVector2D::ZeroVector;   // le long de la route, vers la place du village
+	FVector LanternLocation = FVector::ZeroVector;   // l'autre coin du carrefour, pour une lanterne
 };
 
 /**
@@ -59,6 +61,9 @@ struct EREWHON_API FSectorLayout
 	/** Chemins de terre (cœur du chemin, avant le fondu des bords). */
 	TArray<FBox2D> Paths;
 
+	/** Pour chaque chemin : pavé (améliorations du village ou chemin d'accès pavé). */
+	TArray<bool> PathPaved;
+
 	/**
 	 * Plantes recouvertes par un chemin d'accès tracé après coup (achat d'un secteur) :
 	 * leurs index restent valides, mais elles ne s'affichent ni ne se récoltent.
@@ -77,6 +82,9 @@ struct EREWHON_API FSectorLayout
 	 * à l'exclusion des plantes (serveur et client).
 	 */
 	float DirtAmount(const FVector2D& World) const;
+
+	/** Part de pavés en un point (0 → 1), même fondu que la terre. */
+	float PavedAmount(const FVector2D& World) const;
 
 	/** Rien ne pousse ici : terre au-delà du seuil. */
 	bool IsBare(const FVector2D& World, float DirtThreshold = 0.05f) const;
@@ -121,6 +129,9 @@ public:
 
 	/** Oublie le layout d'un secteur et de ses voisins (ex. un achat trace un chemin d'accès). */
 	void InvalidateAround(const FIntPoint& Sector);
+
+	/** Oublie tous les layouts (ex. le village a été pavé). */
+	void InvalidateAll() { Cache.Reset(); CacheOrder.Reset(); }
 
 	/**
 	 * Plante visée depuis Eye dans la direction Look.
