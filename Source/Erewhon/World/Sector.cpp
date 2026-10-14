@@ -90,6 +90,7 @@ void ASector::Initialize(const TSharedRef<const FSectorLayout>& InLayout, bool b
 	SetActorLabel(FString::Printf(TEXT("Sector_%s"), *ErewhonSector::ToString(InLayout->Coord)));
 #endif
 	BuildGround(GetNetMode() != NM_DedicatedServer);
+	BuildTrees(bWithPlants && GetNetMode() != NM_DedicatedServer);
 	if (bWithPlants)
 	{
 		BuildDecor();
@@ -264,7 +265,9 @@ void ASector::BuildDecor()
 	for (int32 PlantIndex = 0; PlantIndex < Settings.DecorPlants.Num(); ++PlantIndex)
 	{
 		const FDecorPlant& Plant = Settings.DecorPlants[PlantIndex];
-		const int32 BaseCount = Layout->Type == ESectorType::Spawn ? Plant.CountSpawn : Plant.CountPrairie;
+		// Sous les arbres, moins d'herbes folles qu'en prairie.
+		const float Woods = Layout->Type == ESectorType::Edge ? 0.7f : Layout->Type == ESectorType::Forest ? 0.35f : 1.f;
+		const int32 BaseCount = Layout->Type == ESectorType::Spawn ? Plant.CountSpawn : FMath::RoundToInt32(Plant.CountPrairie * Woods);
 		const int32 Count = FMath::RoundToInt32(BaseCount * User->VegetationDensity);
 		UStaticMesh* Mesh = LoadDecorMesh(Plant);
 		if (Count <= 0 || Plant.bSolid || !Mesh || (Plant.bFoliageMaterial && !Foliage))
@@ -315,6 +318,85 @@ UStaticMesh* ASector::LoadDecorMesh(const FDecorPlant& Plant)
 {
 	FString Folder, Name;
 	return Plant.Mesh.Split(TEXT("/"), &Folder, &Name) ? LoadGenerated<UStaticMesh>(*Folder, Name) : nullptr;
+}
+
+void ASector::BuildTrees(bool bVisual)
+{
+	if (Layout->Trees.Num() == 0)
+	{
+		return;
+	}
+	// Les troncs : des cylindres invisibles, en instances, qui arrêtent le joueur.
+	UHierarchicalInstancedStaticMeshComponent* Trunks = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
+	Trunks->SetStaticMesh(GetShape(EShape::Cylinder));
+	Trunks->SetupAttachment(Root);
+	Trunks->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+	Trunks->SetHiddenInGame(true);
+	Trunks->SetCanEverAffectNavigation(false);
+	Trunks->RegisterComponent();
+	AddInstanceComponent(Trunks);
+	TArray<FTransform> TrunkTransforms;
+	TArray<TArray<FTransform>> Batches;
+	Batches.SetNum(ErewhonForest::TreeModelCount);
+	TArray<UStaticMesh*> Models;
+	TArray<FTransform> Fits;
+	for (int32 i = 0; i < ErewhonForest::TreeModelCount; ++i)
+	{
+		UStaticMesh* Model = bVisual ? LoadGenerated<UStaticMesh>(TEXT("Meshes"), ErewhonForest::TreeModels[i]) : nullptr;
+		Models.Add(Model);
+		Fits.Add(Model ? FitToHeight(Model, 100.f) : FTransform::Identity);
+	}
+	for (const FTreeInstance& Tree : Layout->Trees)
+	{
+		const FVector Local = Tree.Location - GetActorLocation();
+		const float R = ErewhonForest::TrunkRadius * 2.f / 100.f * Tree.Girth * Tree.Height / 1100.f;
+		TrunkTransforms.Add(FTransform(FRotator::ZeroRotator, Local + FVector(0, 0, 150.f), FVector(R, R, 3.f)));
+		if (Models.IsValidIndex(Tree.Model) && Models[Tree.Model])
+		{
+			const float Scale = Tree.Height / 100.f;
+			Batches[Tree.Model].Add(Fits[Tree.Model] * FTransform(FRotator(0.f, Tree.Yaw, 0.f), Local - FVector(0, 0, 10.f), FVector(Scale * Tree.Girth, Scale * Tree.Girth, Scale)));
+		}
+	}
+	Trunks->AddInstances(TrunkTransforms, false, false);
+
+	// En forêt, la canopée : de larges masses de feuillage entre les cimes, qui ferment le ciel au-dessus de soi.
+	UStaticMesh* Crown = bVisual && Layout->Type == ESectorType::Forest ? LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_bush_box")) : nullptr;
+	if (Crown)
+	{
+		const FTransform CrownFit = FitToHeight(Crown, 100.f);
+		const float Size = UErewhonSettings::Get().SectorSize();
+		FRandomStream Rand(HashCombine(GetTypeHash(Layout->Coord), 0xC4A0u));
+		TArray<FTransform> Crowns;
+		for (float X = 350.f; X < Size; X += 700.f)
+		{
+			for (float Y = 350.f; Y < Size; Y += 700.f)
+			{
+				const FVector2D Local(X + Rand.FRandRange(-220.f, 220.f), Y + Rand.FRandRange(-220.f, 220.f));
+				const FVector2D World = FVector2D(GetActorLocation()) + Local;
+				if (Layout->DirtAmount(World) > 0.3f)
+				{
+					continue;   // au-dessus des chemins et des clairières, le ciel reste ouvert
+				}
+				const float Ground = ErewhonTerrain::Height(World, Layout->WorldSeed) - GetActorLocation().Z;
+				const float Height = Rand.FRandRange(350.f, 520.f);
+				Crowns.Add(CrownFit * FTransform(FRotator(0.f, Rand.FRandRange(0.f, 360.f), 0.f), FVector(Local, Ground + Rand.FRandRange(950.f, 1350.f)),
+					FVector(Height / 100.f * 2.1f, Height / 100.f * 2.1f, Height / 100.f)));
+			}
+		}
+		UHierarchicalInstancedStaticMeshComponent* Canopy = MakeInstancedPart(Crown, nullptr, 400.f);
+		Canopy->SetCastShadow(true);
+		Canopy->AddInstances(Crowns, false, false);
+	}
+	for (int32 i = 0; i < Batches.Num(); ++i)
+	{
+		if (Batches[i].Num() == 0)
+		{
+			continue;
+		}
+		UHierarchicalInstancedStaticMeshComponent* Part = MakeInstancedPart(Models[i], nullptr, 400.f);
+		Part->SetCastShadow(true);   // de grands arbres : leur ombre compte
+		Part->AddInstances(Batches[i], false, false);
+	}
 }
 
 void ASector::BuildBushes()

@@ -649,9 +649,17 @@ void AErewhonCharacter::UpdateGroundSpeed()
 			Factor = FMath::Max(Factor, 1.f);   // sérénité : herbes hautes et buissons ne retiennent plus
 		}
 	}
-	if ((DrivenCart || (Carried && ErewhonPlaceables::IsHeavy(Carried->GetKind()))) && !HasPotion(EPotionEffect::Strength))
+	if (!HasPotion(EPotionEffect::Strength))
 	{
-		Factor *= 0.5f;   // on pousse une charrette, on porte un tonneau (sauf avec la potion de force)
+		// On pousse une charrette, on porte un tonneau ou un meuble : moitié moins vite ; une cagette : un peu moins (sauf potion de force).
+		if (DrivenCart || (Carried && ErewhonPlaceables::IsHeavy(Carried->GetKind())))
+		{
+			Factor *= 0.5f;
+		}
+		else if (Carried && Carried->GetKind() == EStorageKind::Crate)
+		{
+			Factor *= 0.8f;
+		}
 	}
 	if (HasPotion(EPotionEffect::Speed))
 	{
@@ -1137,6 +1145,10 @@ void AErewhonCharacter::UpdatePlacement()
 		if (const TOptional<FTransform> Hook = bCart ? TOptional<FTransform>() : ErewhonPlaceables::HookFor(this, Kind, Hit.ImpactPoint))
 		{
 			At = *Hook;   // le chaudron s'accroche à la crémaillère
+		}
+		else if (const TOptional<FVector> Under = bCart ? TOptional<FVector>() : ErewhonPlaceables::FountainSnap(this, Kind, Hit.ImpactPoint))
+		{
+			At = FTransform(At.Rotator(), *Under);   // le tonneau se cale sous le bec de la fontaine
 		}
 	}
 	else

@@ -91,6 +91,8 @@ ICONS: dict[str, str] = {
     "potpourri": "a small round wooden bowl of colorful dried flower petals and lavender, with a soft sweet glow",
     "drying_rack": "a rustic wooden herb drying rack with bundles of herbs hanging upside down",
     "workbench": "a small rustic apothecary workbench with jars, twine and scissors",
+    "mushroom_cep": "a pair of plump wild porcini mushrooms with brown caps",
+    "mushroom_chanterelle": "a small handful of golden chanterelle mushrooms",
     "firewood": "a small bundle of dry firewood sticks and kindling tied with a twine string",
     "crushed_grass": "a small wooden bowl of crushed green grass paste",
     "crushed_flower_white": "a small wooden bowl of crushed white daisy petals with yellow specks",
@@ -118,6 +120,28 @@ ICON_PROMPT = (
 # ── Modèles 3D (Gemini → Meshy) ─────────────────────────────────────────────
 # Une image de concept est générée d'abord, puis convertie en modèle par Meshy.
 MODELS: dict[str, dict] = {
+    "fountain": {
+        "subject": "a rustic village stone water fountain seen from the front three-quarter: a tall sturdy fieldstone pillar with a bronze spout high up near its top, pouring water straight down onto an empty flat stone slab at ground level directly in front of the pillar; a small stone basin on the left side only; nothing at all standing on the slab, no bucket, no barrel, no pot",
+        "polycount": 8000,
+    },
+    "mushroom_cep": {
+        "subject": "a small cluster of three wild porcini mushrooms with plump brown caps and thick pale stems, growing from a bit of moss",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "mushroom_chanterelle": {
+        "subject": "a small cluster of five wild golden chanterelle mushrooms with wavy funnel shaped caps, growing from a bit of moss",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "tree_pine": {
+        "subject": "a tall old Scots pine tree with a straight reddish trunk and a rounded crown of dark green needle clusters high up, isolated tree",
+        "polycount": 15000,
+    },
+    "tree_beech": {
+        "subject": "a tall forest beech tree with a smooth grey trunk and a high, airy crown of fresh bright green leaves, isolated tree",
+        "polycount": 15000,
+    },
     "shelf": {
         "subject": "a tall narrow rustic wooden shelf unit seen from the front: two side boards, a plank back, and exactly four evenly spaced empty shelves plus a top board, completely empty, nothing on the shelves",
         "polycount": 3000,
@@ -399,6 +423,7 @@ SOUNDS: dict[str, tuple] = {
     "amb_fire": ("a crackling wood fire in a stone hearth, close up: lots of sharp crackles and pops of burning dry logs over a soft roar of flames, continuous", 12.0, True),
     "sickle_swish": ("a quick swish of a small sickle cutting through tall grass, one short swing", 0.6, False, 0.45),
     "amb_cart_roll": ("the steady rolling of a wooden hand cart on a dirt path: wooden wheels creaking softly, light rumble of the axle, gravel crunch, continuous", 8.0, True),
+    "amb_water_pour": ("a steady stream of fresh water pouring from a fountain spout into a wooden barrel, splashing and gurgling, continuous", 8.0, True),
     "mortar_grind": ("a stone pestle grinding and crushing fresh herbs in a stone mortar, two short grinding strokes", 1.0, False),
     "cauldron_bubble": ("a small cauldron of thick potion bubbling and blooping gently, short", 2.5, False),
     "potion_drink": ("a person uncorking a small glass bottle with a pop and drinking a gulp, then a small satisfied breath", 1.6, False),

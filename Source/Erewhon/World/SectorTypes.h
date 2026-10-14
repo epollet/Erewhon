@@ -11,6 +11,8 @@ enum class ESectorType : uint8
 	Spawn,    // secteur 0:0 — place du village et ses commerces, n'appartient à aucun joueur
 	Prairie,
 	Road,     // prolonge les chemins du marchand vers les quatre horizons ; jamais à vendre
+	Edge,     // lisière de forêt : quelques arbres, plus d'arbustes ; borde la forêt (prairie d'un côté)
+	Forest,   // forêt : beaucoup d'arbres, des champignons ; entourée de lisière
 };
 
 /** Améliorations du village, achetées chez le Sector Manager et partagées par tous. */
@@ -52,7 +54,7 @@ namespace ErewhonSector
 
 	EREWHON_API FText TypeLabel(ESectorType Type);
 
-	/** Le spawn appartient au marchand et les routes à tous : ni l'un ni les autres ne se vendent. */
+	/** Le spawn appartient au marchand et les routes à tous : ni l'un ni les autres ne se vendent (prairie, lisière et forêt, si). */
 	EREWHON_API bool IsPurchasable(const FIntPoint& Sector);
 
 	/** Secteur traversé par une route : sur l'un des deux axes du marchand, hors spawn. */

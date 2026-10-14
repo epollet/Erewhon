@@ -38,6 +38,8 @@ private:
 	/** Prairie lointaine jusqu'à l'horizon, sous le sol des secteurs chargés. */
 	UPROPERTY(Transient)
 	TObjectPtr<class UStaticMeshComponent> FarGround;
+	FIntPoint FarGroundSector = FIntPoint(TNumericLimits<int32>::Max());
+	bool bFarGroundPlaced = false;
 
 	FDelegateHandle HarvestHandle;
 	FDelegateHandle DetailHandle;

@@ -59,6 +59,10 @@ void SApothecaryPanel::Construct(const FArguments& InArgs)
 	{
 		House->OnFireChanged.AddSP(this, &SApothecaryPanel::Rebuild);
 	}
+	if (Station.IsValid())
+	{
+		Station->OnStorageChanged.AddSP(this, &SApothecaryPanel::Rebuild);   // l'eau du chaudron
+	}
 	if (AErewhonPlayerState* State = Controller.IsValid() ? Controller->GetPlayerState<AErewhonPlayerState>() : nullptr)
 	{
 		State->GetInventory()->OnInventoryChanged.AddSP(this, &SApothecaryPanel::Rebuild);
@@ -156,7 +160,7 @@ void SApothecaryPanel::Rebuild()
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	TWeakObjectPtr<AStorageActor> WeakStation = Station;
 	const bool bBusy = Controller->GetCraftJob().IsActive();
-	const bool bCold = bCauldron && !(House.IsValid() && House->IsFireLit());
+	const bool bCold = bCauldron && (!(House.IsValid() && House->IsFireLit()) || !Station.IsValid() || Station->GetWater() < ErewhonPlaceables::WaterPerBrew);
 	for (const ErewhonApothecary::FRecipe& Recipe : ErewhonApothecary::Recipes(*Items, static_cast<ErewhonApothecary::ECraft>(Craft)))
 	{
 		const FItemDef* Def = Items->Find(Recipe.Output);
@@ -229,7 +233,7 @@ void SApothecaryPanel::Rebuild()
 
 TSharedRef<SWidget> SApothecaryPanel::BuildFire() const
 {
-	// Sous le chaudron : le feu, et de quoi le nourrir.
+	// Sous le chaudron : le feu, et de quoi le nourrir ; dedans, l'eau, et de quoi la remplir.
 	const AApothecary* Home = House.Get();
 	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
 	if (!State)
@@ -247,7 +251,8 @@ TSharedRef<SWidget> SApothecaryPanel::BuildFire() const
 	const int32 Wood = CountOwned(State, TEXT("firewood"));
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	TWeakObjectPtr<AApothecary> WeakHouse = House;
-	return CardBox(
+	TWeakObjectPtr<AStorageActor> WeakStation = Station;
+	TSharedRef<SWidget> FireLine = CardBox(
 		SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
 		[
@@ -271,6 +276,26 @@ TSharedRef<SWidget> SApothecaryPanel::BuildFire() const
 				bLit ? EButton::Secondary : EButton::Primary, Wood > 0, 0.f, 11)
 		],
 		8.f);
+	const float Water = Station.IsValid() ? Station->GetWater() : 0.f;
+	TSharedRef<SWidget> WaterLine = CardBox(
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+		[
+			SNew(STextBlock)
+			.Text(FText::Format(LOCTEXT("CauldronWater", "Eau du chaudron : {0} L / {1} (0,15 L par préparation)"),
+				FText::AsNumber(FMath::FloorToFloat(Water * 10.f) / 10.f), FText::AsNumber(FMath::RoundToInt32(ErewhonPlaceables::CauldronLiters))))
+			.Font(Font(11, true)).ColorAndOpacity(Water >= ErewhonPlaceables::WaterPerBrew ? Sky : Danger)
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10, 0, 0, 0)
+		[
+			Button(LOCTEXT("FillCauldron", "Remplir au tonneau d'eau"),
+				[WeakController, WeakStation]() { if (WeakController.IsValid()) { WeakController->ServerFillCauldron(WeakStation.Get()); } },
+				EButton::Secondary, Water < ErewhonPlaceables::CauldronLiters - 0.01f, 0.f, 11)
+		],
+		8.f);
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)[FireLine]
+		+ SVerticalBox::Slot().AutoHeight()[WaterLine];
 }
 
 #undef LOCTEXT_NAMESPACE

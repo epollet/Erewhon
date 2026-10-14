@@ -171,7 +171,9 @@ void USectorLayoutSubsystem::BuildBushes(FSectorLayout& Layout, int32 WorldSeed)
 	for (int32 Kind = 0; Kind < Settings.DecorPlants.Num(); ++Kind)
 	{
 		const FDecorPlant& Plant = Settings.DecorPlants[Kind];
-		const int32 Count = Layout.Type == ESectorType::Spawn ? Plant.CountSpawn : Plant.CountPrairie;
+		// Plus d'arbustes en lisière, un peu plus en forêt qu'en prairie.
+		const float Woods = Layout.Type == ESectorType::Edge ? 2.2f : Layout.Type == ESectorType::Forest ? 1.4f : 1.f;
+		const int32 Count = Layout.Type == ESectorType::Spawn ? Plant.CountSpawn : FMath::RoundToInt32(Plant.CountPrairie * Woods);
 		if (!Plant.bSolid || Count <= 0)
 		{
 			continue;
@@ -202,6 +204,38 @@ void USectorLayoutSubsystem::BuildBushes(FSectorLayout& Layout, int32 WorldSeed)
 			Bush.Yaw = Yaw;
 			Bush.Kind = Kind;
 		}
+	}
+}
+
+void USectorLayoutSubsystem::BuildTrees(FSectorLayout& Layout, int32 WorldSeed) const
+{
+	// Quelques arbres en lisière, beaucoup en forêt ; jamais sur un chemin, une clairière, ni trop serrés.
+	if (Layout.Type != ESectorType::Edge && Layout.Type != ESectorType::Forest)
+	{
+		return;
+	}
+	const float Size = UErewhonSettings::Get().SectorSize();
+	const FVector2D Origin(ErewhonSector::Origin(Layout.Coord));
+	FRandomStream Rand(static_cast<int32>(HashCombine(HashCombine(GetTypeHash(WorldSeed), GetTypeHash(Layout.Coord)), 0x7EE5u)));
+	const bool bForest = Layout.Type == ESectorType::Forest;
+	const int32 Wanted = bForest ? Rand.RandRange(85, 110) : Rand.RandRange(10, 16);
+	const float MinSpacing = bForest ? 560.f : 1100.f;
+	for (int32 Attempt = 0; Attempt < Wanted * 6 && Layout.Trees.Num() < Wanted; ++Attempt)
+	{
+		const FVector2D Point = Origin + FVector2D(Rand.FRandRange(150.f, Size - 150.f), Rand.FRandRange(150.f, Size - 150.f));
+		// En forêt, de vieux arbres : jusqu'à 1,75 fois plus grands, à la couronne plus large, qui se rejoignent au-dessus de soi.
+		const float Grow = bForest ? Rand.FRandRange(1.f, 1.75f) : 1.f;
+		const float Height = Rand.FRandRange(900.f, 1350.f) * Grow;
+		const float Girth = bForest ? Rand.FRandRange(1.1f, 1.3f) : 1.f;
+		const float Yaw = Rand.FRandRange(0.f, 360.f);
+		// La forêt : surtout des pins et des hêtres ; la lisière : des feuillus surtout.
+		const float Pick = Rand.FRand();
+		const int32 Model = bForest ? (Pick < 0.45f ? 0 : Pick < 0.85f ? 1 : 2) : (Pick < 0.2f ? 0 : Pick < 0.45f ? 1 : Pick < 0.75f ? 2 : 3);
+		if (Layout.DirtAmount(Point) > 0.f || Layout.Trees.ContainsByPredicate([&](const FTreeInstance& T) { return FVector2D::Distance(FVector2D(T.Location), Point) < MinSpacing; }))
+		{
+			continue;
+		}
+		Layout.Trees.Add({ FVector(Point, ErewhonTerrain::Height(Point, WorldSeed)), Height, Yaw, Model, Girth });
 	}
 }
 
@@ -238,7 +272,7 @@ void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
 	};
 	// L'apothicairerie : une clairière autour de la maison, et un chemin jusqu'à elle depuis
 	// chaque route reliée (il prolonge celui de la route, jusqu'au centre du secteur).
-	if (Layout.Type == ESectorType::Prairie && ErewhonApothecary::HasHouse(State, Layout.Coord))
+	if (ErewhonSector::IsPurchasable(Layout.Coord) && ErewhonApothecary::HasHouse(State, Layout.Coord))
 	{
 		Layout.Clearings.Add({ Center, ErewhonApothecary::ClearingRadius, false });
 		const uint8 Links = State->GetRoadLinks(Layout.Coord);
@@ -261,7 +295,7 @@ void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
 	{
 		const FIntPoint Neighbor = Layout.Coord + ErewhonSector::Sides[Side];
 		const int32 Back = Side ^ 1;   // côté du voisin qui regarde vers nous (nord ↔ sud, est ↔ ouest)
-		if (ErewhonSector::TypeAt(Neighbor, Layout.WorldSeed) != ESectorType::Prairie || !(State->GetRoadLinks(Neighbor) & (1 << Back)))
+		if (!ErewhonSector::IsPurchasable(Neighbor) || !(State->GetRoadLinks(Neighbor) & (1 << Back)))
 		{
 			continue;
 		}
@@ -306,6 +340,16 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 				continue;
 			}
 			Layout->Clearings.Add({ FVector2D(ErewhonSpawn::CabinTransform(Kind).GetLocation()), ErewhonSpawn::ManagerClearingRadius, bPavedCenter });
+		}
+		// La fontaine : un peu de terre autour, et un chemin jusqu'à l'allée.
+		{
+			const FTransform Fountain = ErewhonVillage::FountainTransform();
+			const FVector2D Foot(Fountain.GetLocation());
+			Layout->Clearings.Add({ Foot + FVector2D(Fountain.GetRotation().GetForwardVector()) * 40.f, 300.f, false });
+			const FVector2D Spot(ErewhonVillage::FountainBarrelSpot());
+			const float AlleyEdge = ErewhonSector::Center(Sector).X - ErewhonSpawn::PathWidth * 0.5f;
+			Layout->Paths.Add(FBox2D(FVector2D(FMath::Min(Spot.X, AlleyEdge), Spot.Y - 110.f), FVector2D(FMath::Max(Spot.X, AlleyEdge) + 60.f, Spot.Y + 110.f)));
+			Layout->PathPaved.Add(false);
 		}
 		if (State && State->HasVillageUpgrade(EVillageUpgrade::Decoration))
 		{
@@ -406,6 +450,7 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 		}
 	}
 	BuildBushes(*Layout, WorldSeed);
+	BuildTrees(*Layout, WorldSeed);
 
 	for (int32 Index = 0; Index < Layout->Plants.Num(); ++Index)
 	{

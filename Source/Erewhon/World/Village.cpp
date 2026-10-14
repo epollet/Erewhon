@@ -1,4 +1,9 @@
 #include "World/Village.h"
+#include "World/Storage.h"
+#include "EngineUtils.h"
+#include "Sound/SoundWave.h"
+#include "World/ErewhonSound.h"
+#include "Components/AudioComponent.h"
 
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
@@ -37,6 +42,13 @@ namespace ErewhonVillage
 		constexpr float GTreeAngles[] = { 20.f, 40.f, 115.f, 140.f, 160.f, 200.f, 295.f, 320.f, 340.f };
 
 		FVector Plaza() { return ErewhonSpawn::CabinTransform(EShopKind::GeneralStore).GetLocation(); }
+
+		/** Sur le modèle de la fontaine (repère de la fontaine) : le bec, et l'endroit où le tonneau reçoit l'eau (mesurés). */
+		constexpr float FountainSide = -18.f;   // le pilier est un peu décentré par rapport au bassin
+		const FVector FountainSpoutLocal(32.f, FountainSide, 132.f);
+		const FVector FountainSpotLocal(62.f, FountainSide, 0.f);
+		constexpr float FountainHeight = 190.f;
+		constexpr float FountainMeshYaw = -90.f;   // la façade du modèle (+Y) vers +X
 
 		FVector OnRing(float AngleDegrees, float Radius)
 		{
@@ -80,6 +92,19 @@ namespace ErewhonVillage
 	{
 		const int32 Radius = UErewhonSettings::Get().StoreSectorRadius;
 		return FMath::Max(FMath::Abs(Sector.X), FMath::Abs(Sector.Y)) <= Radius;
+	}
+
+	FTransform FountainTransform()
+	{
+		// Dans le carré d'herbe au-delà des arbres de la place, entre l'allée nord (+Y) et celle de l'ouest (−X),
+		// le bec (+X) tourné vers l'allée nord, qu'un petit chemin rejoint.
+		const FVector At = Plaza() + FVector(-850.f, 2050.f, 0.f);
+		return FTransform(FRotator::ZeroRotator, FVector(At.X, At.Y, 0.f));
+	}
+
+	FVector FountainBarrelSpot()
+	{
+		return FountainTransform().TransformPosition(FountainSpotLocal);
 	}
 
 	const TArray<FTransform>& BenchSeats()
@@ -553,3 +578,87 @@ void ABench::Interact(AErewhonPlayerController* Controller)
 }
 
 #undef LOCTEXT_NAMESPACE
+
+// ── La fontaine ──────────────────────────────────────────────────────────────
+
+AFountain::AFountain()
+{
+	PrimaryActorTick.bCanEverTick = true;
+	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	RootComponent = Root;
+}
+
+void AFountain::BeginPlay()
+{
+	Super::BeginPlay();
+	using namespace ErewhonVillage;
+	FTransform At = FountainTransform();
+	if (const AErewhonGameState* State = AErewhonGameState::Get(this))
+	{
+		At.SetLocation(FVector(At.GetLocation().X, At.GetLocation().Y, ErewhonTerrain::Height(FVector2D(At.GetLocation()), State->GetWorldSeed())));
+	}
+	SetActorTransform(At);
+	if (UStaticMesh* Model = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_fountain")))
+	{
+		AddGeneratedMesh(this, Root, Model, FVector::ZeroVector, FountainHeight, FountainMeshYaw, false);
+		// Seul le pilier arrête le joueur : la dalle devant reste libre pour le tonneau.
+		UStaticMeshComponent* Pillar = AddShape(this, Root, EShape::Cube, FVector(-18.f, FountainSide, 95.f), FVector(90.f, 80.f, 190.f), Palette::Stone, FRotator::ZeroRotator, true);
+		Pillar->SetHiddenInGame(true);
+		Pillar->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+	}
+	else
+	{
+		AddShape(this, Root, EShape::Cube, FVector(-10.f, 0.f, 90.f), FVector(60.f, 70.f, 180.f), Palette::Stone, FRotator::ZeroRotator, true);
+		AddShape(this, Root, EShape::Cylinder, FVector(FountainSpoutLocal.X * 0.6f, 0.f, FountainSpoutLocal.Z), FVector(6.f, 6.f, 40.f), FLinearColor::FromSRGBColor(FColor(170, 130, 60)), FRotator(90.f, 0.f, 0.f), false);
+	}
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	// Sans modèle, un filet d'eau du bec à la dalle (ou dans le tonneau) ; le modèle a le sien.
+	if (!LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_fountain")))
+	{
+		Stream = AddShape(this, Root, EShape::Cylinder, FVector::ZeroVector, FVector(4.f, 4.f, 100.f), FLinearColor::FromSRGBColor(FColor(160, 210, 240)), FRotator::ZeroRotator, false);
+	}
+	if (Stream)
+	{
+		Stream->SetCastShadow(false);
+	}
+	if (USoundWave* Sound = ErewhonSound::Load(TEXT("amb_water_pour")))
+	{
+		Pour = NewObject<UAudioComponent>(this);
+		Pour->SetupAttachment(Root);
+		Pour->SetRelativeLocation(FountainSpoutLocal);
+		Pour->SetSound(Sound);
+		Pour->AttenuationSettings = ErewhonSound::Attenuation(150.f, 1500.f);
+		Pour->RegisterComponent();
+		Pour->Play(FMath::FRandRange(0.f, 5.f));
+	}
+}
+
+void AFountain::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	using namespace ErewhonVillage;
+	Time += DeltaSeconds;
+	if (Stream)
+	{
+		// Du bec jusqu'au haut du tonneau posé dessous, sinon jusqu'à la dalle ; le filet frémit.
+		bool bBarrel = false;
+		const FVector Spot = ErewhonVillage::FountainBarrelSpot();
+		for (TActorIterator<AStorageActor> It(GetWorld()); It && !bBarrel; ++It)
+		{
+			bBarrel = It->GetKind() == EStorageKind::Barrel && !It->GetCarrier() && FVector::Dist2D(It->GetActorLocation(), Spot) < 80.f;
+		}
+		const FVector From = FountainSpoutLocal;
+		const FVector To = bBarrel ? FVector(54.f, FountainSide, 96.f) : FVector(44.f, FountainSide, 12.f);
+		const FVector Span = To - From;
+		const float Wobble = 1.f + 0.12f * FMath::Sin(Time * 23.f) + 0.08f * FMath::Sin(Time * 37.f);
+		Stream->SetRelativeLocationAndRotation((From + To) * 0.5f, FRotationMatrix::MakeFromZ(Span.GetSafeNormal()).Rotator());
+		Stream->SetRelativeScale3D(FVector(0.04f * Wobble, 0.04f / Wobble, Span.Size() / 100.f));
+	}
+	if (Pour)
+	{
+		Pour->SetVolumeMultiplier(0.55f * ErewhonSound::ChannelVolume(ErewhonSound::EChannel::Ambient));
+	}
+}

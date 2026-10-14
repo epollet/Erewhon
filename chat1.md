@@ -231,3 +231,35 @@ D'ailleurs je pense que le mobilier devra être achetable au general store : ét
 Aussi, les éléments mobilier, ainsi que les conteneurs, ne peuvent pas être posé sur un secteur qui n'est pas le notre. En revanche, on peut toujours poser n'importe où une charette. Et on peut toujours y déposer cagette et tonneaux, même si on est pas sur son secteur
 Grossi un peu la taille des potions et éventuellement ajoute leur de petits effets de lumiére
 
+==================================================================
+
+Les étagères ne devraient pas afficher leur modéle en main, on ne les porte pas on les place. Les étagère et le mobilier ne se stack pas. Actuellement l'étagère bouche la vue quand on veut la placer, ça devrait donc régler le probléme.
+La remise de lapoticairie dois être vide.
+Elle doit avoir un plafond( sous les tuiles) en bois.
+Peut-être les étagère et le sac a dos mériterait il un modéle 3D. Le sac ne suis pas bien les mouvements du personnage.
+Quand on clic avec un outil en mains, ça fait son animation à chaque clic (on la reset si déjà en cours). Aussi, ça déclenche le son associé (reset aussi si en cours). A faire sur la serpe.
+Quand la charette bouge, on emet un son aussi.
+Le feu doit avoir un son de crépitation.
+Nouveaux objets :
+- Le séchoir qui permet de placer des plantes pour les faire sécher.
+- Un petit atelier d'apoticaire : 
+    - Permet de faire des pot pourris qui déodorise une zone avec un joli effet doux et permet de donner un buf aux personnes dans la zone pendant un certains temps, même s'il en sorte)
+    - permet de faire des teintures avec des écrasés qui valent plus cher encore
+    - permet de faire des bouquets en pot, de plantes ou de plantes séchées (demandes différents types de plantes)
+
+===================================================================
+
+On peut aussi ranger les teinture et les pots pourris dans les étagères, ainsi que dans les cagettes.
+Quand on pourte une cagette, on va 20% moins vite, un tonneau 50%.
+On ajoutera une fontaine sous laquelle on peut placer un tonneau pour le remplir d'eau. Il se remplit petit à petit de 100L. Il devient alors un tonneau d'eau qui ne peut contenir que ça sauf si on le vide.
+Remplir à la fontaine coute 1c le L.
+On a désormais besoins d'un tonneau d'eau pour remplir le chaudron de 10L. Celui-ci consomme 150ml par potion.
+On ajoutera 2 nouveaux type de secteur : 
+- La lisiére de forêt, peut se trouver à coter d'une prairie ou d'une foret et contient quelques arbres et une végétation avec plus d'arbustres que les prairies
+- La forêt, peut se trouver à coté de la lisière. Contient beaucoup d'arbres, des champignons aussi.
+
+
+====================================================================
+
+Continue ce que tu faisais aavnt, check ou en est la fontaine.
+Aussi, en foret, les arbres doivent pouvoir être plus grand et plus gros (jusque x1.75)

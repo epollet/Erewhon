@@ -573,36 +573,36 @@ void ASpawnCabin::BuildTimberFrame()
 			UStaticMeshComponent* Part = AddShape(this, Root, EShape::Cube, Center, Size, Palette::WoodDark, FRotator::ZeroRotator, false);
 			Part->SetMaterial(0, Oak);
 		};
-		const float Edge = F.Half - GWallThickness;
+		const float Rim = F.Half - GWallThickness;
 		// Lisse basse et sablière haute, sur toute la façade (sauf la porte).
 		if (F.GapHalf > 0.f && F.GapTop >= GDoorHeight)
 		{
-			Piece(-Edge, -F.GapHalf, 0.f, Beam);
-			Piece(F.GapHalf, Edge, 0.f, Beam);
+			Piece(-Rim, -F.GapHalf, 0.f, Beam);
+			Piece(F.GapHalf, Rim, 0.f, Beam);
 		}
 		else
 		{
-			Piece(-Edge, Edge, 0.f, Beam);
+			Piece(-Rim, Rim, 0.f, Beam);
 		}
-		Piece(-Edge, Edge, H - Beam, H);
+		Piece(-Rim, Rim, H - Beam, H);
 		// Lisse intermédiaire, interrompue par l'ouverture.
 		if (F.GapHalf > 0.f)
 		{
-			Piece(-Edge, -F.GapHalf, MidRail - Beam * 0.5f, MidRail + Beam * 0.5f);
-			Piece(F.GapHalf, Edge, MidRail - Beam * 0.5f, MidRail + Beam * 0.5f);
+			Piece(-Rim, -F.GapHalf, MidRail - Beam * 0.5f, MidRail + Beam * 0.5f);
+			Piece(F.GapHalf, Rim, MidRail - Beam * 0.5f, MidRail + Beam * 0.5f);
 		}
 		else
 		{
-			Piece(-Edge, Edge, MidRail - Beam * 0.5f, MidRail + Beam * 0.5f);
+			Piece(-Rim, Rim, MidRail - Beam * 0.5f, MidRail + Beam * 0.5f);
 		}
 		// Poteaux à mi-chemin entre l'ouverture et l'angle, et croix dans les panneaux bas.
 		const float Inner = FMath::Max(F.GapHalf, 0.f);
-		const float Stud = (Inner + Edge) * 0.5f;
+		const float Stud = (Inner + Rim) * 0.5f;
 		for (const float S : { -1.f, 1.f })
 		{
 			Piece(S * Stud - Beam * 0.5f, S * Stud + Beam * 0.5f, Beam, H - Beam);
-			const float A = S > 0 ? Stud + Beam * 0.5f : -Edge;
-			const float B = S > 0 ? Edge : -Stud - Beam * 0.5f;
+			const float A = S > 0 ? Stud + Beam * 0.5f : -Rim;
+			const float B = S > 0 ? Rim : -Stud - Beam * 0.5f;
 			const float Width = B - A;
 			const float Height = MidRail - Beam * 1.5f;
 			const float Length = FMath::Sqrt(Width * Width + Height * Height);

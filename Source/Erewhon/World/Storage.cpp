@@ -10,6 +10,8 @@
 #include "Net/UnrealNetwork.h"
 #include "World/ErewhonVisuals.h"
 #include "World/Apothecary.h"
+#include "World/Terrain.h"
+#include "World/Village.h"
 #include "Sound/SoundWave.h"
 #include "World/ErewhonSound.h"
 #include "Components/AudioComponent.h"
@@ -177,9 +179,28 @@ namespace ErewhonPlaceables
 		{
 			return !IsFurniture(Kind);
 		}
+		if (Type == 0 && FountainSnap(WorldContext, Kind, Location).IsSet())
+		{
+			return true;   // sous le bec de la fontaine, chacun peut poser son tonneau
+		}
 		const AErewhonGameState* State = AErewhonGameState::Get(WorldContext);
 		const FString* Owner = State ? State->FindSectorOwnerKey(ErewhonSector::FromWorld(Location)) : nullptr;
 		return Owner && !PlayerKey.IsEmpty() && *Owner == PlayerKey;
+	}
+
+	TOptional<FVector> FountainSnap(const UObject* WorldContext, EStorageKind Kind, const FVector& Location)
+	{
+		if (Kind != EStorageKind::Barrel)
+		{
+			return {};
+		}
+		const FVector Spot = ErewhonVillage::FountainBarrelSpot();
+		if (FVector::Dist2D(Spot, Location) > ErewhonVillage::FountainSnapRadius)
+		{
+			return {};
+		}
+		const AErewhonGameState* State = AErewhonGameState::Get(WorldContext);
+		return FVector(Spot.X, Spot.Y, State ? ErewhonTerrain::Height(FVector2D(Spot), State->GetWorldSeed()) : Location.Z);
 	}
 
 	TOptional<FTransform> HookFor(const UObject* WorldContext, EStorageKind Kind, const FVector& Location)
@@ -269,6 +290,7 @@ void AStorageActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME(AStorageActor, Above);
 	DOREPLIFETIME(AStorageActor, SlotTimes);
 	DOREPLIFETIME(AStorageActor, ExpiresAt);
+	DOREPLIFETIME(AStorageActor, Water);
 }
 
 void AStorageActor::Setup(EStorageKind InKind, const FString& InOwnerKey, const FString& InOwnerName)
@@ -427,6 +449,14 @@ void AStorageActor::BeginPlay()
 			Petals.Add(Petal);
 		}
 	}
+}
+
+void AStorageActor::SetWater(float Liters)
+{
+	const float Max = Kind == EStorageKind::Cauldron ? ErewhonPlaceables::CauldronLiters : ErewhonPlaceables::WaterBarrelLiters;
+	Water = FMath::Clamp(Liters, 0.f, Max);
+	ForceNetUpdate();
+	OnStorageChanged.Broadcast();
 }
 
 void AStorageActor::Commit()
@@ -639,7 +669,9 @@ bool AStorageActor::Accepts(const FItemDef& Def) const
 	switch (Kind)
 	{
 	case EStorageKind::Crate:
-	case EStorageKind::Barrel: return Def.Category == EItemCategory::Plant;
+		// Des plantes, et ce qu'on en tire de petit : teintures, pots-pourris.
+		return Def.Category == EItemCategory::Plant || Def.Id.ToString().StartsWith(TEXT("dye_")) || Def.Id == TEXT("potpourri");
+	case EStorageKind::Barrel: return Def.Category == EItemCategory::Plant && Water <= 0.01f;   // un tonneau d'eau ne tient que l'eau
 	case EStorageKind::Shelf:  return ErewhonApothecary::IsShelvable(Def);
 	case EStorageKind::DryingRack: return Def.Category == EItemCategory::Plant;
 	default:                   return false;
@@ -798,6 +830,12 @@ FText AStorageActor::GetInteractionLabel() const
 			const double Left = State ? FMath::Max(0.0, ExpiresAt - State->GetWorldClock()) : 0.0;
 			return FText::Format(LOCTEXT("MinePotpourri", "Pot-pourri (il parfume encore {0} min)    [E] Reprendre"), FText::AsNumber(FMath::CeilToInt32(Left / 60.0)));
 		}
+		case EStorageKind::Barrel:
+			if (Water > 0.01f)
+			{
+				return FText::Format(LOCTEXT("MineWater", "Prendre : Tonneau d'eau ({0} L)    [F] Ouvrir"), FText::AsNumber(FMath::FloorToInt32(Water)));
+			}
+			return FText::Format(LOCTEXT("Mine", "Prendre : {0}    [F] Ouvrir"), ErewhonPlaceables::KindName(Kind));
 		default:
 			return FText::Format(LOCTEXT("Mine", "Prendre : {0}    [F] Ouvrir"), ErewhonPlaceables::KindName(Kind));
 		}

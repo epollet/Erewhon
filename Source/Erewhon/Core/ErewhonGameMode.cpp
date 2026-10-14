@@ -134,6 +134,7 @@ void AErewhonGameMode::BeginPlay()
 		}
 	}
 	GetGameState<AErewhonGameState>()->OnVillageChanged.AddUObject(this, &AErewhonGameMode::SpawnDoors);
+	GetWorldTimerManager().SetTimer(FountainTimer, this, &AErewhonGameMode::FillAtFountain, 0.25f, true);
 	GetWorldTimerManager().SetTimer(AutosaveTimer, this, &AErewhonGameMode::SaveWorld,
 		UErewhonSettings::Get().AutosaveIntervalSeconds, true);
 }
@@ -349,6 +350,13 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 			Cart->StartDriving(Driver);
 			Driver->SetDrivenCart(Cart);
 		}
+	}
+	// -ErewhonTestFountain : un tonneau vide sous le bec de la fontaine de la place.
+	if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestFountain")))
+	{
+		const FVector Spot = ErewhonVillage::FountainBarrelSpot();
+		const FVector At(Spot.X, Spot.Y, ErewhonTerrain::Height(FVector2D(Spot), GetGameState<AErewhonGameState>()->GetWorldSeed()));
+		SpawnStorage(EStorageKind::Barrel, FTransform(At), Key, DisplayName);
 	}
 	// -ErewhonTestApothecary : le secteur 1:1 au joueur, avec ses chemins et son apothicairerie (feu allumé),
 	// de quoi y travailler ; le joueur entre dans la maison.
@@ -571,9 +579,9 @@ FText AErewhonGameMode::TryBuyApothecary(AErewhonPlayerController* Controller, c
 	{
 		return LOCTEXT("NotYours", "Ce secteur ne vous appartient pas.");
 	}
-	if (ErewhonSector::TypeAt(Sector, State->GetWorldSeed()) != ESectorType::Prairie)
+	if (!ErewhonSector::IsPurchasable(Sector))
 	{
-		return LOCTEXT("NotPrairie", "L'apothicairerie se construit dans une prairie.");
+		return LOCTEXT("NotPrairie", "L'apothicairerie se construit sur un secteur à vous.");
 	}
 	if (State->GetBuildings(Sector) & ESectorBuilding::Apothecary)
 	{
@@ -717,6 +725,10 @@ FText AErewhonGameMode::TryStartCraft(AErewhonPlayerController* Controller, ASto
 		{
 			return LOCTEXT("FireOut", "Le feu est éteint : allumez-le avec du petit bois.");
 		}
+		if (Station->GetWater() < ErewhonPlaceables::WaterPerBrew)
+		{
+			return LOCTEXT("CauldronDry", "Le chaudron est vide : remplissez-le d'eau (un tonneau d'eau à quelques pas).");
+		}
 	}
 	if (!HasIngredients(Controller->GetPlayerState<AErewhonPlayerState>(), *Recipe))
 	{
@@ -767,6 +779,11 @@ void AErewhonGameMode::StepCraft(AErewhonPlayerController* Controller)
 	}
 	const bool bCauldron = Recipe->Craft == ErewhonApothecary::ECraft::Cauldron;
 	const AApothecary* House = bCauldron ? ErewhonApothecary::HouseOfHungCauldron(Station) : nullptr;
+	if (bCauldron && Station->GetWater() < ErewhonPlaceables::WaterPerBrew)
+	{
+		Stop(LOCTEXT("CauldronRanDry", "Le chaudron n'a plus d'eau."));
+		return;
+	}
 	if (bCauldron && (!House || !House->IsFireLit()))
 	{
 		Stop(LOCTEXT("FireWentOut", "Le feu s'est éteint : le chaudron refroidit."));
@@ -791,6 +808,10 @@ void AErewhonGameMode::StepCraft(AErewhonPlayerController* Controller)
 		Stop(LOCTEXT("NoRoom", "Plus de place dans l'inventaire."));
 		return;
 	}
+	if (bCauldron)
+	{
+		Station->SetWater(Station->GetWater() - ErewhonPlaceables::WaterPerBrew);
+	}
 	Controller->ClientCraftStep(static_cast<uint8>(Recipe->Craft));
 
 	// Le suivant, s'il en reste à faire et de quoi le faire.
@@ -810,6 +831,110 @@ void AErewhonGameMode::StepCraft(AErewhonPlayerController* Controller)
 			StepCraft(WeakController.Get());
 		}
 	}), Job.StepSeconds, false);
+}
+
+void AErewhonGameMode::FillAtFountain()
+{
+	const FVector Spot = ErewhonVillage::FountainBarrelSpot();
+	const float Step = ErewhonVillage::FountainLitersPerSecond * 0.25f;
+	for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It)
+	{
+		AStorageActor* Barrel = *It;
+		if (Barrel->GetKind() != EStorageKind::Barrel || Barrel->GetCarrier() || FVector::Dist2D(Barrel->GetActorLocation(), Spot) > 80.f
+			|| Barrel->GetWater() >= ErewhonPlaceables::WaterBarrelLiters
+			|| Barrel->GetSlots().ContainsByPredicate([](const FInventorySlot& Slot) { return !Slot.IsEmpty(); }))
+		{
+			continue;
+		}
+		// Le propriétaire paie chaque litre commencé : 1 C le litre. Absent ou sans le sou, l'eau ne coule plus.
+		AErewhonPlayerState* Payer = nullptr;
+		for (APlayerState* PS : GameState->PlayerArray)
+		{
+			AErewhonPlayerState* Candidate = Cast<AErewhonPlayerState>(PS);
+			if (Candidate && Barrel->IsOwnedBy(Candidate->GetPlayerKey()))
+			{
+				Payer = Candidate;
+			}
+		}
+		const float Before = Barrel->GetWater();
+		const float After = FMath::Min(Before + Step, ErewhonPlaceables::WaterBarrelLiters);
+		const int32 Cost = FMath::CeilToInt32(After) - FMath::CeilToInt32(Before);
+		if (!Payer || (Cost > 0 && !Payer->SpendCoins(Cost)))
+		{
+			if (Payer && !BrokeAtFountain.Contains(Barrel))
+			{
+				BrokeAtFountain.Add(Barrel);
+				if (AErewhonPlayerController* PC = Cast<AErewhonPlayerController>(Payer->GetOwningController()))
+				{
+					PC->ClientToast(LOCTEXT("FountainBroke", "Plus assez de pièces pour l'eau de la fontaine (1 C le litre)."));
+				}
+			}
+			continue;
+		}
+		BrokeAtFountain.Remove(Barrel);
+		Barrel->SetWater(After);
+	}
+}
+
+FText AErewhonGameMode::TryFillCauldron(AErewhonPlayerController* Controller, AStorageActor* Cauldron)
+{
+	const FText Error = CheckAtStation(Controller, Cauldron);
+	if (!Error.IsEmpty())
+	{
+		return Error;
+	}
+	if (Cauldron->GetKind() != EStorageKind::Cauldron)
+	{
+		return FText::GetEmpty();
+	}
+	float Need = ErewhonPlaceables::CauldronLiters - Cauldron->GetWater();
+	if (Need <= 0.01f)
+	{
+		return LOCTEXT("CauldronFull", "Le chaudron est plein.");
+	}
+	// Les tonneaux d'eau du propriétaire, à quelques pas, le plus proche d'abord.
+	TArray<AStorageActor*> Barrels;
+	for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It)
+	{
+		if (It->IsWaterBarrel() && It->IsOwnedBy(Cauldron->GetOwnerKey()) && !It->GetCarrier()
+			&& FVector::Dist(It->GetActorLocation(), Cauldron->GetActorLocation()) <= 600.f)
+		{
+			Barrels.Add(*It);
+		}
+	}
+	Barrels.Sort([Cauldron](const AStorageActor& A, const AStorageActor& B)
+	{
+		return FVector::DistSquared(A.GetActorLocation(), Cauldron->GetActorLocation()) < FVector::DistSquared(B.GetActorLocation(), Cauldron->GetActorLocation());
+	});
+	if (Barrels.Num() == 0)
+	{
+		return LOCTEXT("NoWaterBarrel", "Il faut un tonneau d'eau à quelques pas (on le remplit à la fontaine de la place).");
+	}
+	for (AStorageActor* Barrel : Barrels)
+	{
+		const float Taken = FMath::Min(Need, Barrel->GetWater());
+		Barrel->SetWater(Barrel->GetWater() - Taken);
+		Cauldron->SetWater(Cauldron->GetWater() + Taken);
+		Need -= Taken;
+		if (Need <= 0.01f)
+		{
+			break;
+		}
+	}
+	return FText::GetEmpty();
+}
+
+FText AErewhonGameMode::TryEmptyWater(AErewhonPlayerController* Controller, AStorageActor* Barrel)
+{
+	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
+	const APawn* Pawn = Controller->GetPawn();
+	if (!PlayerState || !Pawn || !Barrel || !Barrel->IsOwnedBy(PlayerState->GetPlayerKey()) || !Barrel->IsWaterBarrel()
+		|| FVector::Dist(Pawn->GetActorLocation(), Barrel->GetActorLocation()) > 450.f)
+	{
+		return FText::GetEmpty();
+	}
+	Barrel->SetWater(0.f);
+	return FText::GetEmpty();
 }
 
 FText AErewhonGameMode::TryBuyStoreroom(AErewhonPlayerController* Controller, const FIntPoint& Sector)
@@ -1438,6 +1563,10 @@ FText AErewhonGameMode::TryPlace(AErewhonPlayerController* Controller, uint8 Typ
 		{
 			Storage->PlaceOnGround(Hook->GetLocation(), Hook->Rotator().Yaw);   // le chaudron pend à la crémaillère
 		}
+		else if (const TOptional<FVector> Under = ErewhonPlaceables::FountainSnap(this, Kind, Location))
+		{
+			Storage->PlaceOnGround(*Under, Yaw);   // sous le bec de la fontaine
+		}
 		else
 		{
 			Storage->PlaceOnGround(Location, Yaw);
@@ -1660,6 +1789,7 @@ void AErewhonGameMode::CaptureObjects()
 		Saved.Slots = Storage->GetSlots();
 		Saved.SlotTimes = Storage->GetSlotTimes();
 		Saved.ExpiresAt = Storage->GetExpiresAt();
+		Saved.Water = Storage->GetWater();
 		FVector Location = Storage->GetActorLocation();
 		if (const APawn* Carrier = Storage->GetCarrier())
 		{
@@ -1698,6 +1828,10 @@ void AErewhonGameMode::SpawnSavedObjects()
 			Storage->SetSlotTimes(Saved.SlotTimes);
 		}
 		Storage->SetExpiresAt(Saved.ExpiresAt);
+		if (Saved.Water > 0.f)
+		{
+			Storage->SetWater(Saved.Water);
+		}
 		for (int32 i = 0; i < Saved.Slots.Num() && i < Storage->EditSlots().Num(); ++i)
 		{
 			Storage->EditSlots()[i] = Saved.Slots[i];

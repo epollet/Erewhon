@@ -70,7 +70,7 @@ namespace ErewhonApothecary
 	constexpr float ShelfDepth = 36.f;
 	constexpr float ShelfHeight = 190.f;
 
-	/** Ce qui se range sur les étagères : potions, bases et écrasés. */
+	/** Ce qui se range sur les étagères : potions, bases, écrasés, teintures et pots-pourris. */
 	EREWHON_API bool IsShelvable(const struct FItemDef& Def);
 
 	/** Hauteur du dessus d'un étage de l'étagère (0 : en bas). */

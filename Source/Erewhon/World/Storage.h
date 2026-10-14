@@ -52,11 +52,19 @@ namespace ErewhonPlaceables
 	 */
 	EREWHON_API bool CanPlaceAt(const UObject* WorldContext, const FString& PlayerKey, bool bCart, EStorageKind Kind, uint8 Type, const FVector& Location);
 
+	/** L'eau : un tonneau en tient 100 L (et rien d'autre tant qu'il en reste), le chaudron 10 L, une préparation au chaudron en boit 0,15 L. */
+	constexpr float WaterBarrelLiters = 100.f;
+	constexpr float CauldronLiters = 10.f;
+	constexpr float WaterPerBrew = 0.15f;
+
 	/** Temps de séchage d'une plante sur le séchoir, durée de vie d'un pot-pourri posé et de sa sérénité (s). */
 	constexpr double DryingSeconds = 240.0;
 	constexpr double PotpourriSeconds = 600.0;
 	constexpr double CalmSeconds = 300.0;
 	constexpr float PotpourriRadius = 600.f;
+
+	/** Un tonneau posé près du bec de la fontaine s'y cale : sa place exacte. */
+	EREWHON_API TOptional<FVector> FountainSnap(const UObject* WorldContext, EStorageKind Kind, const FVector& Location);
 
 	/** Un chaudron posé près d'une cheminée s'accroche à sa crémaillère : le repère du crochet. */
 	EREWHON_API TOptional<FTransform> HookFor(const UObject* WorldContext, EStorageKind Kind, const FVector& Location);
@@ -90,6 +98,9 @@ public:
 	const TArray<double>& GetSlotTimes() const { return SlotTimes; }
 	/** Pot-pourri : l'horloge du monde à laquelle il s'éteint. */
 	double GetExpiresAt() const { return ExpiresAt; }
+	/** Tonneau d'eau, chaudron : les litres d'eau qu'il contient. */
+	float GetWater() const { return Water; }
+	bool IsWaterBarrel() const { return Kind == EStorageKind::Barrel && Water > 0.01f; }
 	bool IsOwnedBy(const FString& Key) const { return !Key.IsEmpty() && Key == OwnerKey; }
 	const FString& GetOwnerKey() const { return OwnerKey; }
 	const FString& GetOwnerName() const { return OwnerName; }
@@ -115,6 +126,7 @@ public:
 	void Setup(EStorageKind InKind, const FString& InOwnerKey, const FString& InOwnerName);
 	void SetSlotTimes(const TArray<double>& Times) { SlotTimes = Times; }
 	void SetExpiresAt(double Time) { ExpiresAt = Time; }
+	void SetWater(float Liters);
 	TArray<FInventorySlot>& EditSlots() { return Slots; }
 	void Commit();
 	int32 StoreItem(FName ItemId, int32 Count);
@@ -136,6 +148,12 @@ private:
 
 	UFUNCTION()
 	void OnRep_Slots() { Commit(); }
+
+	UFUNCTION()
+	void OnRep_Water() { OnStorageChanged.Broadcast(); }
+
+	UPROPERTY(ReplicatedUsing = OnRep_Water)
+	float Water = 0.f;
 
 	/** Ce que montre le meuble : les flacons de l'étagère, les bouquets du séchoir. */
 	void RefreshDisplay();

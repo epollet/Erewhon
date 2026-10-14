@@ -108,6 +108,7 @@ void AErewhonGameState::SpawnLocalWorldActors()
 	SpawnCabin(EShopKind::GeneralStore);
 	SpawnCabin(EShopKind::SectorManager);
 	ApplyVillage();
+	World->SpawnActor<AFountain>(Params);   // la fontaine de la place : elle arrête aussi le joueur sur le serveur
 	if (GetNetMode() != NM_DedicatedServer)
 	{
 		World->SpawnActor<ACelestialSystem>(Params);

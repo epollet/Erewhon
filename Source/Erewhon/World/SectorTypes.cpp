@@ -29,18 +29,55 @@ namespace ErewhonSector
 		return FString::Printf(TEXT("%d:%d"), Sector.X, Sector.Y);
 	}
 
-	ESectorType TypeAt(const FIntPoint& Sector, int32 /*WorldSeed*/)
+	namespace
+	{
+		/**
+		 * Les bois : un bruit doux à l'échelle de quelques secteurs, propre à chaque monde. Jamais sur
+		 * la place, les routes, ni tout près du village.
+		 */
+		bool IsWooded(const FIntPoint& Sector, int32 WorldSeed)
+		{
+			if (Sector == FIntPoint::ZeroValue || IsRoad(Sector) || FMath::Max(FMath::Abs(Sector.X), FMath::Abs(Sector.Y)) < 2)
+			{
+				return false;
+			}
+			FRandomStream Rand(HashCombine(GetTypeHash(WorldSeed), 0x7F0E57u));
+			const FVector2D Offset(Rand.FRandRange(-500.f, 500.f), Rand.FRandRange(-500.f, 500.f));
+			const FVector2D Offset2(Rand.FRandRange(-500.f, 500.f), Rand.FRandRange(-500.f, 500.f));
+			const FVector2D P(Sector.X, Sector.Y);
+			const float Noise = FMath::PerlinNoise2D(P * 0.21f + Offset) + 0.35f * FMath::PerlinNoise2D(P * 0.53f + Offset2);
+			return Noise > 0.12f;
+		}
+	}
+
+	ESectorType TypeAt(const FIntPoint& Sector, int32 WorldSeed)
 	{
 		if (Sector == FIntPoint::ZeroValue)
 		{
 			return ESectorType::Spawn;
 		}
-		return IsRoad(Sector) ? ESectorType::Road : ESectorType::Prairie;
+		if (IsRoad(Sector))
+		{
+			return ESectorType::Road;
+		}
+		if (!IsWooded(Sector, WorldSeed))
+		{
+			return ESectorType::Prairie;
+		}
+		// Au cœur des bois, la forêt ; au bord (un voisin qui n'est pas boisé), la lisière.
+		for (const FIntPoint& Side : Sides)
+		{
+			if (!IsWooded(Sector + Side, WorldSeed))
+			{
+				return ESectorType::Edge;
+			}
+		}
+		return ESectorType::Forest;
 	}
 
 	bool IsPurchasable(const FIntPoint& Sector)
 	{
-		return TypeAt(Sector, 0) == ESectorType::Prairie;
+		return Sector != FIntPoint::ZeroValue && !IsRoad(Sector);
 	}
 
 	FText SideLabel(int32 Side)
@@ -61,6 +98,8 @@ namespace ErewhonSector
 		case ESectorType::Spawn:   return LOCTEXT("Spawn", "Place du village");
 		case ESectorType::Prairie: return LOCTEXT("Prairie", "Prairie");
 		case ESectorType::Road:    return LOCTEXT("Road", "Route");
+		case ESectorType::Edge:    return LOCTEXT("Edge", "Lisière");
+		case ESectorType::Forest:  return LOCTEXT("Forest", "Forêt");
 		default:                   return LOCTEXT("Undefined", "Inconnu");
 		}
 	}

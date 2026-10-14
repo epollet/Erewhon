@@ -179,7 +179,16 @@ TSharedRef<SWidget> SStorePanel::BuildSectors()
 				: !Owner ? ESectorState::Free
 				: *Owner == State->GetPlayerKey() ? ESectorState::Mine : ESectorState::Private;
 			const bool bSelected = Sector == Selected;
-			const FLinearColor Fill = StateColor(TileState);
+			// Libre : la couleur du pays (prairie claire, lisière plus verte, forêt sombre).
+			FLinearColor Fill = StateColor(TileState);
+			if (TileState == ESectorState::Free && Type == ESectorType::Edge)
+			{
+				Fill = Mix(Leaf, Ink, 0.25f);
+			}
+			else if (TileState == ESectorState::Free && Type == ESectorType::Forest)
+			{
+				Fill = Mix(Leaf, Ink, 0.5f);
+			}
 
 			FText Glyph;
 			if (Type == ESectorType::Spawn)
@@ -240,6 +249,10 @@ TSharedRef<SWidget> SStorePanel::BuildSectors()
 					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[Legend(ESectorState::Mine, LOCTEXT("LegendMine", "À vous"))]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[Legend(ESectorState::Private, LOCTEXT("LegendPrivate", "Privé"))]
 					+ SHorizontalBox::Slot().AutoWidth()[Legend(ESectorState::Public, LOCTEXT("LegendPublic", "Public"))]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+				[
+					SNew(STextBlock).Text(LOCTEXT("LegendWoods", "Libre plus sombre : lisière, puis forêt")).Font(Font(9)).ColorAndOpacity(MutedInk)
 				],
 				10.f)
 		]
@@ -284,9 +297,12 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 		{
 			bNearRoad |= ErewhonSector::IsRoad(Sector + Side);
 		}
+		const FText Land = Type == ESectorType::Forest ? LOCTEXT("LandForest", "Un coin de forêt, plein d'arbres et de champignons.")
+			: Type == ESectorType::Edge ? LOCTEXT("LandEdge", "Une lisière : quelques arbres, des arbustes, la prairie tout près.")
+			: LOCTEXT("LandPrairie", "Une belle prairie, rien que pour vous.");
 		Status = bNearRoad
-			? LOCTEXT("StatusFreeRoad", "Une belle prairie au bord de la route. Je pourrai vous y tracer un chemin d'accès.")
-			: LOCTEXT("StatusFree", "Une prairie libre, rien que pour vous.");
+			? FText::Format(LOCTEXT("StatusFreeRoad", "{0} Elle borde la route : je pourrai vous y tracer un chemin d'accès."), Land)
+			: Land;
 		const bool bAfford = State->GetCoins() >= Settings.SectorBuyPrice;
 		Action = Button(FText::Format(LOCTEXT("Buy", "Acheter · {0}"), CoinsText(Settings.SectorBuyPrice)),
 			[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerBuySector(Sector); } }, EButton::Primary, bAfford, 200.f);
@@ -356,7 +372,7 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 			}
 		}
 		// L'apothicairerie, au centre d'une prairie.
-		if (Type == ESectorType::Prairie)
+		if (ErewhonSector::IsPurchasable(Sector))
 		{
 			const bool bBuilt = (World->GetBuildings(Sector) & ESectorBuilding::Apothecary) != 0;
 			TSharedRef<SWidget> BuildAction = bBuilt

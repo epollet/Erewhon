@@ -69,7 +69,8 @@ namespace ErewhonApothecary
 
 	bool IsShelvable(const FItemDef& Def)
 	{
-		return Def.IsPotion() || Def.Id == TEXT("potion_base") || Def.Id.ToString().StartsWith(TEXT("crushed_"));
+		const FString Id = Def.Id.ToString();
+		return Def.IsPotion() || Id == TEXT("potion_base") || Id == TEXT("potpourri") || Id.StartsWith(TEXT("crushed_")) || Id.StartsWith(TEXT("dye_"));
 	}
 
 	float ShelfRowZ(int32 Row)

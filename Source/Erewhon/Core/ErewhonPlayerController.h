@@ -185,6 +185,12 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerStopCraft();
 
+	UFUNCTION(Server, Reliable)
+	void ServerFillCauldron(class AStorageActor* Cauldron);
+
+	UFUNCTION(Server, Reliable)
+	void ServerEmptyWater(class AStorageActor* Barrel);
+
 	/** La remise de l'apothicairerie. */
 	UFUNCTION(Server, Reliable)
 	void ServerBuyStoreroom(FIntPoint Sector);

@@ -1,4 +1,5 @@
 #include "World/SectorManager.h"
+#include "World/Terrain.h"
 
 #include "Core/ErewhonGameState.h"
 #include "Core/ErewhonSettings.h"
@@ -142,11 +143,28 @@ void ASectorManager::Refresh()
 		: ErewhonSector::Center(FIntPoint::ZeroValue);
 	if (FarGround)
 	{
-		// Recentrée par pas d'un secteur : la texture, projetée sur le monde, ne glisse pas.
-		const FVector Snap = ErewhonSector::Center(ErewhonSector::FromWorld(Focus));
-		if (!GetActorLocation().Equals(FVector(Snap.X, Snap.Y, 0.f)))
+		// Recentrée par pas d'un secteur : la texture, projetée sur le monde, ne glisse pas. Elle passe juste
+		// sous le point le plus bas des secteurs affichés (leurs coins), pour ne jamais percer le sol d'un creux.
+		const FIntPoint Here = ErewhonSector::FromWorld(Focus);
+		const FVector Snap = ErewhonSector::Center(Here);
+		if (Here != FarGroundSector || !bFarGroundPlaced)
 		{
-			SetActorLocation(FVector(Snap.X, Snap.Y, 0.f));
+			FarGroundSector = Here;
+			bFarGroundPlaced = true;
+			float Lowest = 0.f;
+			const float Size = Settings.SectorSize();
+			for (int32 DY = -ViewDistance; DY <= ViewDistance + 1; ++DY)
+			{
+				for (int32 DX = -ViewDistance; DX <= ViewDistance + 1; ++DX)
+				{
+					const FVector2D Corner(FVector2D(ErewhonSector::Origin(Here + FIntPoint(DX, DY))));
+					for (const FVector2D& Probe : { Corner, Corner + FVector2D(Size * 0.5f, Size * 0.5f) })
+					{
+						Lowest = FMath::Min(Lowest, ErewhonTerrain::Height(Probe, State->GetWorldSeed()));
+					}
+				}
+			}
+			SetActorLocation(FVector(Snap.X, Snap.Y, FMath::Min(0.f, Lowest - 150.f)));
 		}
 	}
 	TArray<FIntPoint> Pending;

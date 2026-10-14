@@ -31,6 +31,16 @@ namespace ErewhonVillage
 	/** Places assises des bancs de la place (monde) : dessus du siège, regard vers la place. */
 	EREWHON_API const TArray<FTransform>& BenchSeats();
 
+	/**
+	 * La fontaine de la place, au sud-ouest du General Store, son bec tourné vers l'allée du sud : son repère,
+	 * l'endroit où poser un tonneau pour le remplir (monde), et le débit (litres par seconde, à 1 C le litre).
+	 */
+	EREWHON_API FTransform FountainTransform();
+	EREWHON_API FVector FountainBarrelSpot();
+	/** Un tonneau posé là (ou tout près) va sous le bec : c'est permis à tous, bien que la place soit publique. */
+	constexpr float FountainSnapRadius = 140.f;
+	constexpr float FountainLitersPerSecond = 5.f;
+
 	/** Lanterne sur poteau (bWall = false) ou en applique (bWall = true), qui s'allume la nuit. Yaw : direction du bras. */
 	EREWHON_API void AddLantern(AActor* Owner, USceneComponent* Parent, const FVector& Location, float Yaw, bool bWall);
 }
@@ -57,6 +67,26 @@ private:
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Root;
+};
+
+/** La fontaine de la place (acteur local) : de l'eau qui coule toujours ; un tonneau posé sous le bec s'y remplit. */
+UCLASS()
+class EREWHON_API AFountain : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	AFountain();
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+
+private:
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<USceneComponent> Root;
+
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Stream;
+	UPROPERTY(Transient) TObjectPtr<class UAudioComponent> Pour;
+	float Time = 0.f;
 };
 
 /** Un banc de la place : on s'y assoit avec E. */

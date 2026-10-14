@@ -512,6 +512,22 @@ void AErewhonPlayerController::ServerStartCraft_Implementation(AStorageActor* St
 	}
 }
 
+void AErewhonPlayerController::ServerFillCauldron_Implementation(AStorageActor* Cauldron)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryFillCauldron(this, Cauldron));
+	}
+}
+
+void AErewhonPlayerController::ServerEmptyWater_Implementation(AStorageActor* Barrel)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryEmptyWater(this, Barrel));
+	}
+}
+
 void AErewhonPlayerController::ServerBuyStoreroom_Implementation(FIntPoint Sector)
 {
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())

@@ -28,6 +28,24 @@ struct FBushInstance
 	int32 Kind = 0;       // index dans UErewhonSettings::DecorPlants
 };
 
+/** Un grand arbre de lisière ou de forêt : son tronc arrête le joueur, donc le serveur le connaît aussi. */
+struct FTreeInstance
+{
+	FVector Location = FVector::ZeroVector;
+	float Height = 0.f;   // cm
+	float Yaw = 0.f;
+	int32 Model = 0;      // index dans ErewhonForest::TreeModels
+	float Girth = 1.f;    // élargissement de la couronne et du tronc
+};
+
+/** Les modèles d'arbres des bois. */
+namespace ErewhonForest
+{
+	inline const TCHAR* const TreeModels[] = { TEXT("SM_tree_pine"), TEXT("SM_tree_beech"), TEXT("SM_tree_oak"), TEXT("SM_tree_linden") };
+	constexpr int32 TreeModelCount = 4;
+	constexpr float TrunkRadius = 35.f;
+}
+
 /** Une place ou une clairière de terre, au bord irrégulier. */
 struct FClearing
 {
@@ -57,6 +75,9 @@ struct EREWHON_API FSectorLayout
 	TArray<FPlantInstance> Plants;
 
 	TArray<FBushInstance> Bushes;
+
+	/** Les grands arbres (lisière, forêt). */
+	TArray<FTreeInstance> Trees;
 
 	/** Chemins de terre (cœur du chemin, avant le fondu des bords). */
 	TArray<FBox2D> Paths;
@@ -145,6 +166,7 @@ public:
 private:
 	TSharedRef<FSectorLayout> Build(const FIntPoint& Sector, int32 WorldSeed) const;
 	void BuildBushes(FSectorLayout& Layout, int32 WorldSeed) const;
+	void BuildTrees(FSectorLayout& Layout, int32 WorldSeed) const;
 	void BuildAccessPaths(FSectorLayout& Layout) const;
 
 	TMap<FIntPoint, TSharedRef<FSectorLayout>> Cache;

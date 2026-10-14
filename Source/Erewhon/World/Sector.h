@@ -53,6 +53,7 @@ private:
 	void BuildPlants();
 	void BuildDecor();
 	void BuildBushes();
+	void BuildTrees(bool bVisual);
 	void BuildSignposts();
 	static UStaticMesh* LoadDecorMesh(const struct FDecorPlant& Plant);
 	UTexture2D* BuildDirtMask() const;

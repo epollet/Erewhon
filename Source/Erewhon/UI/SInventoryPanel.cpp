@@ -455,6 +455,38 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 	}
 	if (const AStorageActor* Opened = OpenedStorage.Get())
 	{
+		if (Opened->IsWaterBarrel())
+		{
+			// Un tonneau d'eau ne tient que l'eau : sa jauge, et de quoi le vider.
+			TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
+			TWeakObjectPtr<AStorageActor> WeakBarrel = const_cast<AStorageActor*>(Opened);
+			return SNew(SBox).WidthOverride(ColumnWidth(5))
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+					[
+						SNew(STextBlock).Text(LOCTEXT("WaterBarrel", "Tonneau d'eau")).Font(Font(11, true)).ColorAndOpacity(Sky)
+					]
+					+ SVerticalBox::Slot().AutoHeight()[Separator()]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 10)
+					[
+						SNew(STextBlock)
+						.Text(FText::Format(LOCTEXT("WaterLevel", "{0} L / {1} L"), FText::AsNumber(FMath::FloorToInt32(Opened->GetWater())),
+							FText::AsNumber(FMath::RoundToInt32(ErewhonPlaceables::WaterBarrelLiters))))
+						.Font(Font(16, true)).ColorAndOpacity(Ink)
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
+					[
+						SNew(STextBlock).Text(LOCTEXT("WaterHint", "Il ne tient que l'eau. Posé sous le bec de la fontaine de la place, il se remplit (1 C le litre). Le chaudron y puise."))
+						.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
+					]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left)
+					[
+						Button(LOCTEXT("EmptyWater", "Vider le tonneau"),
+							[WeakController, WeakBarrel]() { if (WeakController.IsValid()) { WeakController->ServerEmptyWater(WeakBarrel.Get()); } }, EButton::Danger, true, 160.f, 11)
+					]
+				];
+		}
 		// Cagette ou tonneau : des plantes seulement, sur 3 ou 5 colonnes.
 		const int32 Columns = Opened->GetKind() == EStorageKind::Barrel ? 5 : GBagColumns;
 		TSharedRef<SUniformGridPanel> Grid = SNew(SUniformGridPanel).SlotPadding(3.f);

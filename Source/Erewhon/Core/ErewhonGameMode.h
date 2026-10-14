@@ -44,6 +44,12 @@ public:
 	FText TryStartCraft(AErewhonPlayerController* Controller, class AStorageActor* Station, FName Output, int32 Count);
 	FText TryBuyStoreroom(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 
+	// L'eau
+	/** Le chaudron puise dans les tonneaux d'eau tout proches, jusqu'à 10 L. */
+	FText TryFillCauldron(AErewhonPlayerController* Controller, class AStorageActor* Cauldron);
+	/** Vide un tonneau d'eau : il redevient un tonneau ordinaire. */
+	FText TryEmptyWater(AErewhonPlayerController* Controller, class AStorageActor* Barrel);
+
 	// Sac à dos
 	FText TryDropBackpack(AErewhonPlayerController* Controller);
 	FText TryPickUpBackpack(AErewhonPlayerController* Controller, class ABackpack* Backpack);
@@ -99,6 +105,11 @@ private:
 
 	UPROPERTY()
 	TMap<FIntPoint, TObjectPtr<class AApothecary>> Apothecaries;
+
+	/** La fontaine remplit les tonneaux posés sous son bec, à 1 C le litre payé par leur propriétaire. */
+	void FillAtFountain();
+	FTimerHandle FountainTimer;
+	TSet<TWeakObjectPtr<class AStorageActor>> BrokeAtFountain;
 
 	UPROPERTY()
 	TObjectPtr<UErewhonWorldSave> WorldSave;
