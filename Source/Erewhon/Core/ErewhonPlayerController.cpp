@@ -1,4 +1,8 @@
 #include "Core/ErewhonPlayerController.h"
+#include "UI/SBhurakPanel.h"
+#include "World/DroppedItem.h"
+#include "World/Bhurak.h"
+#include "Core/ErewhonPlayerState.h"
 
 #include "Core/ErewhonGameMode.h"
 #include "Engine/GameViewportClient.h"
@@ -123,6 +127,7 @@ const FErewhonInputActions& AErewhonPlayerController::GetInputActions()
 	Actions.Jump = MakeAction(this, TEXT("IA_Jump"), EInputActionValueType::Boolean);
 	Actions.Run = MakeAction(this, TEXT("IA_Run"), EInputActionValueType::Boolean);
 	Actions.Primary = MakeAction(this, TEXT("IA_Primary"), EInputActionValueType::Boolean);
+	Actions.Secondary = MakeAction(this, TEXT("IA_Secondary"), EInputActionValueType::Boolean);
 	Actions.Inventory = MakeAction(this, TEXT("IA_Inventory"), EInputActionValueType::Boolean);
 	Actions.CloseMenu = MakeAction(this, TEXT("IA_CloseMenu"), EInputActionValueType::Boolean);
 	Actions.Use = MakeAction(this, TEXT("IA_Use"), EInputActionValueType::Boolean);
@@ -130,6 +135,10 @@ const FErewhonInputActions& AErewhonPlayerController::GetInputActions()
 	Actions.Bag = MakeAction(this, TEXT("IA_Bag"), EInputActionValueType::Boolean);
 	Actions.Stash = MakeAction(this, TEXT("IA_Stash"), EInputActionValueType::Boolean);
 	Actions.View = MakeAction(this, TEXT("IA_View"), EInputActionValueType::Boolean);
+	Actions.Hotbar1 = MakeAction(this, TEXT("IA_Hotbar1"), EInputActionValueType::Boolean);
+	Actions.Hotbar2 = MakeAction(this, TEXT("IA_Hotbar2"), EInputActionValueType::Boolean);
+	Actions.Hotbar3 = MakeAction(this, TEXT("IA_Hotbar3"), EInputActionValueType::Boolean);
+	Actions.HotbarScroll = MakeAction(this, TEXT("IA_HotbarScroll"), EInputActionValueType::Axis1D);
 
 	// ZQSD (AZERTY) et WASD (QWERTY) coexistent sans conflit : Z/W avancent, Q/A vont à gauche.
 	for (const FKey& Key : { EKeys::Z, EKeys::W, EKeys::Up })
@@ -159,6 +168,7 @@ const FErewhonInputActions& AErewhonPlayerController::GetInputActions()
 	Context->MapKey(Actions.Jump, EKeys::SpaceBar);
 	Context->MapKey(Actions.Run, EKeys::LeftShift);
 	Context->MapKey(Actions.Primary, EKeys::LeftMouseButton);
+	Context->MapKey(Actions.Secondary, EKeys::RightMouseButton);
 	Context->MapKey(Actions.Inventory, EKeys::I);
 	Context->MapKey(Actions.Inventory, EKeys::Tab);
 	Context->MapKey(Actions.CloseMenu, EKeys::Escape);
@@ -167,6 +177,20 @@ const FErewhonInputActions& AErewhonPlayerController::GetInputActions()
 	Context->MapKey(Actions.Bag, EKeys::F);
 	Context->MapKey(Actions.Stash, EKeys::G);
 	Context->MapKey(Actions.View, EKeys::V);
+	// La rangée des chiffres : en AZERTY, sans Maj, elle donne & é " — on accepte les deux.
+	for (const FKey& Key : { EKeys::One, EKeys::NumPadOne, EKeys::Ampersand })
+	{
+		Context->MapKey(Actions.Hotbar1, Key);
+	}
+	for (const FKey& Key : { EKeys::Two, EKeys::NumPadTwo, EKeys::E_AccentAigu })
+	{
+		Context->MapKey(Actions.Hotbar2, Key);
+	}
+	for (const FKey& Key : { EKeys::Three, EKeys::NumPadThree, EKeys::Quote })
+	{
+		Context->MapKey(Actions.Hotbar3, Key);
+	}
+	Context->MapKey(Actions.HotbarScroll, EKeys::MouseWheelAxis);
 	return Actions;
 }
 
@@ -311,6 +335,10 @@ void AErewhonPlayerController::NextAutoShot()
 			else if (ShotMenu == TEXT("cheats")) { OpenCheats(); }
 			else if (ShotMenu == TEXT("village")) { StoreKind = EShopKind::SectorManager; ShowMenu(SNew(SStorePanel).Controller(this).Kind(EShopKind::SectorManager).bVillageTab(true), true); }
 			else if (ShotMenu == TEXT("inventory")) { ToggleInventory(); }
+			else if (ShotMenu == TEXT("split")) { ToggleInventory(); if (OpenMenu.IsValid() || PendingMenu.IsValid()) { StaticCastSharedPtr<SInventoryPanel>(OpenMenu.IsValid() ? OpenMenu : PendingMenu)->TestSplitChooser(); } }
+			else if (ShotMenu == TEXT("breeder")) { OpenStore(EShopKind::Breeder); }
+			else if (ShotMenu == TEXT("workshop")) { OpenStore(EShopKind::Workshop); }
+			else if (ShotMenu == TEXT("bhurak")) { for (TActorIterator<ABhurak> It(GetWorld()); It; ++It) { OpenBhurak(*It); break; } }
 			else if (ShotMenu == TEXT("shelves") || ShotMenu == TEXT("mortar") || ShotMenu == TEXT("cauldron") || ShotMenu == TEXT("book"))
 			{
 				// Le premier meuble de ce genre.
@@ -319,7 +347,20 @@ void AErewhonPlayerController::NextAutoShot()
 					OpenBook();
 				}
 				const EStorageKind Wanted = ShotMenu == TEXT("shelves") ? EStorageKind::Shelf : ShotMenu == TEXT("mortar") ? EStorageKind::Mortar : EStorageKind::Cauldron;
+				// Le chaudron le plus rempli d'abord (on peut en avoir plusieurs).
+				AStorageActor* Fullest = nullptr;
 				for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It)
+				{
+					if (It->GetKind() == EStorageKind::Cauldron && (!Fullest || It->GetWater() > Fullest->GetWater()))
+					{
+						Fullest = *It;
+					}
+				}
+				if (Wanted == EStorageKind::Cauldron && Fullest && ShotMenu != TEXT("book"))
+				{
+					OpenCauldron(Fullest);
+				}
+				else for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It)
 				{
 					if (It->GetKind() == Wanted)
 					{
@@ -330,6 +371,14 @@ void AErewhonPlayerController::NextAutoShot()
 						Wanted == EStorageKind::Shelf ? OpenStorage(*It) : Wanted == EStorageKind::Cauldron ? OpenCauldron(*It) : OpenApothecary(*It, static_cast<uint8>(ErewhonApothecary::ECraft::Mortar));
 						break;
 					}
+				}
+			}
+			else if (ShotMenu == TEXT("unstuck"))
+			{
+				ServerUnstuck();
+				if (AErewhonCharacter* Me = GetPawn<AErewhonCharacter>())
+				{
+					Me->CycleView();
 				}
 			}
 			else if (ShotMenu == TEXT("behind") || ShotMenu == TEXT("front"))
@@ -576,6 +625,96 @@ void AErewhonPlayerController::ServerChooseClass_Implementation(uint8 NewClass)
 	}
 }
 
+void AErewhonPlayerController::ServerBuyField_Implementation(FIntPoint Sector, uint8 Which)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryBuyField(this, Sector, Which));
+	}
+}
+
+void AErewhonPlayerController::ServerWorkField_Implementation(FIntPoint Sector, int32 Cell, uint8 Corner)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryWorkField(this, Sector, Cell, Corner));
+	}
+}
+
+void AErewhonPlayerController::ServerRideBhurak_Implementation(ABhurak* Bhurak)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryRideBhurak(this, Bhurak));
+	}
+}
+
+void AErewhonPlayerController::ServerHitchBhurak_Implementation(ABhurak* Bhurak)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryHitchBhurak(this, Bhurak));
+	}
+}
+
+void AErewhonPlayerController::ServerEquipBhurak_Implementation(ABhurak* Bhurak, uint8 Slot, FName Item)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryEquipBhurak(this, Bhurak, Slot, Item));
+	}
+}
+
+void AErewhonPlayerController::ServerToggleImplement_Implementation(ACart* Implement)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryToggleImplement(this, Implement));
+	}
+}
+
+void AErewhonPlayerController::ServerSplitMove_Implementation(bool bFromOther, int32 From, bool bToOther, int32 To, int32 Count, AStorageActor* Storage, ACart* Cart)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TrySplitMove(this, bFromOther, From, bToOther, To, Count, Storage, Cart));
+	}
+}
+
+void AErewhonPlayerController::ServerPickUpDropped_Implementation(ADroppedItem* Dropped)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryPickUpDropped(this, Dropped));
+	}
+}
+
+void AErewhonPlayerController::OpenBhurak(ABhurak* Bhurak)
+{
+	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	if (!Bhurak || !State)
+	{
+		return;
+	}
+	if (!Bhurak->IsOwnedBy(State->GetPlayerKey()))
+	{
+		ShowToast(FText::Format(NSLOCTEXT("ErewhonPC", "OthersBhurak", "Le bhurak de {0}."), FText::FromString(Bhurak->GetOwnerName())));
+		return;
+	}
+	OpenedBhurak = Bhurak;
+	TSharedRef<SBhurakPanel> Panel = SNew(SBhurakPanel).Controller(this).Bhurak(Bhurak);
+	BhurakWidget = Panel;
+	ShowMenu(Panel, false);
+}
+
+void AErewhonPlayerController::ServerScythe_Implementation()
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryScythe(this));
+	}
+}
+
 void AErewhonPlayerController::OpenCauldron(AStorageActor* Cauldron)
 {
 	OpenedStation = Cauldron;
@@ -594,6 +733,14 @@ void AErewhonPlayerController::ServerEmptyWater_Implementation(AStorageActor* Ba
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
 	{
 		ReportResult(Mode->TryEmptyWater(this, Barrel));
+	}
+}
+
+void AErewhonPlayerController::ServerUnstuck_Implementation()
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->Unstuck(this));
 	}
 }
 
@@ -621,6 +768,17 @@ void AErewhonPlayerController::PlayerTick(float DeltaTime)
 	{
 		OpenedStation.Reset();
 		CloseMenu();
+	}
+
+	// Le harnachement du bhurak : il se ferme si l'on s'éloigne, ou si on l'a repris.
+	if (OpenMenu.IsValid() && OpenMenu == BhurakWidget.Pin())
+	{
+		const APawn* Groom = GetPawn();
+		if (!OpenedBhurak.IsValid() || (Groom && FVector::Dist2D(Groom->GetActorLocation(), OpenedBhurak->GetActorLocation()) > OpenedBhurak->GetHalfLength() + 550.f))
+		{
+			OpenedBhurak.Reset();
+			CloseMenu();
+		}
 	}
 
 	// On ne repart pas avec la boutique ouverte, ni avec un sac posé derrière soi.

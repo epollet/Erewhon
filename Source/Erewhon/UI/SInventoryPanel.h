@@ -35,6 +35,8 @@ public:
 	void Construct(const FArguments& InArgs);
 
 	virtual bool SupportsKeyboardFocus() const override { return true; }
+	/** Captures : ouvre le sélecteur « combien ? » sur la première pile des poches. */
+	void TestSplitChooser();
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 
 private:
@@ -56,6 +58,10 @@ private:
 	TWeakObjectPtr<class AStorageActor> OpenedStorage;
 	TWeakObjectPtr<class ACart> OpenedCart;
 	TSharedPtr<SBox> Body;
+	TSharedPtr<SBox> HeldIcon;
+	/** La petite fenêtre « combien ? », au milieu du panneau, et sa case de saisie. */
+	TSharedPtr<SBox> ChooserHost;
+	TSharedPtr<class SEditableTextBox> ChooserEntry;
 
 	/** Les cases affichées, pour savoir laquelle est survolée (touche A). */
 	struct FSlotRef { TWeakPtr<SWidget> Widget; bool bBag = false; int32 Index = INDEX_NONE; };
@@ -63,4 +69,28 @@ private:
 
 	/** Outil en attente de confirmation avant d'être jeté. */
 	TOptional<FSlotRef> PendingDiscard;
+
+	/**
+	 * Diviser une pile (clic droit) : on choisit combien (la moitié d'abord), puis la nouvelle pile suit la souris
+	 * jusqu'à ce qu'on clique sur une case (clic droit ou Échap : on renonce).
+	 */
+	struct FSplit
+	{
+		bool bFromOther = false;
+		int32 From = INDEX_NONE;
+		int32 Count = 1;
+		int32 Max = 1;
+		bool bHolding = false;
+	};
+	TOptional<FSplit> Split;
+	/** Clic droit : la moitié de la pile part sous la souris ; avec Maj, on choisit d'abord combien. */
+	void BeginSplit(bool bFromOther, int32 SlotIndex, bool bChoose);
+	void ConfirmSplit();
+	/** Pose la pile tenue dans cette case ; vrai si une pile était tenue. */
+	bool DropSplit(bool bToOther, int32 SlotIndex);
+	/** Pose un seul exemplaire de la pile tenue dans cette case (clic droit). */
+	void DropOne(bool bToOther, int32 SlotIndex);
+	TSharedRef<SWidget> BuildSplitChooser() const;
+	FGeometry PanelGeometry;
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 };

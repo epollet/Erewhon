@@ -77,6 +77,19 @@ bool UInventoryComponent::CanStore(FName ItemId, int32 Count) const
 	return false;
 }
 
+float UInventoryComponent::GetTotalWeight() const
+{
+	float Total = 0.f;
+	for (const FInventorySlot& Slot : Slots)
+	{
+		if (const FItemDef* Def = Slot.IsEmpty() ? nullptr : FindDef(Slot.ItemId))
+		{
+			Total += Def->GetWeight() * Slot.Count;
+		}
+	}
+	return Total;
+}
+
 int32 UInventoryComponent::FindFreeSlot(ESlotKind Kind, EClothingSlot ProvidedByToAvoid) const
 {
 	for (int32 i = 0; i < Slots.Num(); ++i)
@@ -180,8 +193,28 @@ bool UInventoryComponent::IsStructureValid(const TArray<FInventorySlot>& Candida
 	return true;
 }
 
-void UInventoryComponent::RestoreSlots(const TArray<FInventorySlot>& Saved)
+void UInventoryComponent::RestoreSlots(const TArray<FInventorySlot>& InSaved)
 {
+	// Une sauvegarde d'avant la barre (moins d'emplacements d'équipement) : on ajoute les emplacements manquants.
+	TArray<FInventorySlot> Saved = InSaved;
+	{
+		int32 Last = INDEX_NONE;
+		int32 Count = 0;
+		for (int32 i = 0; i < Saved.Num(); ++i)
+		{
+			if (Saved[i].Kind == ESlotKind::Equipment && Saved[i].ProvidedBy == EClothingSlot::None)
+			{
+				Last = i;
+				++Count;
+			}
+		}
+		for (; Last != INDEX_NONE && Count < UErewhonSettings::Get().BaseEquipmentSlots; ++Count)
+		{
+			FInventorySlot Extra;
+			Extra.Kind = ESlotKind::Equipment;
+			Saved.Insert(Extra, ++Last);
+		}
+	}
 	if (IsStructureValid(Saved))
 	{
 		Slots = Saved;
@@ -315,7 +348,7 @@ FText UInventoryComponent::UseSlot(int32 SlotIndex)
 		{
 			return FText::GetEmpty();
 		}
-		Character->DrinkPotion(Def->PotionEffect);
+		Character->DrinkPotion(Def->PotionEffect, Def->PotionSeconds);
 		if (--Slots[SlotIndex].Count <= 0)
 		{
 			Slots[SlotIndex].Clear();
@@ -335,11 +368,24 @@ FText UInventoryComponent::EquipFrom(int32 SlotIndex, const FItemDef& Def)
 {
 	if (Def.IsEquipable())
 	{
-		int32 Target = FindFreeSlot(ESlotKind::Equipment);
+		int32 Target = HandSlotIndex();
+		if (!Slots.IsValidIndex(Target) || !Slots[Target].IsEmpty())
+		{
+			Target = INDEX_NONE;
+			for (int32 Hotbar = 0; Hotbar < GetHotbarSize() && Target == INDEX_NONE; ++Hotbar)
+			{
+				const int32 Index = HotbarSlotIndex(Hotbar);
+				Target = Slots.IsValidIndex(Index) && Slots[Index].IsEmpty() ? Index : INDEX_NONE;
+			}
+		}
+		if (Target == INDEX_NONE)
+		{
+			Target = FindFreeSlot(ESlotKind::Equipment);
+		}
 		if (Target == INDEX_NONE)
 		{
 			// Tout est occupé : l'objet prend la place de celui qu'on tient en main.
-			Target = Slots.IndexOfByPredicate([](const FInventorySlot& S) { return S.Kind == ESlotKind::Equipment; });
+			Target = HandSlotIndex();
 		}
 		if (Target == INDEX_NONE)
 		{
@@ -403,6 +449,78 @@ FText UInventoryComponent::UnequipFrom(int32 SlotIndex, const FItemDef& Def)
 	return FText::GetEmpty();
 }
 
+int32 UInventoryComponent::GetHotbarSize() const
+{
+	return UErewhonSettings::Get().BaseEquipmentSlots;
+}
+
+int32 UInventoryComponent::HotbarSlotIndex(int32 Hotbar) const
+{
+	int32 Seen = 0;
+	for (int32 i = 0; i < Slots.Num(); ++i)
+	{
+		if (Slots[i].Kind == ESlotKind::Equipment && Slots[i].ProvidedBy == EClothingSlot::None && Seen++ == Hotbar)
+		{
+			return i;
+		}
+	}
+	return INDEX_NONE;
+}
+
+void UInventoryComponent::SelectHotbar(int32 Hotbar)
+{
+	if (Hotbar >= 0 && Hotbar < GetHotbarSize() && Hotbar != ActiveHotbar)
+	{
+		ActiveHotbar = Hotbar;
+		Commit();
+	}
+}
+
+void UInventoryComponent::ServerMoveSlot_Implementation(int32 From, int32 To)
+{
+	if (!Slots.IsValidIndex(From) || !Slots.IsValidIndex(To) || From == To || Slots[From].IsEmpty())
+	{
+		return;
+	}
+	FInventorySlot& Source = Slots[From];
+	FInventorySlot& Target = Slots[To];
+	// Ni vêtements ni poches de vêtement par ce chemin ; dans la barre, seulement ce qui s'équipe.
+	if (Source.Kind == ESlotKind::Clothing || Target.Kind == ESlotKind::Clothing)
+	{
+		return;
+	}
+	const FItemDef* SourceDef = FindDef(Source.ItemId);
+	const FItemDef* TargetDef = Target.IsEmpty() ? nullptr : FindDef(Target.ItemId);
+	const auto Fits = [](const FInventorySlot& Into, const FItemDef* Def) { return !Def || Into.Kind != ESlotKind::Equipment || Def->IsEquipable(); };
+	if (!SourceDef || !Fits(Target, SourceDef) || !Fits(Source, TargetDef))
+	{
+		ClientInventoryMessage(LOCTEXT("NotEquipable", "Seuls les outils et ce qui se tient en main vont dans la barre."));
+		return;
+	}
+	if (TargetDef && TargetDef == SourceDef && Target.Count < SourceDef->MaxStack)
+	{
+		// La même chose : on complète la pile.
+		const int32 Moved = FMath::Min(Source.Count, SourceDef->MaxStack - Target.Count);
+		Target.Count += Moved;
+		Source.Count -= Moved;
+		if (Source.Count <= 0)
+		{
+			Source.Clear();
+		}
+	}
+	else
+	{
+		Swap(Source.ItemId, Target.ItemId);
+		Swap(Source.Count, Target.Count);
+	}
+	Commit();
+}
+
+void UInventoryComponent::ServerSelectHotbar_Implementation(int32 Hotbar)
+{
+	SelectHotbar(Hotbar);
+}
+
 void UInventoryComponent::ServerUseSlot_Implementation(int32 SlotIndex)
 {
 	const FText Error = UseSlot(SlotIndex);
@@ -422,14 +540,25 @@ void UInventoryComponent::ClientInventoryMessage_Implementation(const FText& Mes
 void UInventoryComponent::Commit()
 {
 	FInventoryAppearance NewAppearance;
-	bool bHandFound = false;
+	ActiveHotbar = FMath::Clamp(ActiveHotbar, 0, FMath::Max(0, GetHotbarSize() - 1));
+	NewAppearance.ActiveHotbar = static_cast<uint8>(ActiveHotbar);
+	int32 Hotbar = 0;
 	for (const FInventorySlot& Slot : Slots)
 	{
-		// Le premier slot d'équipement de base est la main.
-		if (Slot.Kind == ESlotKind::Equipment && Slot.ProvidedBy == EClothingSlot::None && !bHandFound)
+		// Les slots d'équipement de base forment la barre : l'actif est en main, les autres se portent sur soi.
+		if (Slot.Kind == ESlotKind::Equipment && Slot.ProvidedBy == EClothingSlot::None)
 		{
-			bHandFound = true;
-			NewAppearance.HandItem = Slot.IsEmpty() ? NAME_None : Slot.ItemId;
+			const FName Item = Slot.IsEmpty() ? NAME_None : Slot.ItemId;
+			if (Hotbar == ActiveHotbar)
+			{
+				NewAppearance.HandItem = Item;
+				NewAppearance.Stowed.Add(NAME_None);
+			}
+			else
+			{
+				NewAppearance.Stowed.Add(Item);
+			}
+			++Hotbar;
 		}
 		else if (Slot.Kind == ESlotKind::Clothing && !Slot.IsEmpty())
 		{

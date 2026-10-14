@@ -40,4 +40,13 @@ private:
 	TArray<FTransform> Spots;
 	int32 CurrentSpot = INDEX_NONE;
 	FVector BaseScale = FVector::OneVector;
+	FTransform BaseTransform;
+
+	/** Son attente du moment : regarder à gauche ou à droite, s'étirer, se mettre en boule, frissonner. */
+	enum class EIdle : uint8 { Sit, LookLeft, LookRight, Stretch, Loaf, Twitch };
+	EIdle Idle = EIdle::Sit;
+	double IdleStart = 0.0;
+	double IdleEnd = 0.0;
+	/** Pose courante (adoucie) : lacet, tangage, roulis, et écrasement vertical. */
+	FVector4 Pose = FVector4(0.f, 0.f, 0.f, 1.f);
 };

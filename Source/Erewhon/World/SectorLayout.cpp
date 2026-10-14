@@ -9,6 +9,7 @@
 #include "World/Terrain.h"
 #include "World/Village.h"
 #include "World/Apothecary.h"
+#include "World/Farm.h"
 
 namespace
 {
@@ -285,6 +286,32 @@ void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
 		}
 		return;
 	}
+	// Les champs du fermier : de la terre, et la croix de chemins qui les sépare, du centre jusqu'aux
+	// bords (là où arrivent les chemins d'accès depuis la route).
+	if (ErewhonSector::IsPurchasable(Layout.Coord))
+	{
+		const uint8 Buildings = State->GetBuildings(Layout.Coord);
+		if (Buildings & ErewhonFarm::AnyField)
+		{
+			ErewhonFarm::FieldBoxes(Layout.Coord, Buildings, Layout.Fields);
+			for (const FBox2D& Field : Layout.Fields)
+			{
+				Layout.Paths.Add(Field);
+				Layout.PathPaved.Add(false);
+			}
+			const uint8 Arms = ErewhonFarm::CrossArms(Buildings);
+			Layout.bFenced = (Buildings & ErewhonFarm::FenceBit) != 0;   // la clôture s'achète à part
+			Layout.FenceGates = Arms | State->GetRoadLinks(Layout.Coord);
+			for (int32 Side = 0; Side < 4; ++Side)
+			{
+				if (Arms & (1 << Side))
+				{
+					Corridor(ErewhonSector::Sides[Side], false);
+				}
+			}
+		}
+		return;
+	}
 	if (Layout.Type != ESectorType::Road)
 	{
 		return;
@@ -340,6 +367,26 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 				continue;
 			}
 			Layout->Clearings.Add({ FVector2D(ErewhonSpawn::CabinTransform(Kind).GetLocation()), ErewhonSpawn::ManagerClearingRadius, bPavedCenter });
+		}
+		// L'éleveur et l'atelier : de la terre autour de la maison et de son annexe, et jusqu'à la route.
+		for (const EShopKind Kind : { EShopKind::Breeder, EShopKind::Workshop })
+		{
+			const FTransform House = ErewhonSpawn::CabinTransform(Kind);
+			const FVector2D Half = ErewhonSpawn::CabinHalfSize(Kind);
+			Layout->Clearings.Add({ FVector2D(House.GetLocation()), static_cast<float>(Half.X + 350.0), bPavedCenter });
+			const FVector2D AnnexAt(House.TransformPosition(FVector(ErewhonSpawn::AnnexCenter(Kind), 0.f)));
+			const FVector2D AnnexHalf = ErewhonSpawn::AnnexHalfSize(Kind);
+			Layout->Clearings.Add({ AnnexAt, static_cast<float>(FMath::Max(AnnexHalf.X, AnnexHalf.Y) + 250.0), false });
+			// Du perron à la route, et de la façade de l'annexe à la route.
+			for (const FVector& LocalFrom : { FVector(-Half.X - 100.f, 0.f, 0.f), FVector(ErewhonSpawn::AnnexCenter(Kind).X - AnnexHalf.X - 100.f, ErewhonSpawn::AnnexCenter(Kind).Y, 0.f) })
+			{
+				const FVector2D From(House.TransformPosition(LocalFrom));
+				const FVector2D Road(ErewhonSector::Center(Sector).X, ErewhonSector::Center(Sector).Y);
+				// La route du nord ou du sud court le long de X, à Y = centre.
+				const FVector2D To(From.X, Road.Y);
+				Layout->Paths.Add(FBox2D(FVector2D(From.X - 160.f, FMath::Min(From.Y, To.Y)), FVector2D(From.X + 160.f, FMath::Max(From.Y, To.Y))));
+				Layout->PathPaved.Add(false);
+			}
 		}
 		// La fontaine : un peu de terre autour, et un chemin jusqu'à l'allée.
 		{

@@ -308,3 +308,40 @@ On ajoutera la classe fermier :
 On ajoutera également la possibilité d'acheter un Bhurak (une sorte de gros bovin poilu, si le joueur fait 1.7m le bhurak fait 1.8m). On eput acheter au general store un harnais que l'on peut équiper au bhurak. On peut aussi acheter des sacoches de bhurak et une selle de bhurak. Le harnais contient deux slot d'équipemet latéral et un central. On peut équiper une sacoche sur chacun des 3 emplacement, mais la selle uniquement au centre. Une sacoche contient autant u'un sac à dos. Si la selle est équipée, on peut monter le bhurak et se déplacer avec, bonus de 50% de vitesse. Quand on est sur le bhurak a coté d'une charette, on peut l'équiper pour que la charette soit tirée par le bhurak. On peut aussi faire la même chose en prenant la charette et en s'approchant du bhurak.
 
 Le bhurak coute 3000c, le harnais 500c, les sacoche 300c et la selle 500c.
+
+
+====================================================================
+
+Au village, on ajoute 2 nouvelles maison, style différent, plus grande : 
+- L'éleveur : maison + grange pour y mettre des animaux, comme pour des box à chevaux. On y trouve des bhurak de différente apparence. On peut les acheter ici maintenant plutot qu'au general store.
+- Dans la maison, l'éleveur nous vend l'équipement pour le bhurak (sacoche, harnais, selle)
+- L'atelier est une sorte de vielle atelier mécanique + bois. Il aura une grande cours dans laquelle on présentera la charette et d'autre outil, permettant leur achat.
+- A l'atelier, on présente et vend des outils tactables par les bhurak, accessible aux fermiers : un cultivateur qui s'attache au bhurak et cultive la terre dessous quand on passe dessus. Une manette le fait passer en position basse ou haute. En position haute il n'agit pas, mais en position basse on va à -50% de vitesse.
+- On trouve aussi un semeur : charette avec une roue qui tourne et qui envoi les grains depuis un petit coffre a grain dans lequel on peut verser des sacs de grain. ça permet de semer autour de la charette dans le champs. La encore, un levier permet d'enclencher/désenclencher la roue de distribution. Et ça ne séme évidmeent pas si ce n'est pas enclenché. On va 30% moins vite si enclenché.
+
+Autre ajustements: 
+- Seuls les secteurs prairies et lisière peuvent être utilisés pour en faire des champs
+- Une amélioration d'un secteur de type champs ajoute des barrières en bois tout autour du secteur. Là où des jonctions sont présente, on trouvera un petit porche en bois avec portique
+
+====================================================================
+
+Nouveau systéme pour les outils et items en main :
+- 3 slots d'inventaire permettent de pré-équiper les items (outil, potion, etc...)
+- Ces 3 slots sont également visible en bas au milieu de l'écran
+- Un slot, le premier par défaut, est en surbrillance, ce qui signifie que l'itme à cet emplacement est équipé
+- Avec la molette, on peut switcher de l'un à l'autre, ou en utilisant 1, 2 ou 3 (&, é ou " pour les claviers azerty) directement
+- Les outils pré-équipé se voient dans le dos, les items genre potion sont accrochés à la ceinture.
+
+Aussi, il va falloir animer nos modéles de personnage : les vendeurs, le bhurak, le chat, ils doivent avoir différentes animations d'attente
+
+=====================================================================
+
+Dans le village, ajoute quelques maisons avec leur propriétaire. Ces derniers seront amené à se balader dans leur maison et à en sortir pour faire un tour dans le village (tout secteur confondu) ou dans le centre.
+On ajoutera aussi un marché, une grande place avec plusieurs stands, pour le moment vides.
+On ajoutera également le metier de forestier : 
+- Peux acheter une hache
+- Peux couper des arbres sur son propre secteur
+- Les arbres tombent alors au sol, leur feuillage explose et se tranforme en branches avec feuillage qu'on peut ramasser
+- On peut donner des coups de hache sur un arbre tombé pour en couper des buches
+- On peut porter 2 buches à la fois et les poser en tas (max 20 par tas)
+- On peut mettre 6 buches dans la charette

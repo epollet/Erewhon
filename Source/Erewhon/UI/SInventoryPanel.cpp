@@ -1,4 +1,10 @@
 #include "UI/SInventoryPanel.h"
+#include "Styling/CoreStyle.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Images/SImage.h"
+#include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/SCanvas.h"
+#include "Framework/Application/SlateApplication.h"
 
 #include "Core/ErewhonPlayerController.h"
 #include "Core/ErewhonPlayerState.h"
@@ -84,6 +90,7 @@ namespace
 			SLATE_ARGUMENT(bool, bDropTarget)
 			SLATE_ARGUMENT(FLinearColor, Accent)
 			SLATE_EVENT(FSimpleDelegate, OnClicked)
+			SLATE_EVENT(FSimpleDelegate, OnRightClicked)
 			SLATE_EVENT(FOnItemDropped, OnItemDropped)
 			SLATE_DEFAULT_SLOT(FArguments, Content)
 		SLATE_END_ARGS()
@@ -96,6 +103,7 @@ namespace
 			bDraggable = InArgs._bDraggable && Def;
 			bDropTarget = InArgs._bDropTarget;
 			OnClicked = InArgs._OnClicked;
+			OnRightClicked = InArgs._OnRightClicked;
 			OnItemDropped = InArgs._OnItemDropped;
 			Normal = Rounded(Mix(Card, InArgs._Accent, Def ? 0.12f : 0.06f), 10.f, Mix(InArgs._Accent, Card, 0.25f), 2.f);
 			Hovered = Rounded(Mix(Card, Gold, 0.25f), 10.f, Gold, 2.5f);
@@ -110,6 +118,11 @@ namespace
 
 		virtual FReply OnMouseButtonDown(const FGeometry& Geometry, const FPointerEvent& Event) override
 		{
+			if (Event.GetEffectingButton() == EKeys::RightMouseButton)
+			{
+				OnRightClicked.ExecuteIfBound();
+				return FReply::Handled();
+			}
 			if (Event.GetEffectingButton() != EKeys::LeftMouseButton)
 			{
 				return FReply::Unhandled();
@@ -170,6 +183,7 @@ namespace
 		const FSlateBrush* Normal = nullptr;
 		const FSlateBrush* Hovered = nullptr;
 		FSimpleDelegate OnClicked;
+		FSimpleDelegate OnRightClicked;
 		FOnItemDropped OnItemDropped;
 	};
 }
@@ -204,17 +218,227 @@ void SInventoryPanel::Construct(const FArguments& InArgs)
 
 	const float Width = ColumnWidth(GInventoryColumns) + ColumnWidth(GClothingColumns) + ColumnWidth(GEquipmentColumns) + 2 * GColumnGap + 70.f
 		+ (ShowsBag() ? ColumnWidth(OpenedStorage.IsValid() && OpenedStorage->GetKind() == EStorageKind::Barrel ? 5
-			: OpenedStorage.IsValid() && OpenedStorage->GetKind() == EStorageKind::Shelf ? 4 : GBagColumns) + 2 * GColumnGap + 10.f : 0.f);
+			: OpenedStorage.IsValid() && OpenedStorage->GetKind() == EStorageKind::Shelf ? 7 : GBagColumns) + 2 * GColumnGap + 10.f : 0.f);
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	ChildSlot
 	[
+		SNew(SOverlay)
+		+ SOverlay::Slot()
+		[
 		Window(OpenedCart.IsValid() ? LOCTEXT("TitleCart", "Inventaire et charrette")
 			: OpenedStorage.IsValid() ? FText::Format(LOCTEXT("TitleStorage", "Inventaire et {0}"), ErewhonPlaceables::KindName(OpenedStorage->GetKind()).ToLower())
 			: ShowsBag() ? LOCTEXT("TitleBag", "Inventaire et sac à dos") : LOCTEXT("Title", "Inventaire"), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
 			Width)
+		]
+		// « Combien ? » (Maj + clic droit), au milieu.
+		+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+		[
+			SAssignNew(ChooserHost, SBox)
+		]
+		// La pile qu'on tient (après une division) suit la souris.
+		+ SOverlay::Slot()
+		[
+			SNew(SCanvas).Visibility(EVisibility::HitTestInvisible)
+			+ SCanvas::Slot()
+			.Position_Lambda([this]()
+			{
+				const FVector2D Cursor = FSlateApplication::Get().GetCursorPos();
+				return PanelGeometry.AbsoluteToLocal(Cursor) - FVector2D(GSlotSize * 0.5f, GSlotSize * 0.5f);
+			})
+			.Size(FVector2D(GSlotSize, GSlotSize))
+			[
+				SNew(SBox).Visibility_Lambda([this]() { return Split.IsSet() && Split->bHolding ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
+				[
+					SNew(SOverlay)
+					+ SOverlay::Slot()[SAssignNew(HeldIcon, SBox)]
+					+ SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Bottom)
+					[
+						SNew(SBorder).BorderImage(Rounded(Ink, 7.f)).Padding(FMargin(5.f, 0.f))
+						[
+							SNew(STextBlock).Text_Lambda([this]() { return Split.IsSet() ? FText::AsNumber(Split->Count) : FText::GetEmpty(); })
+							.Font(Font(9, true)).ColorAndOpacity(FLinearColor::White)
+						]
+					]
+				]
+			]
+		]
 	];
 	Rebuild();
+}
+
+void SInventoryPanel::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	PanelGeometry = AllottedGeometry;
+}
+
+void SInventoryPanel::BeginSplit(bool bFromOther, int32 SlotIndex, bool bChoose)
+{
+	const TArray<FInventorySlot>& Slots = bFromOther ? OtherSlots() : GetInventory()->GetSlots();
+	if (!Slots.IsValidIndex(SlotIndex) || Slots[SlotIndex].IsEmpty() || Slots[SlotIndex].Kind == ESlotKind::Clothing)
+	{
+		return;
+	}
+	FSplit New;
+	New.bFromOther = bFromOther;
+	New.From = SlotIndex;
+	New.Max = Slots[SlotIndex].Count;
+	New.Count = FMath::Max(1, New.Max / 2);
+	// Sans Maj, ou pour un seul exemplaire : pas de question, la moitié part sous la souris.
+	New.bHolding = !bChoose || New.Max <= 1;
+	Split = New;
+	Rebuild();
+	if (!New.bHolding && ChooserEntry.IsValid())
+	{
+		FSlateApplication::Get().SetKeyboardFocus(ChooserEntry, EFocusCause::SetDirectly);
+	}
+}
+
+void SInventoryPanel::TestSplitChooser()
+{
+	const TArray<FInventorySlot>& Slots = GetInventory()->GetSlots();
+	const int32 First = Slots.IndexOfByPredicate([](const FInventorySlot& S) { return S.Kind == ESlotKind::Inventory && S.Count > 1; });
+	if (First != INDEX_NONE)
+	{
+		BeginSplit(false, First, true);
+	}
+}
+
+void SInventoryPanel::ConfirmSplit()
+{
+	if (Split.IsSet() && !Split->bHolding)
+	{
+		Split->bHolding = true;
+		Rebuild();
+		FSlateApplication::Get().SetKeyboardFocus(SharedThis(this), EFocusCause::SetDirectly);
+	}
+}
+
+bool SInventoryPanel::DropSplit(bool bToOther, int32 SlotIndex)
+{
+	if (!Split.IsSet() || !Split->bHolding)
+	{
+		return false;
+	}
+	const FSplit Held = Split.GetValue();
+	Split.Reset();
+	if (Controller.IsValid() && (Held.bFromOther != bToOther || Held.From != SlotIndex))
+	{
+		Controller->ServerSplitMove(Held.bFromOther, Held.From, bToOther, SlotIndex, Held.Count, OpenedStorage.Get(), OpenedCart.Get());
+	}
+	Rebuild();
+	return true;
+}
+
+void SInventoryPanel::DropOne(bool bToOther, int32 SlotIndex)
+{
+	if (!Split.IsSet() || !Split->bHolding || (Split->bFromOther == bToOther && Split->From == SlotIndex) || !Controller.IsValid())
+	{
+		return;
+	}
+	Controller->ServerSplitMove(Split->bFromOther, Split->From, bToOther, SlotIndex, 1, OpenedStorage.Get(), OpenedCart.Get());
+	if (--Split->Count <= 0)
+	{
+		Split.Reset();
+	}
+	Rebuild();
+}
+
+TSharedRef<SWidget> SInventoryPanel::BuildSplitChooser() const
+{
+	if (!Split.IsSet() || Split->bHolding)
+	{
+		return SNullWidget::NullWidget;
+	}
+	SInventoryPanel* Self = const_cast<SInventoryPanel*>(this);
+	const auto Step = [Self](int32 Delta)
+	{
+		return [Self, Delta]()
+		{
+			if (Self->Split.IsSet())
+			{
+				Self->Split->Count = FMath::Clamp(Self->Split->Count + Delta, 1, Self->Split->Max);
+			}
+		};
+	};
+	// Une petite flèche (celle des arbres de Slate, retournée pour monter).
+	const auto Arrow = [](bool bUp, TFunction<void()> OnClick)
+	{
+		return SNew(SButton)
+			.ButtonStyle(&FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("Button"))
+			.ContentPadding(FMargin(8.f, 2.f))
+			.OnClicked_Lambda([OnClick]() { OnClick(); return FReply::Handled(); })
+			[
+				SNew(SImage)
+				.Image(FCoreStyle::Get().GetBrush("TreeArrow_Expanded"))
+				.ColorAndOpacity(FSlateColor(FLinearColor::White))
+				.RenderTransformPivot(FVector2D(0.5f, 0.5f))
+				.RenderTransform(bUp ? FSlateRenderTransform(FQuat2D(UE_PI)) : FSlateRenderTransform())
+			];
+	};
+	return SNew(SBorder).BorderImage(Rounded(Card, 10.f, Gold, 2.f)).Padding(14.f)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
+			[
+				SNew(STextBlock).Text(FText::Format(LOCTEXT("SplitHow", "Combien dans la nouvelle pile ? (sur {0})"), FText::AsNumber(Split->Max)))
+				.Font(Font(11, true)).ColorAndOpacity(Ink)
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					SNew(SBox).WidthOverride(80.f)
+					[
+						SAssignNew(Self->ChooserEntry, SEditableTextBox)
+						.Font(Font(14, true))
+						.Justification(ETextJustify::Center)
+						.SelectAllTextWhenFocused(true)
+						.Text_Lambda([Self]() { return Self->Split.IsSet() ? FText::AsNumber(Self->Split->Count, &FNumberFormattingOptions::DefaultNoGrouping()) : FText::GetEmpty(); })
+						.OnTextChanged_Lambda([Self](const FText& Typed)
+						{
+							if (Self->Split.IsSet() && Typed.ToString().IsNumeric())
+							{
+								Self->Split->Count = FMath::Clamp(FCString::Atoi(*Typed.ToString()), 1, Self->Split->Max);
+							}
+						})
+						.OnTextCommitted_Lambda([Self](const FText&, ETextCommit::Type How)
+						{
+							if (How == ETextCommit::OnEnter)
+							{
+								Self->ConfirmSplit();
+							}
+						})
+						.OnKeyDownHandler_Lambda([Self](const FGeometry&, const FKeyEvent& Event)
+						{
+							// Les flèches du clavier : un de plus, un de moins.
+							if (Self->Split.IsSet() && (Event.GetKey() == EKeys::Up || Event.GetKey() == EKeys::Down))
+							{
+								Self->Split->Count = FMath::Clamp(Self->Split->Count + (Event.GetKey() == EKeys::Up ? 1 : -1), 1, Self->Split->Max);
+								return FReply::Handled();
+							}
+							return FReply::Unhandled();
+						})
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(6, 0, 0, 0)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 2)[Arrow(true, Step(1))]
+					+ SVerticalBox::Slot().AutoHeight()[Arrow(false, Step(-1))]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10, 0, 0, 0)
+				[
+					Button(LOCTEXT("SplitOk", "OK"), [Self]() { Self->ConfirmSplit(); }, EButton::Primary, true, 60.f, 11)
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+			[
+				SNew(STextBlock).Text(LOCTEXT("SplitKeys", "Entrée : prendre    Échap : annuler")).Font(Font(9)).ColorAndOpacity(MutedInk)
+			]
+		];
 }
 
 UInventoryComponent* SInventoryPanel::GetInventory() const
@@ -278,6 +502,12 @@ bool SInventoryPanel::ShowsBag() const
 FReply SInventoryPanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
 	const FKey Key = InKeyEvent.GetKey();
+	if (Key == EKeys::Escape && Split.IsSet())
+	{
+		Split.Reset();
+		Rebuild();
+		return FReply::Handled();
+	}
 	if ((Key == EKeys::Escape || Key == EKeys::I || Key == EKeys::Tab || Key == EKeys::F) && Controller.IsValid())
 	{
 		Controller->CloseMenu();
@@ -375,23 +605,44 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(bool bBag, int32 SlotIndex, const
 
 	// Avec le sac ouvert, les objets rangés (pas ce qu'on porte ou tient) passent d'un côté à l'autre.
 	const bool bExchange = ShowsBag() && (bBag || Slot.Kind == ESlotKind::Inventory);
+	// Ses propres poches et sa barre : on y glisse ses objets d'une case à l'autre (les outils dans la barre).
+	const bool bOwnSlot = !bBag && (Slot.Kind == ESlotKind::Inventory || Slot.Kind == ESlotKind::Equipment);
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	TSharedRef<SItemSlot> Widget = SNew(SItemSlot)
 		.bBag(bBag)
 		.Index(SlotIndex)
 		.Def(Def)
-		.bDraggable(bExchange)
-		.bDropTarget(bExchange)
+		.bDraggable(bExchange || bOwnSlot)
+		.bDropTarget(bExchange || bOwnSlot)
 		.Accent(Accent)
+		.OnRightClicked_Lambda([Self = const_cast<SInventoryPanel*>(this), bBag, SlotIndex]()
+		{
+			// Clic droit : diviser la pile ; une pile en main, on en pose un exemplaire ici.
+			if (Self->Split.IsSet() && Self->Split->bHolding)
+			{
+				Self->DropOne(bBag, SlotIndex);
+				return;
+			}
+			Self->BeginSplit(bBag, SlotIndex, FSlateApplication::Get().GetModifierKeys().IsShiftDown());
+		})
 		.OnClicked_Lambda([this, WeakController, bBag, SlotIndex]()
 		{
+			if (const_cast<SInventoryPanel*>(this)->DropSplit(bBag, SlotIndex))
+			{
+				return;
+			}
 			AErewhonPlayerController* PC = WeakController.Get();
 			const AErewhonPlayerState* State = PC ? PC->GetPlayerState<AErewhonPlayerState>() : nullptr;
 			if (!State)
 			{
 				return;
 			}
-			if (bBag)
+			// Ctrl + clic : la pile passe de l'autre côté (cagette, tonneau, sac, charrette), là où il y a de la place.
+			if (FSlateApplication::Get().GetModifierKeys().IsControlDown() && ShowsBag())
+			{
+				MoveItem(bBag, SlotIndex, !bBag, INDEX_NONE);
+			}
+			else if (bBag)
 			{
 				MoveItem(true, SlotIndex, false, INDEX_NONE);   // reprendre dans ses poches
 			}
@@ -410,6 +661,11 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(bool bBag, int32 SlotIndex, const
 		})
 		.OnItemDropped_Lambda([this, bBag, SlotIndex](bool bFromBag, int32 From)
 		{
+			if (!bFromBag && !bBag)
+			{
+				GetInventory()->ServerMoveSlot(From, SlotIndex);   // dans ses poches, dans sa barre
+				return;
+			}
 			MoveItem(bFromBag, From, bBag, SlotIndex);
 		})
 		[
@@ -437,13 +693,16 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
 				[
-					SNew(STextBlock).Text(LOCTEXT("CartHeader", "Charrette")).Font(Font(11, true)).ColorAndOpacity(BagAccent)
+					SNew(STextBlock).Text(Cart->GetCartKind() == ECartKind::Seeder ? LOCTEXT("SeederHeader", "Trémie du semoir") : LOCTEXT("CartHeader", "Charrette"))
+					.Font(Font(11, true)).ColorAndOpacity(BagAccent)
 				]
 				+ SVerticalBox::Slot().AutoHeight()[Separator()]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)[Grid]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 				[
-					SNew(STextBlock).Text(Cart->HasLoads()
+					SNew(STextBlock).Text(Cart->GetCartKind() == ECartKind::Seeder
+						? LOCTEXT("SeederHint", "Des sacs de graines : chaque sac sème neuf cases. [G] y verser tous les vôtres.")
+						: Cart->HasLoads()
 						? LOCTEXT("CartBusy", "Elle porte des conteneurs : pas de place pour du petit bois en vrac.")
 						: LOCTEXT("CartHint", "Du petit bois en vrac, trente brassées. [G] y charger tout le vôtre."))
 					.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
@@ -458,12 +717,18 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 		TSharedRef<SVerticalBox> Floors = SNew(SVerticalBox);
 		for (int32 Row = ShelfRows - 1; Row >= 0; --Row)
 		{
-			const int32 Index = Row;
-			const FInventorySlot* Slot = Shelf->GetSlots().IsValidIndex(Index) ? &Shelf->GetSlots()[Index] : nullptr;
-			const FItemDef* Def = Slot && !Slot->IsEmpty() && Items ? Items->Find(Slot->ItemId) : nullptr;
+			TSharedRef<SHorizontalBox> Places = SNew(SHorizontalBox);
+			for (int32 Column = 0; Column < ShelfSlotsPerRow; ++Column)
+			{
+				const int32 Index = Row * ShelfSlotsPerRow + Column;
+				if (Shelf->GetSlots().IsValidIndex(Index))
+				{
+					Places->AddSlot().AutoWidth().Padding(0, 0, 3, 0)[BuildSlot(true, Index, BagAccent, FText::GetEmpty())];
+				}
+			}
 			Floors->AddSlot().AutoHeight().Padding(0, 0, 0, 4)
 			[
-				// Une planche par étage : le numéro, la pile, ce qu'il y a dessus.
+				// Une planche par étage : son numéro, puis ses cinq emplacements.
 				SNew(SBorder).BorderImage(Rounded(Mix(Card, Edge, 0.18f), 6.f, Mix(Card, Edge, 0.5f), 1.f)).Padding(FMargin(6.f, 4.f))
 				[
 					SNew(SHorizontalBox)
@@ -476,18 +741,12 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 							.Font(Font(9, true)).ColorAndOpacity(MutedInk)
 						]
 					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[BuildSlot(true, Index, BagAccent, FText::GetEmpty())]
-					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(8, 0, 0, 0)
-					[
-						SNew(STextBlock)
-						.Text(Def ? FText::Format(LOCTEXT("FloorStack", "{0}\n{1} / {2}"), Def->Name, FText::AsNumber(Slot->Count), FText::AsNumber(PotionsPerSlot))
-							: LOCTEXT("FloorEmpty", "Vide"))
-						.Font(Font(9)).ColorAndOpacity(Def ? Ink : MutedInk).AutoWrapText(true)
-					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[Places]
 				]
 			];
 		}
-		return SNew(SBox).WidthOverride(ColumnWidth(4))
+		(void)Items;
+		return SNew(SBox).WidthOverride(ColumnWidth(ShelfSlotsPerRow) + 70.f)
 			[
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
@@ -499,7 +758,7 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)[Floors]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
 				[
-					SNew(STextBlock).Text(LOCTEXT("ShelvesHint", "Potions, bases et écrasés : une pile de 10 par étage. Glissez-les sur l'étage voulu ; [G] tout ranger ici."))
+					SNew(STextBlock).Text(LOCTEXT("ShelvesHint", "Potions, bases et écrasés : cinq emplacements par étage, une pile entière par emplacement. Glissez-les où vous voulez ; [G] tout ranger ici."))
 					.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
 				]
 			];
@@ -750,12 +1009,12 @@ void SInventoryPanel::Rebuild()
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
 				[
-					SNew(STextBlock).Text(FText::Format(LOCTEXT("ConfirmDiscard", "Jeter « {0} » ? Il sera perdu."), Def->Name))
+					SNew(STextBlock).Text(FText::Format(LOCTEXT("ConfirmDiscard", "Poser « {0} » à terre ? Il y restera trois minutes."), Def->Name))
 					.Font(Font(11, true)).ColorAndOpacity(Danger)
 				]
 				+ SHorizontalBox::Slot().AutoWidth().Padding(8, 0, 0, 0)
 				[
-					Button(LOCTEXT("DiscardYes", "Jeter"), [this, WeakController, Pending]()
+					Button(LOCTEXT("DiscardYes", "Poser à terre"), [this, WeakController, Pending]()
 					{
 						if (WeakController.IsValid())
 						{
@@ -777,6 +1036,16 @@ void SInventoryPanel::Rebuild()
 		}
 	}
 
+	if (ChooserHost.IsValid())
+	{
+		ChooserHost->SetContent(BuildSplitChooser());
+	}
+	if (HeldIcon.IsValid())
+	{
+		const TArray<FInventorySlot>& HeldFrom = Split.IsSet() && Split->bFromOther ? OtherSlots() : Slots;
+		const FItemDef* HeldDef = Split.IsSet() && HeldFrom.IsValidIndex(Split->From) && !HeldFrom[Split->From].IsEmpty() ? Items->Find(HeldFrom[Split->From].ItemId) : nullptr;
+		HeldIcon->SetContent(HeldDef ? ItemIcon(HeldDef, GSlotSize - 12.f) : SNullWidget::NullWidget);
+	}
 	Body->SetContent(
 		SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
@@ -789,8 +1058,8 @@ void SInventoryPanel::Rebuild()
 		[
 			SNew(STextBlock)
 			.Text(bBag
-				? LOCTEXT("HelpBag", "Glisser-déposer : échanger avec le sac. Clic : équiper / ranger, ou reprendre un objet du sac. A : jeter.")
-				: LOCTEXT("Help", "Clic : équiper / ranger. Survol : description. A : jeter."))
+				? LOCTEXT("HelpBag", "Glisser-déposer : échanger avec le sac. Clic : équiper / ranger, ou reprendre un objet du sac. Ctrl + clic : de l'autre côté. Clic droit : la moitié (Maj : combien). A : poser à terre.")
+				: LOCTEXT("Help", "Clic : équiper / ranger. Glisser : ranger, ou mettre dans la barre. Clic droit : la moitié de la pile (Maj : combien), puis un à un. A : poser à terre."))
 			.Font(Font(9)).ColorAndOpacity(MutedInk)
 		]);
 }

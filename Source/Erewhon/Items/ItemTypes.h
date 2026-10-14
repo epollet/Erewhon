@@ -28,6 +28,7 @@ enum class EPotionEffect : uint8
 	Shrink,     // on rapetisse
 	Grow,       // on grandit
 	Calm,       // sérénité (pot-pourri) : herbes hautes et buissons ne ralentissent plus
+	Light,      // on luit : une lumière chaude autour de soi
 	Count UMETA(Hidden)
 };
 
@@ -146,6 +147,28 @@ struct FItemDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	bool bHarvestTool = false;
 
+	/** Poids d'un exemplaire (kg), négatif : selon la catégorie (voir GetWeight). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	float Weight = -1.f;
+
+	float GetWeight() const
+	{
+		if (Weight >= 0.f)
+		{
+			return Weight;
+		}
+		switch (Category)
+		{
+		case EItemCategory::Plant:     return 0.2f;
+		case EItemCategory::Tool:      return 1.5f;
+		case EItemCategory::Clothing:  return 0.6f;
+		case EItemCategory::Backpack:  return 1.5f;
+		case EItemCategory::Placeable: return 10.f;
+		case EItemCategory::Potion:    return 0.35f;
+		default:                       return 0.5f;
+		}
+	}
+
 	// ── Vêtements ──
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	EClothingSlot ClothingSlot = EClothingSlot::None;
@@ -164,6 +187,10 @@ struct FItemDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	EPotionEffect PotionEffect = EPotionEffect::None;
 
+	/** Durée de l'effet (s), 0 : celle d'une potion ordinaire (deux minutes). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	float PotionSeconds = 0.f;
+
 	/** Se tient en main (un pichet) sans être un outil. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	bool bHoldable = false;
@@ -171,6 +198,17 @@ struct FItemDef
 	/** Ne se vend qu'aux apothicaires (leurs outils). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	bool bApothecaryOnly = false;
+
+	/** Ne se vend qu'aux fermiers (la faux). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	bool bFarmerOnly = false;
+
+	/** Le commerce imposé par le catalogue (« shop ») : l'éleveur, l'atelier. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	EShopKind ShopOverride = EShopKind::GeneralStore;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	bool bShopOverride = false;
 
 	// ── Plantes ──
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
@@ -199,7 +237,7 @@ struct FItemDef
 	bool IsPotion() const { return Category == EItemCategory::Potion && PotionEffect != EPotionEffect::None; }
 
 	/** Le commerce qui vend et rachète cet objet : les vêtements chez le tailleur, le reste au General Store. */
-	EShopKind ShopFor() const { return IsClothing() || Id.ToString().StartsWith(TEXT("dye_")) ? EShopKind::Tailor : EShopKind::GeneralStore; }
+	EShopKind ShopFor() const { return bShopOverride ? ShopOverride : IsClothing() || Id.ToString().StartsWith(TEXT("dye_")) ? EShopKind::Tailor : EShopKind::GeneralStore; }
 	bool IsUnique() const { return Category == EItemCategory::Tool || Category == EItemCategory::Backpack; }
 	bool IsBackpack() const { return Category == EItemCategory::Backpack; }
 

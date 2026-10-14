@@ -1,4 +1,5 @@
 #include "Player/ErewhonCharacter.h"
+#include "Components/PointLightComponent.h"
 #include "EngineUtils.h"
 
 #include "Camera/CameraComponent.h"
@@ -30,6 +31,8 @@
 #include "World/ErewhonSound.h"
 #include "World/SpawnLayout.h"
 #include "World/Apothecary.h"
+#include "World/Farm.h"
+#include "World/Bhurak.h"
 #include "World/Sector.h"
 #include "World/SectorManager.h"
 #include "Materials/MaterialInterface.h"
@@ -42,7 +45,7 @@ using namespace ErewhonVisuals;
 namespace
 {
 	constexpr float GSwingDuration = 0.35f;
-	constexpr double GPendingHarvestSeconds = 1.0;
+	constexpr double GPendingHarvestSeconds = 2.0;   // le geste (une seconde à la main), plus la latence
 	const FVector GHeldFirstPersonOffset(38.f, 24.f, -22.f);
 	const FRotator GHeldFirstPersonRotation(-20.f, 0.f, 10.f);
 	const FVector GHeldThirdPersonOffset(22.f, 28.f, 0.f);
@@ -180,12 +183,13 @@ void AErewhonCharacter::KeepBodyInPlace()
 	}
 	// Assis ou en l'air, le bassin se déplace pour de bon ; sinon il reste à l'aplomb de la capsule.
 	FVector Offset = FVector::ZeroVector;
-	if (CurrentAnimation != TEXT("sit") && CurrentAnimation != TEXT("jump"))
+	if ((CurrentAnimation != TEXT("sit") || Mount) && CurrentAnimation != TEXT("jump"))
 	{
 		const FVector Hips = AnimatedBody->GetSocketTransform(HipsBone, RTS_Component).GetLocation();
 		Offset = AnimatedBody->GetRelativeRotation().RotateVector(FVector(Hips.X, Hips.Y, 0.f));
 	}
-	AnimatedBody->SetRelativeLocation(FVector(0.f, 0.f, -GetCapsuleComponent()->GetScaledCapsuleHalfHeight()) - Offset);
+	const float Rise = Mount ? ABhurak::RideRise : 0.f;
+	AnimatedBody->SetRelativeLocation(FVector(0.f, 0.f, Rise - GetCapsuleComponent()->GetScaledCapsuleHalfHeight()) - Offset);
 }
 
 void AErewhonCharacter::PlayBodyAnimation(FName Name, bool bLoop, float PlayRate)
@@ -217,6 +221,13 @@ void AErewhonCharacter::UpdateAnimation(float DeltaSeconds)
 	KeepBodyInPlace();
 	const UCharacterMovementComponent* Movement = GetCharacterMovement();
 	const float Speed = GetVelocity().Size2D();
+	if (Mount)
+	{
+		// En selle : assis, tourné comme sa monture.
+		PlayBodyAnimation(TEXT("sit"), true);
+		AnimatedBody->SetWorldRotation(FRotator(0.f, Mount->GetActorRotation().Yaw + GBodyMeshYaw, 0.f));
+		return;
+	}
 	if (GetWorld()->GetTimeSeconds() < OneShotUntil)
 	{
 		return;
@@ -347,6 +358,7 @@ void AErewhonCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(AErewhonCharacter, SeatIndex);
 	DOREPLIFETIME(AErewhonCharacter, Carried);
 	DOREPLIFETIME(AErewhonCharacter, DrivenCart);
+	DOREPLIFETIME(AErewhonCharacter, Mount);
 	DOREPLIFETIME(AErewhonCharacter, PotionUntil);
 }
 
@@ -438,6 +450,14 @@ void AErewhonCharacter::ApplyView()
 
 	// À la première personne, on ne voit pas son propre corps ; sinon si.
 	TArray<USceneComponent*> SelfParts = { Torso.Get(), Legs.Get(), Head.Get(), HeldThirdPerson.Get(), AnimatedBody.Get() };
+	for (UStaticMeshComponent* Part : StowedParts)
+	{
+		SelfParts.Add(Part);
+	}
+	for (UStaticMeshComponent* Strap : HarnessStraps)
+	{
+		SelfParts.Add(Strap);
+	}
 	if (WornBackpack)
 	{
 		TArray<USceneComponent*> BagParts;
@@ -521,6 +541,7 @@ void AErewhonCharacter::ApplyAppearance()
 		Legs->SetMaterial(0, MakeColorMaterial(Legs, LegsDef ? LegsDef->Color : Palette::DefaultShorts));
 	}
 
+	ApplyStowed();
 	const FItemDef* Hand = Items->Find(Look.HandItem);
 	for (UStaticMeshComponent* Held : { HeldFirstPerson.Get(), HeldThirdPerson.Get() })
 	{
@@ -533,10 +554,26 @@ void AErewhonCharacter::ApplyAppearance()
 		if (UStaticMesh* HandMesh = Cast<UStaticMesh>(Hand->Mesh.TryLoad()))
 		{
 			// Modèle généré : ramené à ~45 cm, la base (le manche) au creux de la main.
-			const FTransform Fit = FitToHeight(HandMesh, Hand->bHoldable ? 24.f : 45.f);
+			const float HandHeight = Hand->bHoldable ? 24.f : Hand->Id == ErewhonFarm::Scythe ? 80.f : Hand->Id == ErewhonFarm::Spade ? 70.f : 45.f;
+			const FTransform Fit = FitToHeight(HandMesh, HandHeight);
 			const FVector Base = Held == HeldFirstPerson.Get() ? GHeldFirstPersonOffset : (AnimatedBody ? HeldThirdPersonBase : GHeldThirdPersonOffset);
+			// La faux se tient lame en bas ; la bêche, lame vers l'avant.
+			const FQuat Turn = Hand->Id == ErewhonFarm::Scythe ? FQuat(FRotator(Held == HeldFirstPerson.Get() ? -125.f : 0.f, 0.f, 0.f)) : Hand->Id == ErewhonFarm::Spade ? FQuat(FRotator(0.f, 135.f, 0.f)) : FQuat::Identity;
+			if (Held == HeldFirstPerson.Get())
+			{
+				HeldFirstRotation = (FQuat(GHeldFirstPersonRotation) * Turn).Rotator();
+				Held->SetRelativeRotation(HeldFirstRotation);
+			}
+			else
+			{
+				Held->SetRelativeRotation(Turn.Rotator());
+			}
 			Held->SetStaticMesh(HandMesh);
 			Held->SetRelativeLocation(Base + Held->GetRelativeRotation().RotateVector(Fit.GetLocation()));
+			if (Held == HeldFirstPerson.Get())
+			{
+				HeldFirstLocation = Held->GetRelativeLocation();
+			}
 			Held->SetRelativeScale3D(Fit.GetScale3D());
 			Held->EmptyOverrideMaterials();
 		}
@@ -570,6 +607,7 @@ void AErewhonCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	Input->BindAction(Actions.Run, ETriggerEvent::Started, this, &AErewhonCharacter::StartRun);
 	Input->BindAction(Actions.Run, ETriggerEvent::Completed, this, &AErewhonCharacter::StopRun);
 	Input->BindAction(Actions.Primary, ETriggerEvent::Started, this, &AErewhonCharacter::Primary);
+	Input->BindAction(Actions.Secondary, ETriggerEvent::Started, this, &AErewhonCharacter::Secondary);
 	Input->BindAction(Actions.Use, ETriggerEvent::Started, this, &AErewhonCharacter::Use);
 	Input->BindAction(Actions.Crouch, ETriggerEvent::Started, this, &AErewhonCharacter::StartCrouch);
 	Input->BindAction(Actions.Crouch, ETriggerEvent::Completed, this, &AErewhonCharacter::StopCrouch);
@@ -577,6 +615,10 @@ void AErewhonCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	Input->BindAction(Actions.Bag, ETriggerEvent::Started, this, &AErewhonCharacter::BagAction);
 	Input->BindAction(Actions.Stash, ETriggerEvent::Started, this, &AErewhonCharacter::StashAction);
 	Input->BindAction(Actions.View, ETriggerEvent::Started, this, &AErewhonCharacter::CycleView);
+	Input->BindAction(Actions.Hotbar1, ETriggerEvent::Started, this, &AErewhonCharacter::SelectHotbar1);
+	Input->BindAction(Actions.Hotbar2, ETriggerEvent::Started, this, &AErewhonCharacter::SelectHotbar2);
+	Input->BindAction(Actions.Hotbar3, ETriggerEvent::Started, this, &AErewhonCharacter::SelectHotbar3);
+	Input->BindAction(Actions.HotbarScroll, ETriggerEvent::Triggered, this, &AErewhonCharacter::ScrollHotbar);
 	Input->BindAction(Actions.CloseMenu, ETriggerEvent::Started, PC, &AErewhonPlayerController::HandleEscape);
 }
 
@@ -650,7 +692,12 @@ void AErewhonCharacter::UpdateGroundSpeed()
 			Factor = FMath::Max(Factor, 1.f);   // sérénité : herbes hautes et buissons ne retiennent plus
 		}
 	}
-	if (!HasPotion(EPotionEffect::Strength))
+	// Un outil attelable tiré à pied : fait pour un bhurak, il se traîne levé (20 %), et ne bouge pas baissé.
+	if (DrivenCart && DrivenCart->IsImplement())
+	{
+		Factor *= DrivenCart->IsEngaged() ? 0.f : 0.2f;
+	}
+	else if (!HasPotion(EPotionEffect::Strength))
 	{
 		// On pousse une charrette, on porte un tonneau ou un meuble : moitié moins vite ; une cagette : un peu moins (sauf potion de force).
 		if (DrivenCart || (Carried && ErewhonPlaceables::IsHeavy(Carried->GetKind())))
@@ -660,6 +707,28 @@ void AErewhonCharacter::UpdateGroundSpeed()
 		else if (Carried && Carried->GetKind() == EStorageKind::Crate)
 		{
 			Factor *= 0.8f;
+		}
+	}
+	// Trop chargé, on ralentit, jusqu'à ne plus pouvoir avancer.
+	{
+		const float Load = GetCarriedWeight();
+		const float Comfort = GetCarryComfort();
+		const float Max = GetCarryMax();
+		if (Load >= Max)
+		{
+			Factor = 0.f;
+		}
+		else if (Load > Comfort)
+		{
+			Factor *= FMath::Lerp(1.f, 0.25f, (Load - Comfort) / (Max - Comfort));
+		}
+	}
+	if (Mount)
+	{
+		Factor *= ABhurak::RideSpeedFactor;
+		if (const ACart* Towed = Mount->GetTowedCart())
+		{
+			Factor *= Towed->DragFactor();   // cultivateur baissé, semoir enclenché
 		}
 	}
 	if (HasPotion(EPotionEffect::Speed))
@@ -674,6 +743,105 @@ void AErewhonCharacter::UpdateGroundSpeed()
 void AErewhonCharacter::ServerSetRunning_Implementation(bool bRunning)
 {
 	ApplyRunning(bRunning);
+}
+
+void AErewhonCharacter::SelectHotbar(int32 Hotbar)
+{
+	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	if (State && !IsMenuOpen() && Hotbar != State->GetInventory()->GetActiveHotbar())
+	{
+		State->GetInventory()->ServerSelectHotbar(Hotbar);
+	}
+}
+
+void AErewhonCharacter::ScrollHotbar(const FInputActionValue& Value)
+{
+	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	const float Axis = Value.Get<float>();
+	if (!State || IsMenuOpen() || FMath::IsNearlyZero(Axis))
+	{
+		return;
+	}
+	// Molette vers le bas : l'emplacement suivant ; vers le haut : le précédent.
+	const int32 Size = FMath::Max(1, State->GetInventory()->GetHotbarSize());
+	const int32 Next = (State->GetInventory()->GetActiveHotbar() + (Axis < 0.f ? 1 : -1) + Size) % Size;
+	State->GetInventory()->ServerSelectHotbar(Next);
+}
+
+void AErewhonCharacter::ApplyStowed()
+{
+	const UInventoryComponent* Inventory = BoundInventory.Get();
+	const UItemDatabase* Items = UItemDatabase::Get(this);
+	if (!Inventory || !Items || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	const TArray<FName>& Stowed = Inventory->GetAppearance().Stowed;
+	while (StowedParts.Num() < Stowed.Num())
+	{
+		UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
+		Part->SetupAttachment(GetCapsuleComponent());
+		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Part->SetOwnerNoSee(ViewMode == EViewMode::FirstPerson);
+		Part->RegisterComponent();
+		AddInstanceComponent(Part);
+		StowedParts.Add(Part);
+	}
+	const bool bBag = BoundBackpack.IsValid() && BoundBackpack->IsWorn();
+	int32 Tools = 0, Belt = 0;
+	for (int32 i = 0; i < StowedParts.Num(); ++i)
+	{
+		UStaticMeshComponent* Part = StowedParts[i];
+		const FItemDef* Def = Stowed.IsValidIndex(i) ? Items->Find(Stowed[i]) : nullptr;
+		UStaticMesh* StowMesh = Def ? Cast<UStaticMesh>(Def->Mesh.TryLoad()) : nullptr;
+		Part->SetVisibility(StowMesh != nullptr && !Def->IsPlaceable());
+		if (!StowMesh || Def->IsPlaceable())
+		{
+			continue;
+		}
+		Part->SetStaticMesh(StowMesh);
+		FTransform Place;
+		if (Def->Category == EItemCategory::Tool)
+		{
+			// En croix dans le dos, comme rangés à un harnais : à plat contre le dos (derrière le sac s'il est porté),
+			// l'un penché à droite, l'autre à gauche, qui se croisent entre les omoplates.
+			const float Side = Tools == 0 ? 1.f : -1.f;
+			const float Behind = (bBag ? -46.f : -22.f) - 3.f * Tools;
+			++Tools;
+			const float Height = Def->Id == ErewhonFarm::Scythe ? 100.f : Def->Id == ErewhonFarm::Spade ? 85.f : 55.f;
+			// Le long de sa plus grande dimension (un modèle couché, comme la faux, se relève d'abord), centré.
+			const FVector Size = StowMesh->GetBoundingBox().GetSize();
+			const FTransform Upright = Size.Z >= FMath::Max(Size.X, Size.Y)
+				? FitToHeight(StowMesh, Height) * FTransform(FVector(0.f, 0.f, -Height * 0.5f)) * FTransform(FRotator(0.f, 90.f, 0.f))
+				: FitToLength(StowMesh, Height) * FTransform(FRotator(0.f, 0.f, 90.f));   // la longueur (sur Y) passe à la verticale
+			// Le manche de la faux est déjà en biais dans son modèle (~40°) : on n'ajoute que ce qui manque.
+			const float Lean = Def->Id == ErewhonFarm::Scythe ? -40.f : 0.f;
+			Place = Upright * FTransform(FRotator(0.f, 0.f, Side * 42.f - Lean), FVector(Behind, 0.f, 28.f));   // penché, dans le plan du dos
+		}
+		else
+		{
+			// À la ceinture, sur la hanche.
+			const float Side = Belt++ == 0 ? 1.f : -1.f;
+			Place = FitToHeight(StowMesh, 18.f) * FTransform(FRotator::ZeroRotator, FVector(4.f, Side * 30.f, -10.f));
+		}
+		Part->SetRelativeTransform(Place);
+	}
+	// Les sangles du harnais, dès qu'un outil est rangé dans le dos : deux fines lanières croisées, contre le dos.
+	if (HarnessStraps.IsEmpty())
+	{
+		const FLinearColor Leather = FLinearColor::FromSRGBColor(FColor(84, 56, 36));
+		for (const float Side : { 1.f, -1.f })
+		{
+			UStaticMeshComponent* Strap = AddShape(this, GetCapsuleComponent(), EShape::Cube, FVector(-19.f, 0.f, 30.f),
+				FVector(1.5f, 3.f, 46.f), Leather, FRotator(0.f, 0.f, Side * 40.f), false);
+			Strap->SetOwnerNoSee(ViewMode == EViewMode::FirstPerson);
+			HarnessStraps.Add(Strap);
+		}
+	}
+	for (UStaticMeshComponent* Strap : HarnessStraps)
+	{
+		Strap->SetVisibility(Tools > 0);
+	}
 }
 
 void AErewhonCharacter::ToggleInventory()
@@ -698,19 +866,32 @@ void AErewhonCharacter::BagAction()
 		PC->ServerToggleDrive(nullptr);   // lâcher la charrette
 		return;
 	}
+	if (Mount)
+	{
+		PC->ServerRideBhurak(nullptr);   // descendre
+		return;
+	}
+	if (ABhurak* Beast = Cast<ABhurak>(Target.Interactable.Get()))
+	{
+		if (!Beast->IsOwnedBy(State->GetPlayerKey()))
+		{
+			PC->ShowToast(LOCTEXT("NotYourBhurak", "Ce bhurak n'est pas à vous."));
+		}
+		else if (Beast->HasSaddle())
+		{
+			PC->ServerRideBhurak(Beast);
+		}
+		else
+		{
+			PC->ShowToast(LOCTEXT("NoSaddle", "Il faut une selle pour le monter : [E] pour le harnacher."));
+		}
+		return;
+	}
 	if (AStorageActor* Storage = Cast<AStorageActor>(Target.Interactable.Get()))
 	{
-		// Un pichet en main : on le remplit au récipient visé, ou on l'y vide.
-		const FName Hand = State->GetInventory()->GetHandItem();
-		if ((Hand == ErewhonApothecary::EmptyPitcher || !ErewhonApothecary::LiquidOfPitcher(Hand).IsNone())
-			&& (Storage->GetKind() == EStorageKind::Barrel || Storage->GetKind() == EStorageKind::Cauldron) && Storage->IsOwnedBy(State->GetPlayerKey()))
+		// Un pichet en main : F y puise au récipient visé, un litre par seconde (F de nouveau : on s'arrête).
+		if (TryPitcher(Storage, true))
 		{
-			if (Storage->GetKind() == EStorageKind::Cauldron && !State->IsApothecary())
-			{
-				PC->ShowToast(LOCTEXT("ApothecaryOnly", "Réservé aux apothicaires : choisissez cette classe à la mairie."));
-				return;
-			}
-			PC->ServerStartPour(Storage, 4, NAME_None, 1);
 			return;
 		}
 		// Le rack à petit bois : chacun peut s'y servir.
@@ -784,6 +965,10 @@ void AErewhonCharacter::BagAction()
 		{
 			PC->ServerToggleDrive(Cart);
 		}
+		else if (Cart->GetCartKind() == ECartKind::Cultivator)
+		{
+			PC->ServerToggleImplement(Cart);
+		}
 		else
 		{
 			PC->OpenCart(Cart);
@@ -818,6 +1003,24 @@ void AErewhonCharacter::StashAction()
 	// G : en visant son sac posé, on y vide ses poches.
 	AErewhonPlayerController* PC = GetController<AErewhonPlayerController>();
 	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	// Un pichet en main : G verse dans le récipient visé, un litre par seconde (G de nouveau : on s'arrête).
+	if (PC && State && !PC->IsMenuOpen())
+	{
+		if (AStorageActor* Aimed = Cast<AStorageActor>(Target.Interactable.Get()); Aimed && TryPitcher(Aimed, false))
+		{
+			return;
+		}
+	}
+	// Le bhurak : en selle ou en conduisant une charrette, on attelle ; sur un bhurak attelé, on dételle.
+	if (PC && State && !PC->IsMenuOpen())
+	{
+		ABhurak* AimedBeast = Cast<ABhurak>(Target.Interactable.Get());
+		if (Mount || DrivenCart || (AimedBeast && AimedBeast->GetTowedCart()))
+		{
+			PC->ServerHitchBhurak(AimedBeast);
+			return;
+		}
+	}
 	const ABackpack* Aimed = Cast<ABackpack>(Target.Interactable.Get());
 	if (PC && State && !PC->IsMenuOpen() && Aimed && Aimed->IsOwnedBy(State->GetPlayerKey()))
 	{
@@ -882,9 +1085,23 @@ void AErewhonCharacter::Primary()
 		}
 		return;
 	}
+	// Le pichet en main, devant un tonneau ou le chaudron : le clic gauche puise.
+	if (AStorageActor* Vessel = Cast<AStorageActor>(Target.Interactable.Get()); Vessel && TryPitcher(Vessel, true))
+	{
+		return;
+	}
 	if (IErewhonInteractable* Interactable = Cast<IErewhonInteractable>(Target.Interactable.Get()))
 	{
 		Interactable->Interact(PC);
+		return;
+	}
+	// En selle, un outil attelé : le clic actionne son levier.
+	if (Mount)
+	{
+		if (ACart* Towed = Mount->GetTowedCart(); Towed && Towed->IsImplement())
+		{
+			PC->ServerToggleImplement(Towed);
+		}
 		return;
 	}
 
@@ -892,26 +1109,50 @@ void AErewhonCharacter::Primary()
 	const AErewhonPlayerState* MyState = GetPlayerState<AErewhonPlayerState>();
 	const UItemDatabase* Items = UItemDatabase::Get(this);
 	const FItemDef* HandDef = MyState && Items ? Items->Find(MyState->GetInventory()->GetHandItem()) : nullptr;
-	if (HandDef && HandDef->Category == EItemCategory::Tool)
+	const FName HandId = HandDef ? HandDef->Id : NAME_None;
+	// La faux : un grand geste de deux secondes, et tout ce qui est à portée tombe.
+	if (HandId == ErewhonFarm::Scythe)
+	{
+		if (ScytheTime <= 0.f)
+		{
+			ScytheTime = ErewhonFarm::ScytheSeconds;
+			PlayToolSound(TEXT("scythe_sweep"), 0.8f);
+			PC->ServerScythe();
+		}
+		return;
+	}
+	// La bêche sur son champ : un coup d'une seconde, pas deux à la fois.
+	if (HandId == ErewhonFarm::Spade && Target.FieldCell != INDEX_NONE)
+	{
+		if (DigTime <= 0.f)
+		{
+			DigTime = ErewhonFarm::SpadeSeconds;
+			PlayToolSound(TEXT("spade_dig"), 0.7f);
+			PC->ServerWorkField(Target.FieldSector, Target.FieldCell, Target.FieldCorner);
+		}
+		return;
+	}
+	// Une cueillette (ou un autre geste) en cours : on attend qu'elle finisse.
+	if (PC->GetCraftJob().IsActive())
+	{
+		return;
+	}
+	const bool bSeeds = ErewhonFarm::CropOfSeed(HandId) != INDEX_NONE;
+	if (HandDef && (HandDef->Category == EItemCategory::Tool || (bSeeds && Target.FieldCell != INDEX_NONE)))
 	{
 		SwingTime = GSwingDuration;
-		if (!ToolAudio)
+		PlayToolSound(HandId == ErewhonFarm::Spade ? TEXT("spade_dig") : bSeeds ? TEXT("seeds_scatter") : TEXT("sickle_swish"), 0.7f);
+	}
+	// Une case de son champ : bêcher, semer, récolter.
+	if (Target.FieldCell != INDEX_NONE)
+	{
+		PC->ServerWorkField(Target.FieldSector, Target.FieldCell, Target.FieldCorner);
+		if (HandId.IsNone() && AnimatedBody && GetVelocity().Size2D() < 20.f && BodyAnimations.Contains(TEXT("pickup")))
 		{
-			ToolAudio = NewObject<UAudioComponent>(this);
-			ToolAudio->SetupAttachment(GetCapsuleComponent());
-			ToolAudio->SetRelativeLocation(FVector(40.f, 20.f, 30.f));
-			ToolAudio->bAutoActivate = false;
-			ToolAudio->bAllowSpatialization = false;
-			ToolAudio->RegisterComponent();
+			PlayBodyAnimation(TEXT("pickup"), false, 1.8f);
+			OneShotUntil = GetWorld()->GetTimeSeconds() + BodyAnimations[TEXT("pickup")]->GetPlayLength() / 1.8f;
 		}
-		if (USoundWave* Swish = ErewhonSound::Load(TEXT("sickle_swish")))
-		{
-			ToolAudio->Stop();
-			ToolAudio->SetSound(Swish);
-			ToolAudio->SetVolumeMultiplier(0.7f * ErewhonSound::ChannelVolume(ErewhonSound::EChannel::Effects));
-			ToolAudio->SetPitchMultiplier(FMath::FRandRange(0.93f, 1.07f));
-			ToolAudio->Play();
-		}
+		return;
 	}
 	if (!Target.Plant.IsValid())
 	{
@@ -952,17 +1193,57 @@ void AErewhonCharacter::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+#if !UE_BUILD_SHIPPING
+	// -ErewhonTestWalk=8 : tests, on avance tout droit pendant 8 s (après 6 s de chargement).
+	if (float WalkFor = 0.f; FParse::Value(FCommandLine::Get(), TEXT("ErewhonTestWalk="), WalkFor))
+	{
+		const float Age = GetGameTimeSinceCreation();
+		if (Age > 6.f && Age < 6.f + WalkFor)
+		{
+			AddMovementInput(FRotator(0.f, GetControlRotation().Yaw, 0.f).Vector(), 1.f);
+		}
+	}
+#endif
 	UpdateTarget();
 	UpdateHighlight();
 	UpdatePlacement();
 
+	// La faux : on arme vers la droite, on balaie largement vers la gauche, on revient.
+	if (ScytheTime > 0.f)
+	{
+		ScytheTime = FMath::Max(0.f, ScytheTime - DeltaSeconds);
+		const float P = 1.f - ScytheTime / ErewhonFarm::ScytheSeconds;
+		const float Yaw = P < 0.35f ? FMath::InterpEaseInOut(0.f, 70.f, P / 0.35f, 2.f)
+			: P < 0.8f ? FMath::InterpEaseInOut(70.f, -95.f, (P - 0.35f) / 0.45f, 2.f)
+			: FMath::InterpEaseInOut(-95.f, 0.f, (P - 0.8f) / 0.2f, 2.f);
+		const float Dip = FMath::Sin(P * UE_PI);
+		HeldFirstPerson->SetRelativeRotation(HeldFirstRotation + FRotator(-50.f * Dip, Yaw, -35.f * Dip));
+	}
+	// La bêche : le bas du fer part vers l'avant et s'enfonce, on fait levier (le haut du manche revient), puis on se redresse.
+	else if (DigTime > 0.f)
+	{
+		DigTime = FMath::Max(0.f, DigTime - DeltaSeconds);
+		const float P = 1.f - DigTime / ErewhonFarm::SpadeSeconds;
+		const float Thrust = P < 0.4f ? FMath::InterpEaseInOut(0.f, 1.f, P / 0.4f, 2.f)
+			: P < 0.75f ? 1.f : FMath::InterpEaseInOut(1.f, 0.f, (P - 0.75f) / 0.25f, 2.f);
+		const float Lever = P < 0.4f ? 0.f : P < 0.75f ? FMath::InterpEaseInOut(0.f, 1.f, (P - 0.4f) / 0.35f, 2.f)
+			: FMath::InterpEaseInOut(1.f, 0.f, (P - 0.75f) / 0.25f, 2.f);
+		HeldFirstPerson->SetRelativeLocation(HeldFirstLocation + FVector(30.f * Thrust, -6.f * Thrust, -14.f * Thrust));
+		// Basculé dans le repère de la vue (pas dans celui de la bêche, tournée) : le haut du manche part en arrière.
+		HeldFirstPerson->SetRelativeRotation((FQuat(FRotator(15.f * Thrust + 25.f * Lever, 0.f, 0.f)) * FQuat(HeldFirstRotation)).Rotator());
+		if (DigTime <= 0.f)
+		{
+			HeldFirstPerson->SetRelativeLocation(HeldFirstLocation);
+			HeldFirstPerson->SetRelativeRotation(HeldFirstRotation);
+		}
+	}
 	// Coup de l'objet tenu : un aller-retour vers le bas.
-	if (SwingTime > 0.f)
+	else if (SwingTime > 0.f)
 	{
 		SwingTime = FMath::Max(0.f, SwingTime - DeltaSeconds);
 		const float Progress = 1.f - SwingTime / GSwingDuration;
 		const float Arc = FMath::Sin(Progress * UE_PI) * 55.f;
-		HeldFirstPerson->SetRelativeRotation(GHeldFirstPersonRotation + FRotator(-Arc, -Arc * 0.4f, 0.f));
+		HeldFirstPerson->SetRelativeRotation(HeldFirstRotation + FRotator(-Arc, -Arc * 0.4f, 0.f));
 	}
 }
 
@@ -977,7 +1258,7 @@ float AErewhonCharacter::PotionRemaining(EPotionEffect Effect) const
 	return FMath::Max(0.f, static_cast<float>(PotionUntil[Index] - State->GetWorldClock()));
 }
 
-void AErewhonCharacter::DrinkPotion(EPotionEffect Effect)
+void AErewhonCharacter::DrinkPotion(EPotionEffect Effect, float Seconds)
 {
 	const AErewhonGameState* State = AErewhonGameState::Get(this);
 	if (!State || Effect == EPotionEffect::None)
@@ -991,7 +1272,7 @@ void AErewhonCharacter::DrinkPotion(EPotionEffect Effect)
 		PotionUntil[static_cast<int32>(EPotionEffect::Shrink)] = 0.0;
 		PotionUntil[static_cast<int32>(EPotionEffect::Grow)] = 0.0;
 	}
-	PotionUntil[static_cast<int32>(Effect)] = State->GetWorldClock() + ErewhonApothecary::PotionSeconds;
+	PotionUntil[static_cast<int32>(Effect)] = State->GetWorldClock() + (Seconds > 0.f ? Seconds : ErewhonApothecary::PotionSeconds);
 	MulticastPotionDrunk();
 }
 
@@ -1033,6 +1314,31 @@ void AErewhonCharacter::UpdatePotions(float DeltaSeconds)
 		GetCharacterMovement()->JumpZVelocity = 450.f * (HasPotion(EPotionEffect::Jump) ? 1.55f : 1.f);
 	}
 
+	// Lumière : une lueur chaude autour de soi, que tout le monde voit.
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		const float WantedGlow = HasPotion(EPotionEffect::Light) ? 1.f : 0.f;
+		if (WantedGlow > 0.f || GlowLevel > 0.f)
+		{
+			GlowLevel = FMath::FInterpConstantTo(GlowLevel, WantedGlow, DeltaSeconds, 0.8f);
+			if (!PotionGlow)
+			{
+				PotionGlow = NewObject<UPointLightComponent>(this);
+				PotionGlow->SetupAttachment(GetCapsuleComponent());
+				PotionGlow->SetRelativeLocation(FVector(0.f, 0.f, 60.f));
+				PotionGlow->SetIntensityUnits(ELightUnits::Lumens);
+				PotionGlow->SetAttenuationRadius(1400.f);
+				PotionGlow->SetLightColor(FLinearColor(1.f, 0.82f, 0.55f));
+				PotionGlow->SetSourceRadius(30.f);
+				PotionGlow->SetCastShadows(false);
+				PotionGlow->RegisterComponent();
+			}
+			const float Flicker = 1.f + 0.05f * FMath::Sin(GetWorld()->GetTimeSeconds() * 3.1f);
+			PotionGlow->SetIntensity(6000.f * GlowLevel * Flicker);
+			PotionGlow->SetVisibility(GlowLevel > 0.001f);
+		}
+	}
+
 	// Nyctalopie (pour soi seulement) : l'œil s'ouvre grand dans le noir, les couleurs pâlissent un peu.
 	if (!IsLocallyControlled())
 	{
@@ -1065,7 +1371,7 @@ void AErewhonCharacter::UpdateFootsteps(float DeltaSeconds)
 	// La foulée s'en déduit, si bien que ralentir dans l'herbe espace aussi les pas. Son selon la surface.
 	const UCharacterMovementComponent* Movement = GetCharacterMovement();
 	const float Speed = GetVelocity().Size2D();
-	if (!Movement->IsMovingOnGround() || Speed < 40.f)
+	if (!Movement->IsMovingOnGround() || Speed < 40.f || Mount)
 	{
 		StrideDistance = 0.f;
 		return;
@@ -1141,7 +1447,8 @@ void AErewhonCharacter::UpdatePlacement()
 
 	// Ce qu'on pose : la charrette, ou un conteneur (porté, ou neuf depuis la main).
 	const FName HandItem = State->GetInventory()->GetHandItem();
-	const bool bCart = !Carried && ErewhonPlaceables::IsCart(HandItem);
+	const bool bBhurak = !Carried && ErewhonPlaceables::IsBhurak(HandItem);
+	const bool bCart = !Carried && (ErewhonPlaceables::IsCart(HandItem) || bBhurak);
 	const TOptional<EStorageKind> HandKind = ErewhonPlaceables::StorageForItem(HandItem);
 	const EStorageKind Kind = Carried ? Carried->GetKind() : HandKind.Get(EStorageKind::Crate);
 
@@ -1237,7 +1544,7 @@ void AErewhonCharacter::UpdatePlacement()
 		PlacementGhost->RegisterComponent();
 	}
 	FTransform Fit;
-	UStaticMesh* GhostMesh = bCart ? ErewhonPlaceables::CartMesh(Fit) : ErewhonPlaceables::StorageMesh(Kind, Fit);
+	UStaticMesh* GhostMesh = bBhurak ? ABhurak::Mesh(Fit, static_cast<uint8>(FMath::Max(0, ABhurak::CoatOfItem(HandItem)))) : bCart ? ErewhonPlaceables::CartMesh(Fit) : ErewhonPlaceables::StorageMesh(Kind, Fit);
 	if (!GhostMesh)
 	{
 		GhostMesh = GetShape(EShape::Cube);
@@ -1298,7 +1605,42 @@ void AErewhonCharacter::UpdateHighlight()
 {
 	// La plante qu'on peut récolter s'entoure d'un halo chaud ; rien sinon.
 	TArray<TPair<UStaticMesh*, FTransform>> Parts;
-	if (Target.Plant.IsValid() && Target.bPlantHarvestable)
+	// La faux en main : tout ce qu'elle couperait, plantes sauvages et cultures mûres, chez soi et à portée.
+	const AErewhonPlayerState* MyState = GetPlayerState<AErewhonPlayerState>();
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	if (MyState && State && !IsMenuOpen() && MyState->GetInventory()->GetHandItem() == ErewhonFarm::Scythe)
+	{
+		USectorLayoutSubsystem* Layouts = GetWorld()->GetSubsystem<USectorLayoutSubsystem>();
+		const FVector Center = GetActorLocation();
+		const FIntPoint Here = ErewhonSector::FromWorld(Center);
+		TArray<TPair<UStaticMesh*, FTransform>> One;
+		for (int32 DY = -1; DY <= 1; ++DY)
+		{
+			for (int32 DX = -1; DX <= 1; ++DX)
+			{
+				const FIntPoint Coord = Here + FIntPoint(DX, DY);
+				const FString* OwnerKey = State->FindSectorOwnerKey(Coord);
+				const ASector* Sector = OwnerKey && *OwnerKey == MyState->GetPlayerKey() ? ASectorManager::FindLoaded(this, Coord) : nullptr;
+				if (!Sector)
+				{
+					continue;
+				}
+				const TSharedRef<const FSectorLayout> Layout = Layouts->GetLayout(Coord, State->GetWorldSeed());
+				TArray<int32> Near;
+				Layout->GatherNear(Center, ErewhonFarm::ScytheRadius, Near);
+				for (const int32 Index : Near)
+				{
+					if (!Layout->CoveredPlants.Contains(Index) && !State->IsHarvested(Coord, Index))
+					{
+						Sector->GetPlantVisual(Index, One);
+						Parts.Append(One);
+					}
+				}
+				Sector->GetRipeCropVisuals(FVector2D(Center), ErewhonFarm::ScytheRadius, Parts);
+			}
+		}
+	}
+	else if (Target.Plant.IsValid() && Target.bPlantHarvestable)
 	{
 		if (const ASector* Sector = ASectorManager::FindLoaded(this, Target.Plant.Sector))
 		{
@@ -1363,6 +1705,19 @@ void AErewhonCharacter::UpdateTarget()
 
 	FHitResult Hit;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(ErewhonTarget), false, this);
+	if (Mount)
+	{
+		// En selle, on vise par-dessus sa monture, ses sacoches et la charrette qu'elle tire.
+		TArray<AActor*> Ridden;
+		Mount->GetAttachedActors(Ridden, true, true);
+		Ridden.Add(Mount);
+		if (ACart* Towed = Mount->GetTowedCart())
+		{
+			Ridden.Add(Towed);
+			Towed->GetAttachedActors(Ridden, false, true);
+		}
+		Params.AddIgnoredActors(Ridden);
+	}
 	if (GetWorld()->LineTraceSingleByChannel(Hit, Eye, Eye + Look * Reach, ECC_Visibility, Params))
 	{
 		AActor* HitActor = Hit.GetActor();
@@ -1372,6 +1727,25 @@ void AErewhonCharacter::UpdateTarget()
 			{
 				Target.Interactable = HitActor;
 				Target.Hint = FText::Format(LOCTEXT("InteractHint", "[E] {0}"), Interactable->GetInteractionLabel());
+				// Le pichet en main, devant un tonneau ou le chaudron : puiser, verser, et ce qu'il contient.
+				const AStorageActor* Vessel = Cast<AStorageActor>(HitActor);
+				const FName HandItem = MyState->GetInventory()->GetHandItem();
+				const int32 InPitcher = ErewhonApothecary::PitcherLitersOf(HandItem);
+				if (Vessel && Vessel->GetKind() == EStorageKind::Cauldron && HandItem == ErewhonApothecary::EmptyVial)
+				{
+					Target.Hint = ErewhonApothecary::FindBrew(Vessel->GetLiquid())
+						? FText::Format(LOCTEXT("VialHint", "[Clic droit] Remplir une fiole (0,5 L) : {0}"), ErewhonApothecary::LiquidName(Vessel->GetLiquid()))
+						: LOCTEXT("VialNoBrew", "Il n'y a pas de breuvage à mettre en fiole");
+				}
+				else if (Vessel && InPitcher >= 0 && (Vessel->GetKind() == EStorageKind::Barrel || Vessel->GetKind() == EStorageKind::Cauldron))
+				{
+					const FText Content = InPitcher == 0 ? LOCTEXT("PitcherEmptyHint", "vide")
+						: FText::Format(LOCTEXT("PitcherHas", "{0} L de {1}"), FText::AsNumber(InPitcher), ErewhonApothecary::LiquidName(ErewhonApothecary::LiquidOfPitcher(HandItem)).ToLower());
+					const AErewhonPlayerController* MyPC = GetController<AErewhonPlayerController>();
+					Target.Hint = MyPC && MyPC->GetCraftJob().IsActive()
+						? FText::Format(LOCTEXT("PitcherBusy", "Transvasement…  [Clic] Arrêter    (pichet : {0})"), Content)
+						: FText::Format(LOCTEXT("PitcherHint", "[Clic gauche] Puiser   [Clic droit] Verser    (1 L par seconde ; pichet : {0})"), Content);
+				}
 				return;
 			}
 		}
@@ -1379,6 +1753,50 @@ void AErewhonCharacter::UpdateTarget()
 		Reach = Hit.Distance + 30.f;
 	}
 
+	// En selle : descendre, atteler.
+	if (Mount)
+	{
+		const ACart* Towed = Mount->GetTowedCart();
+		if (Towed && Towed->GetCartKind() == ECartKind::Cultivator)
+		{
+			Target.Hint = Towed->IsEngaged() ? LOCTEXT("RideHintCultDown", "Cultivateur baissé    [Clic] Le lever    [F] Descendre    [G] Dételer")
+				: LOCTEXT("RideHintCultUp", "Cultivateur levé    [Clic] Le baisser    [F] Descendre    [G] Dételer");
+		}
+		else if (Towed && Towed->GetCartKind() == ECartKind::Seeder)
+		{
+			Target.Hint = Towed->IsEngaged() ? LOCTEXT("RideHintSeedOn", "Semoir enclenché    [Clic] Désenclencher    [F] Descendre    [G] Dételer")
+				: LOCTEXT("RideHintSeedOff", "Semoir en roue libre    [Clic] Enclencher    [F] Descendre    [G] Dételer");
+		}
+		else
+		{
+			Target.Hint = Towed ? LOCTEXT("RideHintCart", "[F] Descendre    [G] Dételer la charrette")
+				: LOCTEXT("RideHint", "[F] Descendre    [G] Atteler une charrette ou un outil tout proche");
+		}
+		return;
+	}
+	// Ce qu'on tient : la faux fauche tout autour, sans viser.
+	const FName HandId = MyState->GetInventory()->GetHandItem();
+	if (HandId == ErewhonFarm::Scythe)
+	{
+		Target.Hint = LOCTEXT("ScytheHint", "[Clic] Faucher : tout ce qui pousse à portée, autour de vous");
+		return;
+	}
+	// Une case de son champ, sous le regard.
+	if (Hit.bBlockingHit && Hit.ImpactNormal.Z > 0.5f && Hit.Distance <= Settings.HarvestReach())
+	{
+		const FIntPoint FieldSector = ErewhonSector::FromWorld(Hit.ImpactPoint);
+		const FString* FieldOwner = State->FindSectorOwnerKey(FieldSector);
+		const int32 Cell = ErewhonFarm::CellAt(FieldSector, FVector2D(Hit.ImpactPoint));
+		if (FieldOwner && *FieldOwner == MyState->GetPlayerKey() && ErewhonFarm::IsFieldCell(FieldSector, State->GetBuildings(FieldSector), Cell))
+		{
+			Target.FieldSector = FieldSector;
+			Target.FieldCell = Cell;
+			const FVector2D CellMid = ErewhonFarm::CellCenter(FieldSector, Cell);
+			Target.FieldCorner = (Hit.ImpactPoint.X > CellMid.X ? 1 : 0) | (Hit.ImpactPoint.Y > CellMid.Y ? 2 : 0);
+			Target.Hint = FieldHint(State->FindFieldCell(FieldSector, Cell), HandId);
+			return;
+		}
+	}
 	const double Now = GetWorld()->GetTimeSeconds();
 	for (auto It = PendingHarvests.CreateIterator(); It; ++It)
 	{
@@ -1411,6 +1829,157 @@ void AErewhonCharacter::UpdateTarget()
 	Target.Hint = Target.bPlantHarvestable
 		? FText::Format(LOCTEXT("HarvestHint", "[Clic] Récolter : {0}"), PlantName)
 		: FText::Format(LOCTEXT("NotOwnedHint", "{0} — secteur non possédé"), PlantName);
+}
+
+float AErewhonCharacter::GetCarriedWeight() const
+{
+	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	if (!State)
+	{
+		return 0.f;
+	}
+	const UBackpackComponent* Bag = State->GetBackpack();
+	return State->GetInventory()->GetTotalWeight() + (Bag && Bag->IsWorn() ? Bag->GetTotalWeight() : 0.f);
+}
+
+float AErewhonCharacter::GetCarryComfort() const
+{
+	// En selle, c'est le bhurak qui porte ; la potion de force double ce qu'on supporte.
+	return UErewhonSettings::Get().CarryComfortKg * (Mount ? 4.f : 1.f) * (HasPotion(EPotionEffect::Strength) ? 2.f : 1.f);
+}
+
+float AErewhonCharacter::GetCarryMax() const
+{
+	return UErewhonSettings::Get().CarryMaxKg * (Mount ? 4.f : 1.f) * (HasPotion(EPotionEffect::Strength) ? 2.f : 1.f);
+}
+
+void AErewhonCharacter::OnRep_Mount()
+{
+	// En selle : une capsule plus large (le corps de la bête), le regard à hauteur de cavalier.
+	const float Rise = Mount ? ABhurak::RideRise : 0.f;
+	GetCapsuleComponent()->SetCapsuleRadius(Mount ? 70.f : 32.f);
+	Camera->SetRelativeLocation(FVector(0.f, 0.f, 66.f + Rise));
+	CameraArm->SetRelativeLocation(FVector(0.f, 0.f, 62.f + Rise));
+	if (AnimatedBody && !Mount)
+	{
+		AnimatedBody->SetRelativeRotation(FRotator(0.f, GBodyMeshYaw, 0.f));
+	}
+}
+
+void AErewhonCharacter::Secondary()
+{
+	// Clic droit, le pichet en main devant un tonneau ou le chaudron : verser.
+	AErewhonPlayerController* PC = GetController<AErewhonPlayerController>();
+	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	if (!PC || !State || PC->IsMenuOpen())
+	{
+		return;
+	}
+	AStorageActor* Vessel = Cast<AStorageActor>(Target.Interactable.Get());
+	// Une fiole vide en main devant le chaudron : on la remplit d'un demi-litre de breuvage, c'est une potion.
+	if (Vessel && Vessel->GetKind() == EStorageKind::Cauldron && State->GetInventory()->GetHandItem() == ErewhonApothecary::EmptyVial)
+	{
+		if (!State->IsApothecary())
+		{
+			PC->ShowToast(LOCTEXT("ApothecaryOnly", "Réservé aux apothicaires : choisissez cette classe à la mairie."));
+			return;
+		}
+		PC->ServerStartPour(Vessel, 2, NAME_None, 1);
+		return;
+	}
+	TryPitcher(Vessel, false);
+}
+
+bool AErewhonCharacter::TryPitcher(AStorageActor* Storage, bool bDraw)
+{
+	AErewhonPlayerController* PC = GetController<AErewhonPlayerController>();
+	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
+	if (!PC || !State || !Storage || ErewhonApothecary::PitcherLitersOf(State->GetInventory()->GetHandItem()) < 0
+		|| (Storage->GetKind() != EStorageKind::Barrel && Storage->GetKind() != EStorageKind::Cauldron) || !Storage->IsOwnedBy(State->GetPlayerKey()))
+	{
+		return false;
+	}
+	if (Storage->GetKind() == EStorageKind::Cauldron && !State->IsApothecary())
+	{
+		PC->ShowToast(LOCTEXT("ApothecaryOnly", "Réservé aux apothicaires : choisissez cette classe à la mairie."));
+		return true;
+	}
+	// Déjà en train de transvaser : la touche arrête (le litre entamé ne compte pas).
+	if (PC->GetCraftJob().IsActive())
+	{
+		PC->ServerStopCraft();
+		return true;
+	}
+	PC->ServerStartPour(Storage, bDraw ? 5 : 6, NAME_None, 1);
+	return true;
+}
+
+void AErewhonCharacter::PlayToolSound(const TCHAR* SoundName, float Volume)
+{
+	if (!ToolAudio)
+	{
+		ToolAudio = NewObject<UAudioComponent>(this);
+		ToolAudio->SetupAttachment(GetCapsuleComponent());
+		ToolAudio->SetRelativeLocation(FVector(40.f, 20.f, 30.f));
+		ToolAudio->bAutoActivate = false;
+		ToolAudio->bAllowSpatialization = false;
+		ToolAudio->RegisterComponent();
+	}
+	if (USoundWave* Sound = ErewhonSound::Load(SoundName))
+	{
+		ToolAudio->Stop();
+		ToolAudio->SetSound(Sound);
+		ToolAudio->SetVolumeMultiplier(Volume * ErewhonSound::ChannelVolume(ErewhonSound::EChannel::Effects));
+		ToolAudio->SetPitchMultiplier(FMath::FRandRange(0.93f, 1.07f));
+		ToolAudio->Play();
+	}
+}
+
+FText AErewhonCharacter::FieldHint(const FFieldCellEntry* Entry, FName Hand) const
+{
+	using namespace ErewhonFarm;
+	const UItemDatabase* Items = UItemDatabase::Get(this);
+	const auto NameOf = [Items](FName Id)
+	{
+		const FItemDef* Def = Items ? Items->Find(Id) : nullptr;
+		return Def ? Def->Name : FText::FromName(Id);
+	};
+	if (Hand == Spade)
+	{
+		return Entry ? LOCTEXT("FieldTilled", "Terre retournée") : LOCTEXT("FieldTill", "[Clic] Retourner la terre");
+	}
+	if (const int32 Seed = CropOfSeed(Hand); Seed != INDEX_NONE)
+	{
+		if (!Entry)
+		{
+			return LOCTEXT("FieldTillFirst", "Terre grossière : retournez-la d'abord à la bêche");
+		}
+		if (Entry->Crop == 0)
+		{
+			return FText::Format(LOCTEXT("FieldSow", "[Clic] Semer : {0}"), NameOf(Crops()[Seed].Product));
+		}
+	}
+	if (!Entry)
+	{
+		return LOCTEXT("FieldRaw", "Terre grossière : à retourner à la bêche (General Store)");
+	}
+	if (Entry->Crop == 0 || !Crops().IsValidIndex(Entry->Crop - 1))
+	{
+		return LOCTEXT("FieldReady", "Terre retournée : semez-y des graines (General Store)");
+	}
+	const FText Product = NameOf(Crops()[Entry->Crop - 1].Product);
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	const double Now = State ? State->GetWorldClock() : 0.0;
+	const int32 Grown = Stage(Entry->SownAt, Now);
+	if (Grown >= RipeStage)
+	{
+		return Hand.IsNone() || Hand == Sickle ? FText::Format(LOCTEXT("FieldHarvest", "[Clic] Récolter : {0}"), Product)
+			: FText::Format(LOCTEXT("FieldRipe", "{0} : mûr (à la main, à la cerpe ou à la faux)"), Product);
+	}
+	const int32 Minutes = FMath::Max(1, FMath::CeilToInt32((Entry->SownAt + DaySeconds() * RipeStage - Now) / 60.0));
+	const FText StageText = Grown == 0 ? LOCTEXT("StageSown", "semé, rien ne paraît encore")
+		: Grown == 1 ? LOCTEXT("StageSprouts", "petites pousses") : LOCTEXT("StageTall", "grandes pousses");
+	return FText::Format(LOCTEXT("FieldGrowing", "{0} : {1} — mûr dans {2} min"), Product, StageText, Minutes);
 }
 
 #undef LOCTEXT_NAMESPACE

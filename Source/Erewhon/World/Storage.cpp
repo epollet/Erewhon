@@ -1,4 +1,5 @@
 #include "World/Storage.h"
+#include "GameFramework/Character.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Core/ErewhonPlayerController.h"
@@ -22,6 +23,8 @@
 #include "Player/ErewhonCharacter.h"
 #include "Core/ErewhonGameState.h"
 #include "World/SectorTypes.h"
+#include "World/Bhurak.h"
+#include "World/Farm.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonStorage"
 
@@ -47,6 +50,13 @@ namespace
 		const AErewhonPlayerState* State = Local ? Local->GetPlayerState<AErewhonPlayerState>() : nullptr;
 		return State ? State->GetPlayerKey() : None;
 	}
+}
+
+namespace
+{
+	/** Rotation des modèles d'outils tractés pour que leurs brancards pointent vers −X. */
+	constexpr float GCultivatorYaw = 270.f;
+	constexpr float GSeederYaw = 270.f;
 }
 
 namespace ErewhonPlaceables
@@ -120,7 +130,12 @@ namespace ErewhonPlaceables
 
 	bool IsCart(FName ItemId)
 	{
-		return ItemId == TEXT("cart");
+		return CartKindForItem(ItemId).IsSet();
+	}
+
+	bool IsBhurak(FName ItemId)
+	{
+		return ABhurak::CoatOfItem(ItemId) != INDEX_NONE;
 	}
 
 	int32 Capacity(EStorageKind Kind)
@@ -130,10 +145,11 @@ namespace ErewhonPlaceables
 		{
 		case EStorageKind::Crate:  return 12;
 		case EStorageKind::Barrel: return 30;
-		case EStorageKind::Shelf:  return ErewhonApothecary::ShelfRows;
+		case EStorageKind::Shelf:  return ErewhonApothecary::ShelfSlots;
 		case EStorageKind::DryingRack: return 6;
 		case EStorageKind::Cauldron: return 6;   // ses ingrédients
 		case EStorageKind::FirewoodRack: return 4;
+		case EStorageKind::Saddlebag: return 12;   // un sac à dos
 		default:                   return 0;
 		}
 	}
@@ -163,6 +179,7 @@ namespace ErewhonPlaceables
 		case EStorageKind::Potpourri:  return 14.f;
 		case EStorageKind::CauldronStand: return 150.f;
 		case EStorageKind::FirewoodRack:  return 110.f;
+		case EStorageKind::Saddlebag:     return 52.f;
 		default:                     return 36.f;
 		}
 	}
@@ -181,6 +198,7 @@ namespace ErewhonPlaceables
 		case EStorageKind::Potpourri:  return LOCTEXT("Potpourri", "Pot-pourri");
 		case EStorageKind::CauldronStand: return LOCTEXT("CauldronStand", "Support de chaudron");
 		case EStorageKind::FirewoodRack:  return LOCTEXT("FirewoodRack", "Rack à petit bois");
+		case EStorageKind::Saddlebag:     return LOCTEXT("Saddlebag", "Sacoche");
 		default:                     return LOCTEXT("Crate", "Cagette");
 		}
 	}
@@ -242,7 +260,7 @@ namespace ErewhonPlaceables
 		return {};
 	}
 
-	UStaticMeshComponent* AddBundle(AActor* Owner, USceneComponent* Parent, FName ItemId, const FTransform& At, float Length)
+	UStaticMeshComponent* AddBundle(AActor* Owner, USceneComponent* Parent, FName ItemId, const FTransform& At, float Length, bool bLying)
 	{
 		FString Plant = ItemId.ToString();
 		const bool bDried = Plant.RemoveFromStart(TEXT("dried_"));
@@ -256,7 +274,17 @@ namespace ErewhonPlaceables
 		Part->SetupAttachment(Parent);
 		// Séché : plus fin (en travers), et de la couleur de la paille.
 		const FTransform Thin(FRotator::ZeroRotator, FVector::ZeroVector, bDried ? FVector(0.75f, 1.f, 0.75f) : FVector::OneVector);
-		Part->SetRelativeTransform(FitToLength(Mesh, Length) * Thin * At);
+		FTransform Fit = FitToLength(Mesh, Length);
+		const FBox Bounds = Mesh->GetBoundingBox();
+		const FVector Size = Bounds.GetSize();
+		if (bLying && Size.Z > FMath::Max(Size.X, Size.Y))
+		{
+			// Une plante haute (la fougère) : couchée, sa hauteur dans la longueur (Y), posée à plat.
+			const float Scale = Length / FMath::Max(1.f, static_cast<float>(Size.Z));
+			Fit = FTransform(-Bounds.GetCenter()) * FTransform(FRotator::ZeroRotator, FVector::ZeroVector, FVector(Scale))
+				* FTransform(FRotator(0.f, 0.f, 90.f), FVector(0.f, 0.f, Size.Y * Scale * 0.5f));
+		}
+		Part->SetRelativeTransform(Fit * Thin * At);
 		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Part->SetCastShadow(false);
 		if (bDried)
@@ -284,8 +312,9 @@ namespace ErewhonPlaceables
 		}
 		const TCHAR* ModelName = Kind == EStorageKind::Mortar ? TEXT("SM_mortar") : Kind == EStorageKind::Cauldron ? TEXT("SM_cauldron")
 			: Kind == EStorageKind::DryingRack ? TEXT("SM_drying_rack") : Kind == EStorageKind::Workbench ? TEXT("SM_workbench")
-			: Kind == EStorageKind::Potpourri ? TEXT("SM_potpourri") : Kind == EStorageKind::FirewoodRack ? TEXT("SM_firewood_rack")
-			: Kind == EStorageKind::CauldronStand ? TEXT("SM_cauldron_stand") : nullptr;
+			: Kind == EStorageKind::Potpourri ? TEXT("SM_potpourri")
+			: Kind == EStorageKind::FirewoodRack ? (LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_firewood_rack_empty")) ? TEXT("SM_firewood_rack_empty") : TEXT("SM_firewood_rack"))
+			: Kind == EStorageKind::CauldronStand ? TEXT("SM_cauldron_stand") : Kind == EStorageKind::Saddlebag ? TEXT("SM_saddlebag") : nullptr;
 		if (ModelName)
 		{
 			UStaticMesh* Model = LoadGenerated<UStaticMesh>(TEXT("Meshes"), ModelName);
@@ -308,6 +337,34 @@ namespace ErewhonPlaceables
 			OutFit = Kind == EStorageKind::Barrel ? FitToHeight(Mesh, Height(Kind)) : FitToLength(Mesh, 60.f, Height(Kind));
 		}
 		return Mesh;
+	}
+
+	UStaticMesh* ImplementMesh(ECartKind Kind, FTransform& OutFit)
+	{
+		if (Kind == ECartKind::Cart)
+		{
+			return CartMesh(OutFit);
+		}
+		// Le grand côté (les brancards) sur Y une fois mis à la longueur : on le couche sur X, brancards vers −X.
+		UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), Kind == ECartKind::Cultivator ? TEXT("SM_cultivator") : TEXT("SM_seeder"));
+		if (Mesh)
+		{
+			OutFit = FitToLength(Mesh, Kind == ECartKind::Cultivator ? 300.f : 320.f) * FTransform(FRotator(0.f, Kind == ECartKind::Cultivator ? GCultivatorYaw : GSeederYaw, 0.f), FVector(Kind == ECartKind::Cultivator ? -40.f : 70.f, 0.f, 0.f));
+		}
+		return Mesh;
+	}
+
+	TOptional<ECartKind> CartKindForItem(FName ItemId)
+	{
+		if (ItemId == TEXT("cart")) { return ECartKind::Cart; }
+		if (ItemId == TEXT("cultivator")) { return ECartKind::Cultivator; }
+		if (ItemId == TEXT("seeder")) { return ECartKind::Seeder; }
+		return {};
+	}
+
+	FName ItemForCartKind(ECartKind Kind)
+	{
+		return Kind == ECartKind::Cultivator ? FName(TEXT("cultivator")) : Kind == ECartKind::Seeder ? FName(TEXT("seeder")) : FName(TEXT("cart"));
 	}
 
 	UStaticMesh* CartMesh(FTransform& OutFit)
@@ -610,7 +667,12 @@ void AStorageActor::UpdateBrewing(float DeltaSeconds)
 	Temperature = FMath::FInterpConstantTo(Temperature, Target, DeltaSeconds, Rate);
 
 	// Le breuvage : de l'eau, les bons ingrédients dans la bonne proportion, le temps qu'il faut à la bonne température.
-	const FBrew* Brew = Liquid == ErewhonApothecary::Water ? MatchBrew(Slots, Water) : nullptr;
+	// La base se fait dans l'eau ; les autres breuvages, dans la base.
+	const FBrew* Brew = MatchBrew(Slots, Water);
+	if (Brew && Liquid != SolventOf(*Brew))
+	{
+		Brew = nullptr;
+	}
 	if (Brew && Temperature >= Brew->MinTemp && Temperature <= Brew->MaxTemp)
 	{
 		BrewProgress += DeltaSeconds;
@@ -698,11 +760,44 @@ void AStorageActor::RefreshDisplay()
 			const FTransform At = bCrate
 				? FTransform(FRotator(0.f, 90.f + (Shown % 2 ? 6.f : -6.f), 0.f), FVector(-14.f + 14.f * (Shown % 3), (Shown < 3 ? -8.f : 8.f), 8.f + 6.f * (Shown / 3)))
 				: FTransform(FRotator(0.f, Shown * 60.f, 0.f), FVector(0.f, 0.f, ErewhonPlaceables::Height(EStorageKind::Barrel) + 2.f));
-			if (UStaticMeshComponent* Bundle = ErewhonPlaceables::AddBundle(this, DisplayFrame, Slot.ItemId, At, bCrate ? 46.f : 40.f))
+			if (UStaticMeshComponent* Bundle = ErewhonPlaceables::AddBundle(this, DisplayFrame, Slot.ItemId, At, bCrate ? 46.f : 40.f, true))
 			{
 				DisplayParts.Add(Bundle);
 				++Shown;
 			}
+		}
+	}
+	else if (Kind == EStorageKind::FirewoodRack && GetNetMode() != NM_DedicatedServer)
+	{
+		// Des piles de bûchettes sur les deux étagères, une pile toutes les cinq brassées.
+		if (!DisplayFrame)
+		{
+			DisplayFrame = NewObject<USceneComponent>(this);
+			DisplayFrame->SetupAttachment(Root);
+			DisplayFrame->RegisterComponent();
+			AddInstanceComponent(DisplayFrame);
+		}
+		for (UPrimitiveComponent* Part : DisplayParts)
+		{
+			if (Part)
+			{
+				Part->DestroyComponent();
+			}
+		}
+		DisplayParts.Reset();
+		UStaticMesh* Logs = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_firewood"));
+		const int32 Piles = FMath::Min(8, (CountStored(TEXT("firewood")) + 4) / 5);
+		for (int32 i = 0; i < Piles && Logs; ++i)
+		{
+			const FVector At(0.f, -39.f + 26.f * (i % 4), i < 4 ? 14.f : 58.f);
+			UStaticMeshComponent* Pile = NewObject<UStaticMeshComponent>(this);
+			Pile->SetStaticMesh(Logs);
+			Pile->SetupAttachment(DisplayFrame);
+			Pile->SetRelativeTransform(FitToLength(Logs, 30.f, 22.f) * FTransform(FRotator(0.f, 90.f, 0.f), At));
+			Pile->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Pile->RegisterComponent();
+			AddInstanceComponent(Pile);
+			DisplayParts.Add(Pile);
 		}
 	}
 	else if (Kind == EStorageKind::DryingRack && DisplayFrame && GetNetMode() != NM_DedicatedServer)
@@ -748,7 +843,7 @@ void AStorageActor::RefreshDisplay()
 
 int32 AStorageActor::SlotCap(const FItemDef& Def) const
 {
-	return Kind == EStorageKind::Shelf || Kind == EStorageKind::DryingRack || Kind == EStorageKind::FirewoodRack ? FMath::Min(Def.MaxStack, ErewhonApothecary::PotionsPerSlot) : Def.MaxStack;
+	return Kind == EStorageKind::DryingRack || Kind == EStorageKind::FirewoodRack ? FMath::Min(Def.MaxStack, ErewhonApothecary::PotionsPerSlot) : Def.MaxStack;
 }
 
 void AStorageActor::ApplyCollision()
@@ -913,12 +1008,14 @@ bool AStorageActor::Accepts(const FItemDef& Def) const
 	{
 	case EStorageKind::Crate:
 		// Des plantes, et ce qu'on en tire de petit : teintures, pots-pourris.
-		return Def.Category == EItemCategory::Plant || Def.Id.ToString().StartsWith(TEXT("dye_")) || Def.Id == TEXT("potpourri");
+		return Def.Category == EItemCategory::Plant || Def.Id.ToString().StartsWith(TEXT("dried_")) || Def.Id.ToString().StartsWith(TEXT("dye_"))
+			|| Def.Id == TEXT("potpourri");
 	case EStorageKind::Barrel: return Def.Category == EItemCategory::Plant && Water <= 0.01f;   // un tonneau de liquide ne tient que ça
 	case EStorageKind::Shelf:  return ErewhonApothecary::IsShelvable(Def);
 	case EStorageKind::DryingRack: return Def.Category == EItemCategory::Plant;
 	case EStorageKind::FirewoodRack: return Def.Id == TEXT("firewood");
-	case EStorageKind::Cauldron: return ErewhonApothecary::IsIngredient(Def) && (Water <= 0.01f || Liquid == ErewhonApothecary::Water);
+	case EStorageKind::Saddlebag: return Def.Category != EItemCategory::Placeable && Def.Category != EItemCategory::Backpack;
+	case EStorageKind::Cauldron: return ErewhonApothecary::IsIngredient(Def) && (Water <= 0.01f || Liquid == ErewhonApothecary::Water || Liquid == ErewhonApothecary::BaseLiquid);
 	default:                   return false;
 	}
 }
@@ -1057,6 +1154,8 @@ FText AStorageActor::GetInteractionLabel() const
 		{
 		case EStorageKind::Table:
 			return LOCTEXT("MineTable", "Prendre : Table");
+		case EStorageKind::Saddlebag:
+			return LOCTEXT("MineSaddlebag", "Sacoche du bhurak    [E] / [F] Ouvrir");
 		case EStorageKind::Mortar:
 			return LOCTEXT("MineMortar", "Prendre : Mortier    [F] Piler des plantes");
 		case EStorageKind::Cauldron:
@@ -1099,6 +1198,15 @@ FText AStorageActor::GetInteractionLabel() const
 
 void AStorageActor::Interact(AErewhonPlayerController* Controller)
 {
+	if (Controller && Kind == EStorageKind::Saddlebag)
+	{
+		// La sacoche reste sur le harnais : on l'ouvre.
+		if (IsOwnedBy(LocalPlayerKey(this)))
+		{
+			Controller->OpenStorage(this);
+		}
+		return;
+	}
 	if (Controller)
 	{
 		Controller->ServerPickUpStorage(this);
@@ -1126,12 +1234,128 @@ void ACart::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimePro
 	DOREPLIFETIME(ACart, Driver);
 	DOREPLIFETIME(ACart, Loads);
 	DOREPLIFETIME(ACart, Wood);
+	DOREPLIFETIME(ACart, CartKind);
+	DOREPLIFETIME(ACart, bEngaged);
 }
 
-void ACart::Setup(const FString& InOwnerKey, const FString& InOwnerName)
+void ACart::Setup(const FString& InOwnerKey, const FString& InOwnerName, ECartKind InKind)
 {
 	OwnerKey = InOwnerKey;
 	OwnerName = InOwnerName;
+	CartKind = InKind;
+}
+
+bool ACart::AcceptsBulk(FName ItemId) const
+{
+	switch (CartKind)
+	{
+	case ECartKind::Seeder: return ErewhonFarm::CropOfSeed(ItemId) != INDEX_NONE;
+	case ECartKind::Cultivator: return false;
+	default: return ItemId == TEXT("firewood");
+	}
+}
+
+float ACart::DragFactor() const
+{
+	if (!bEngaged)
+	{
+		return 1.f;
+	}
+	return CartKind == ECartKind::Cultivator ? 0.5f : CartKind == ECartKind::Seeder ? 0.7f : 1.f;
+}
+
+void ACart::SetEngaged(bool bOn)
+{
+	bEngaged = bOn && IsImplement();
+	OnRep_Engaged();
+	ForceNetUpdate();
+}
+
+void ACart::OnRep_Engaged()
+{
+	// Le cultivateur s'abaisse dans la terre ; le semoir ne bouge pas (sa roue tournera en roulant).
+	if (ImplementBody && CartKind == ECartKind::Cultivator)
+	{
+		FTransform Lowered = ImplementRest;
+		Lowered.AddToTranslation(FVector(0.f, 0.f, bEngaged ? -9.f : 0.f));
+		ImplementBody->SetRelativeTransform(Lowered);
+	}
+}
+
+void ACart::Work()
+{
+	using namespace ErewhonFarm;
+	AErewhonGameState* State = AErewhonGameState::Get(this);
+	if (!State || !bEngaged || !Cast<ABhurak>(Driver))
+	{
+		return;
+	}
+	const double Now = State->GetWorldClock();
+	// Les cases sous l'outil : le cultivateur sur sa largeur (trois cases), le semoir trois sur trois autour de lui.
+	TArray<FVector2D> Points;
+	if (CartKind == ECartKind::Cultivator)
+	{
+		for (const float Y : { -150.f, 0.f, 150.f })
+		{
+			Points.Add(FVector2D(GetActorTransform().TransformPosition(FVector(AxleX, Y, 0.f))));
+		}
+	}
+	else
+	{
+		for (const float X : { -200.f, 0.f, 200.f })
+		{
+			for (const float Y : { -200.f, 0.f, 200.f })
+			{
+				Points.Add(FVector2D(GetActorTransform().TransformPosition(FVector(AxleX + X, Y, 0.f))));
+			}
+		}
+	}
+	bool bWoodChanged = false;
+	for (const FVector2D& Point : Points)
+	{
+		const FIntPoint Sector = ErewhonSector::FromWorld(FVector(Point, 0.f));
+		const FString* FieldOwner = State->FindSectorOwnerKey(Sector);
+		const int32 Cell = CellAt(Sector, Point);
+		if (!FieldOwner || *FieldOwner != OwnerKey || !IsFieldCell(Sector, State->GetBuildings(Sector), Cell))
+		{
+			continue;
+		}
+		const FFieldCellEntry* Entry = State->FindFieldCell(Sector, Cell);
+		if (CartKind == ECartKind::Cultivator)
+		{
+			if (!Entry)
+			{
+				State->SetFieldCell(Sector, Cell, 0, Now);
+			}
+			continue;
+		}
+		if (!Entry || Entry->Crop != 0)
+		{
+			continue;
+		}
+		// Un sac de graines sème neuf cases ; on en prend un dans la trémie quand le précédent est vide.
+		if (SeedCredit <= 0)
+		{
+			FInventorySlot* Bag = Wood.FindByPredicate([](const FInventorySlot& S) { return !S.IsEmpty() && CropOfSeed(S.ItemId) != INDEX_NONE; });
+			if (!Bag)
+			{
+				break;
+			}
+			SeedCrop = CropOfSeed(Bag->ItemId);
+			SeedCredit = 9;
+			if (--Bag->Count <= 0)
+			{
+				Bag->Clear();
+			}
+			bWoodChanged = true;
+		}
+		State->SetFieldCell(Sector, Cell, static_cast<uint8>(SeedCrop + 1), Now);
+		--SeedCredit;
+	}
+	if (bWoodChanged)
+	{
+		CommitWood();
+	}
 }
 
 FTransform ACart::SlotTransform(int32 Slot)
@@ -1144,6 +1368,46 @@ void ACart::BeginPlay()
 {
 	Super::BeginPlay();
 	FTransform Fit;
+	if (IsImplement())
+	{
+		if (UStaticMesh* Tool = ErewhonPlaceables::ImplementMesh(CartKind, Fit))
+		{
+			ImplementBody = NewObject<UStaticMeshComponent>(this);
+			ImplementBody->SetStaticMesh(Tool);
+			ImplementBody->SetupAttachment(Root);
+			ImplementBody->SetRelativeTransform(Fit);
+			ImplementRest = Fit;
+			ImplementBody->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+			ImplementBody->RegisterComponent();
+			AddInstanceComponent(ImplementBody);
+		}
+		else
+		{
+			// Repli : un châssis bas, deux brancards.
+			ImplementBody = AddShape(this, Root, EShape::Cube, FVector(20, 0, 40), FVector(120, 150, 30), Palette::WoodDark, FRotator::ZeroRotator, true);
+			ImplementRest = ImplementBody->GetRelativeTransform();
+			for (const float Y : { -46.f, 46.f })
+			{
+				AddShape(this, Root, EShape::Cube, FVector(-90, Y, 60), FVector(130, 6, 6), Palette::WoodLight, FRotator::ZeroRotator, false);
+			}
+		}
+		if (CartKind == ECartKind::Seeder)
+		{
+			// La petite roue de distribution, sur le flanc : elle tourne quand le semoir roule, enclenché.
+			Spinner = NewObject<USceneComponent>(this);
+			Spinner->SetupAttachment(Root);
+			Spinner->SetRelativeLocation(FVector(AxleX + 20.f, 70.f, 55.f));
+			Spinner->RegisterComponent();
+			AddInstanceComponent(Spinner);
+			for (int32 Spoke = 0; Spoke < 3; ++Spoke)
+			{
+				AddShape(this, Spinner, EShape::Cube, FVector::ZeroVector, FVector(48.f, 3.f, 5.f), Palette::WoodDark, FRotator(Spoke * 60.f, 0.f, 0.f), false);
+			}
+		}
+		OnRep_Engaged();
+		CommitWood();
+		return;
+	}
 	if (UStaticMesh* Mesh = ErewhonPlaceables::CartMesh(Fit))
 	{
 		UStaticMeshComponent* Body = NewObject<UStaticMeshComponent>(this);
@@ -1200,6 +1464,20 @@ void ACart::BeginPlay()
 
 FText ACart::GetInteractionLabel() const
 {
+	if (IsOwnedBy(LocalPlayerKey(this)) && CartKind == ECartKind::Cultivator)
+	{
+		return bEngaged ? LOCTEXT("CultivatorDown", "Cultivateur (baissé : il retourne la terre)    [E] Le lever    [F] Le tirer (devant les brancards)")
+			: LOCTEXT("CultivatorUp", "Cultivateur (levé)    [E] Le baisser    [F] Le tirer (devant les brancards)");
+	}
+	if (IsOwnedBy(LocalPlayerKey(this)) && CartKind == ECartKind::Seeder)
+	{
+		return bEngaged ? LOCTEXT("SeederOn", "Semoir (roue enclenchée)    [E] Désenclencher    [F] La trémie (sur le côté) ou le tirer (devant)")
+			: LOCTEXT("SeederOff", "Semoir (roue libre)    [E] Enclencher    [F] La trémie (sur le côté) ou le tirer (devant)");
+	}
+	if (IsOwnedBy(LocalPlayerKey(this)) && Cast<ABhurak>(Driver))
+	{
+		return LOCTEXT("CartTowed", "Charrette attelée au bhurak    [F] Ouvrir (sur le côté)    [G] sur le bhurak : dételer");
+	}
 	if (IsOwnedBy(LocalPlayerKey(this)))
 	{
 		return LOCTEXT("CartMine", "Charrette    [F] La conduire (devant les brancards), ou y charger du petit bois (sur le côté)");
@@ -1209,6 +1487,11 @@ FText ACart::GetInteractionLabel() const
 
 void ACart::Interact(AErewhonPlayerController* Controller)
 {
+	if (Controller && IsImplement() && IsOwnedBy(LocalPlayerKey(this)))
+	{
+		Controller->ServerToggleImplement(this);   // le levier
+		return;
+	}
 	if (Controller)
 	{
 		Controller->ShowToast(LOCTEXT("CartHint", "Placez-vous devant les brancards et appuyez sur F pour la conduire."));
@@ -1233,7 +1516,7 @@ void ACart::CommitWood()
 		{
 			Count += Slot.IsEmpty() ? 0 : Slot.Count;
 		}
-		UStaticMesh* Logs = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_firewood"));
+		UStaticMesh* Logs = IsImplement() ? nullptr : LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_firewood"));
 		const int32 Piles = FMath::Min(6, (Count + 4) / 5);
 		for (int32 i = 0; i < Piles && Logs; ++i)
 		{
@@ -1247,7 +1530,7 @@ void ACart::CommitWood()
 
 int32 ACart::FreeSlotNear(const FVector& World) const
 {
-	if (HasWood())
+	if (HasWood() || IsImplement())
 	{
 		return INDEX_NONE;   // le petit bois occupe toute la plate-forme
 	}
@@ -1328,6 +1611,20 @@ void ACart::Tick(float DeltaSeconds)
 		FollowDriver();
 	}
 	SpinWheels();
+	if (IsImplement() && HasAuthority())
+	{
+		WorkTimer += DeltaSeconds;
+		if (WorkTimer >= 0.2f)
+		{
+			WorkTimer = 0.f;
+			Work();
+		}
+	}
+	if (Spinner && bEngaged && DeltaSeconds > 0.f)
+	{
+		SpinAngle = FMath::Fmod(SpinAngle + RollSpeed * DeltaSeconds * 1.2f, 360.f);
+		Spinner->SetRelativeRotation(FRotator(SpinAngle, 0.f, 0.f));
+	}
 
 	// Le bruit des roues : il suit la vitesse (adoucie), et se tait à l'arrêt.
 	if (GetNetMode() != NM_DedicatedServer && DeltaSeconds > 0.f)
@@ -1421,7 +1718,8 @@ void ACart::FollowDriver()
 	// suit le bout des brancards à distance constante. La charrette pivote donc autour de ses
 	// roues ; si l'on recule vers elle, elle est poussée et roule à l'envers.
 	const float Length = AxleX - GripX;
-	const FVector2D Grip(Driver->GetActorLocation());
+	const ABhurak* Beast = Cast<ABhurak>(Driver);
+	const FVector2D Grip(Beast ? Beast->GetHitchPoint() : Driver->GetActorLocation());
 	FVector2D Axle(GetActorTransform().TransformPosition(FVector(AxleX, 0.f, 0.f)));
 	FVector2D Along = Axle - Grip;
 	if (Along.SizeSquared() < 1.f)
@@ -1433,7 +1731,33 @@ void ACart::FollowDriver()
 	const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Along.Y, Along.X));
 	const FVector2D Origin = Axle - Along * AxleX;
 	const float Ground = GroundAt(FVector(Axle, GetActorLocation().Z));
-	SetActorLocationAndRotation(FVector(Origin, Ground), FRotator(0.f, Yaw, 0.f));
+	const FTransform Wanted(FRotator(0.f, Yaw, 0.f), FVector(Origin, Ground));
+	if (Cast<ACharacter>(Driver) && IsBlockedAt(Wanted))
+	{
+		// Bloquée : elle reste où elle est, et retient qui la tire (au bout des brancards).
+		if (Driver->HasAuthority() || Driver->IsLocallyControlled())
+		{
+			const FVector Hold = GetActorTransform().TransformPosition(FVector(GripX, 0.f, 0.f));
+			Driver->SetActorLocation(FVector(Hold.X, Hold.Y, Driver->GetActorLocation().Z));
+		}
+		return;
+	}
+	SetActorLocationAndRotation(Wanted.GetLocation(), Wanted.Rotator());
+}
+
+bool ACart::IsBlockedAt(const FTransform& Where) const
+{
+	// La caisse, au-dessus des roues (pour ne pas buter sur le sol en pente).
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(ErewhonCartBlock), false, this);
+	TArray<AActor*> Ignored;
+	GetAttachedActors(Ignored, true, true);
+	Params.AddIgnoredActors(Ignored);
+	if (Driver)
+	{
+		Params.AddIgnoredActor(Driver);
+	}
+	const FVector Center = Where.TransformPosition(FVector(25.f, 0.f, 72.f));
+	return GetWorld()->OverlapBlockingTestByChannel(Center, Where.GetRotation(), ECC_Pawn, FCollisionShape::MakeBox(FVector(68.f, 48.f, 16.f)), Params);
 }
 
 void ACart::StopDriving()

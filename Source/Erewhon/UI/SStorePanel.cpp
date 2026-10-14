@@ -22,6 +22,7 @@
 #include "World/SpawnLayout.h"
 #include "World/Village.h"
 #include "World/Apothecary.h"
+#include "World/Farm.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonStorePanel"
 
@@ -95,6 +96,10 @@ void SStorePanel::Construct(const FArguments& InArgs)
 				? LOCTEXT("ManagerSubtitle", "« Bienvenue à la mairie ! Un secteur, une amélioration, une vocation ? »")
 				: Kind == EShopKind::Tailor
 				? LOCTEXT("TailorSubtitle", "« Entrez donc ! Un peu d'étoffe, quelques poches de plus ? »")
+				: Kind == EShopKind::Breeder
+				? LOCTEXT("BreederSubtitle", "« Allez voir mes bêtes à la grange ! Et pour les harnacher, c'est ici. »")
+				: Kind == EShopKind::Workshop
+				? LOCTEXT("WorkshopSubtitle", "« Tout est dans la cour : charrettes et outils, solides comme du chêne. »")
 				: LOCTEXT("Subtitle", "« Bonjour ! Qu'est-ce qui vous ferait plaisir ? »"))
 	];
 	Rebuild();
@@ -117,6 +122,10 @@ void SStorePanel::Rebuild()
 	{
 		return;
 	}
+	// Après un achat, la liste se refait : on la garde là où on l'avait fait défiler (même onglet).
+	const float KeptScroll = ContentScroll.IsValid() && LastTab == Tab ? ContentScroll->GetScrollOffset() : 0.f;
+	LastTab = Tab;
+	ContentScroll.Reset();
 	TSharedRef<SWidget> Content = Tab == ETab::Sectors ? BuildSectors() : Tab == ETab::Village ? BuildVillage() : Tab == ETab::Class ? BuildClass()
 		: Tab == ETab::Buy ? BuildBuy() : BuildSell();
 	Body->SetContent(
@@ -128,6 +137,10 @@ void SStorePanel::Rebuild()
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[CoinBadge(State->GetCoins(), 14)]
 		]
 		+ SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride(GContentHeight)[Content]]);
+	if (ContentScroll.IsValid() && KeptScroll > 0.f)
+	{
+		ContentScroll->SetScrollOffset(KeptScroll);
+	}
 }
 
 TSharedRef<SWidget> SStorePanel::BuildTabs()
@@ -193,11 +206,17 @@ TSharedRef<SWidget> SStorePanel::BuildClass()
 		[
 			ClassCard(EPlayerClass::None, LOCTEXT("ClassNone", "Sans classe particulière"), LOCTEXT("ClassNoneDesc", "Libre comme l'air : on cueille, on vend, on se promène."), 0)
 		]
-		+ SVerticalBox::Slot().AutoHeight()
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
 		[
 			ClassCard(EPlayerClass::Apothecary, LOCTEXT("ClassApothecary", "Apothicaire"),
 				LOCTEXT("ClassApothecaryDesc", "Bâtit l'apothicairerie et sa remise, se sert du mortier, du chaudron et de son support, du séchoir et de l'atelier."),
 				Settings.ApothecaryClassPrice)
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			ClassCard(EPlayerClass::Farmer, LOCTEXT("ClassFarmer", "Fermier"),
+				LOCTEXT("ClassFarmerDesc", "Change ses secteurs en champs (onglet Secteurs), les laboure, les sème et les récolte ; seul à manier la faux."),
+				Settings.FarmerClassPrice)
 		];
 }
 
@@ -303,7 +322,7 @@ TSharedRef<SWidget> SStorePanel::BuildSectors()
 				],
 				10.f)
 		]
-		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(14, 0, 0, 0)[BuildSectorDetail()];
+		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(14, 0, 0, 0)[SNew(SScrollBox) + SScrollBox::Slot()[BuildSectorDetail()]];
 }
 
 TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
@@ -418,15 +437,15 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 				];
 			}
 		}
-		// L'apothicairerie, au centre d'une prairie.
-		if (ErewhonSector::IsPurchasable(Sector))
+		// L'apothicairerie, au centre d'une prairie (pas sur des champs).
+		if (ErewhonSector::IsPurchasable(Sector) && !(World->GetBuildings(Sector) & ErewhonFarm::AnyField))
 		{
 			const bool bBuilt = (World->GetBuildings(Sector) & ESectorBuilding::Apothecary) != 0;
 			TSharedRef<SWidget> BuildAction = bBuilt
 				? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("Built", "✓ Construit")).Font(Font(11, true)).ColorAndOpacity(Leaf))
-				: Button(FText::Format(LOCTEXT("BuildApothecary", "Construire · {0}"), CoinsText(Settings.ApothecaryPrice)),
+				: Button(State->IsApothecary() ? FText::Format(LOCTEXT("BuildApothecary", "Construire · {0}"), CoinsText(Settings.ApothecaryPrice)) : LOCTEXT("ApothecariesOnly", "Apothicaires"),
 					[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerBuyApothecary(Sector); } },
-					EButton::Primary, State->GetCoins() >= Settings.ApothecaryPrice, 150.f);
+					EButton::Primary, State->IsApothecary() && State->GetCoins() >= Settings.ApothecaryPrice, 150.f);
 			Upgrades->AddSlot().AutoHeight().Padding(0, 4, 0, 6)
 			[
 				SNew(SHorizontalBox)
@@ -444,9 +463,9 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 				const bool bStore = (World->GetBuildings(Sector) & ESectorBuilding::Storeroom) != 0;
 				TSharedRef<SWidget> StoreAction = bStore
 					? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("Built", "✓ Construit")).Font(Font(11, true)).ColorAndOpacity(Leaf))
-					: Button(FText::Format(LOCTEXT("BuildStoreroom", "Construire · {0}"), CoinsText(Settings.StoreroomPrice)),
+					: Button(State->IsApothecary() ? FText::Format(LOCTEXT("BuildStoreroom", "Construire · {0}"), CoinsText(Settings.StoreroomPrice)) : LOCTEXT("ApothecariesOnly", "Apothicaires"),
 						[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerBuyStoreroom(Sector); } },
-						EButton::Primary, State->GetCoins() >= Settings.StoreroomPrice, 150.f);
+						EButton::Primary, State->IsApothecary() && State->GetCoins() >= Settings.StoreroomPrice, 150.f);
 				Upgrades->AddSlot().AutoHeight().Padding(0, 0, 0, 6)
 				[
 					SNew(SHorizontalBox)
@@ -456,6 +475,63 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 						.Font(Font(11)).ColorAndOpacity(Ink).AutoWrapText(true)
 					]
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[StoreAction]
+				];
+			}
+		}
+		// Les champs du fermier : un par quart de secteur (avec les chemins en croix qui les bordent), puis leur fusion.
+		const uint8 FieldBits = World->GetBuildings(Sector);
+		const ESectorType FieldType = ErewhonSector::TypeAt(Sector, World->GetWorldSeed());
+		if (ErewhonSector::IsPurchasable(Sector) && !(FieldBits & ESectorBuilding::Apothecary)
+			&& (FieldType == ESectorType::Prairie || FieldType == ESectorType::Edge))
+		{
+			const bool bFarmer = State->IsFarmer();
+			for (int32 Quarter = 0; Quarter <= ErewhonFarm::QuarterCount; ++Quarter)
+			{
+				const bool bMerge = Quarter == ErewhonFarm::QuarterCount;
+				if (bMerge && (FieldBits & ErewhonFarm::AllQuarters) != ErewhonFarm::AllQuarters)
+				{
+					continue;   // la fusion vient une fois les quatre champs achetés
+				}
+				const uint8 FieldBit = bMerge ? ErewhonFarm::MergedBit : ErewhonFarm::QuarterBit(Quarter);
+				const int32 Cost = bMerge ? Settings.FieldMergePrice : Settings.FieldPrice;
+				const bool bHave = (FieldBits & FieldBit) != 0 || (!bMerge && (FieldBits & ErewhonFarm::MergedBit));
+				const uint8 Which = static_cast<uint8>(Quarter);
+				TSharedRef<SWidget> FieldAction = bHave
+					? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("FieldHave", "✓ À vous")).Font(Font(11, true)).ColorAndOpacity(Leaf))
+					: Button(bFarmer ? FText::Format(LOCTEXT("BuyField", "Acheter · {0}"), CoinsText(Cost)) : LOCTEXT("FarmersOnly", "Fermiers"),
+						[WeakController, Sector, Which]() { if (WeakController.IsValid()) { WeakController->ServerBuyField(Sector, Which); } },
+						EButton::Primary, bFarmer && State->GetCoins() >= Cost, 150.f);
+				Upgrades->AddSlot().AutoHeight().Padding(0, Quarter == 0 ? 4 : 0, 0, 6)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(bMerge ? LOCTEXT("FieldMergeRow", "Fusion des quatre champs (sans la croix de chemins)")
+							: FText::Format(LOCTEXT("FieldRow", "Champ {0}, et ses chemins"), ErewhonFarm::QuarterLabel(Quarter)))
+						.Font(Font(11)).ColorAndOpacity(Ink).AutoWrapText(true)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[FieldAction]
+				];
+			}
+			// La clôture et ses portiques, une fois qu'il y a un champ.
+			if (FieldBits & ErewhonFarm::AnyField)
+			{
+				const bool bFenced = (FieldBits & ErewhonFarm::FenceBit) != 0;
+				TSharedRef<SWidget> FenceAction = bFenced
+					? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("FenceHave", "✓ Construite")).Font(Font(11, true)).ColorAndOpacity(Leaf))
+					: Button(bFarmer ? FText::Format(LOCTEXT("BuyFence", "Acheter · {0}"), CoinsText(Settings.FencePrice)) : LOCTEXT("FarmersOnlyFence", "Fermiers"),
+						[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerBuyField(Sector, ErewhonFarm::FenceWhich); } },
+						EButton::Primary, bFarmer && State->GetCoins() >= Settings.FencePrice, 150.f);
+				Upgrades->AddSlot().AutoHeight().Padding(0, 0, 0, 6)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+					[
+						SNew(STextBlock).Text(LOCTEXT("FenceRow", "Clôture du secteur, et un portique à chaque chemin"))
+						.Font(Font(11)).ColorAndOpacity(Ink).AutoWrapText(true)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[FenceAction]
 				];
 			}
 		}
@@ -526,7 +602,7 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 		}
 		const bool bOwned = Def->IsBackpack() ? State->GetBackpack()->IsOwned() : Def->IsUnique() && State->GetInventory()->Owns(Def->Id);
 		const bool bAfford = State->GetCoins() >= Def->BuyPrice;
-		const bool bForbidden = Def->bApothecaryOnly && !State->IsApothecary();
+		const bool bForbidden = (Def->bApothecaryOnly && !State->IsApothecary()) || (Def->bFarmerOnly && !State->IsFarmer());
 		const FName Id = Def->Id;
 		TSharedRef<SWidget> ItemCard = CardBox(
 			SNew(SVerticalBox)
@@ -538,7 +614,7 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 0, 0, 8)[CoinBadge(Def->BuyPrice, 10)]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				Button(bOwned ? LOCTEXT("Owned", "Déjà à vous") : bForbidden ? LOCTEXT("ApothecaryOnlyBuy", "Apothicaires") : LOCTEXT("BuyItem", "Acheter"),
+				Button(bOwned ? LOCTEXT("Owned", "Déjà à vous") : bForbidden ? (Def->bFarmerOnly ? LOCTEXT("FarmerOnlyBuy", "Fermiers") : LOCTEXT("ApothecaryOnlyBuy", "Apothicaires")) : LOCTEXT("BuyItem", "Acheter"),
 					[WeakController, Id]() { if (WeakController.IsValid()) { WeakController->ServerBuyItem(Id); } },
 					EButton::Primary, !bOwned && bAfford && !bForbidden, 0.f, 11)
 			],
@@ -547,7 +623,7 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 		Grid->AddSlot(Index % GBuyColumns, Index / GBuyColumns)[ItemCard];
 		++Index;
 	}
-	return SNew(SScrollBox) + SScrollBox::Slot()[Grid];
+	return SAssignNew(ContentScroll, SScrollBox) + SScrollBox::Slot()[Grid];
 }
 
 // ── Vendre ───────────────────────────────────────────────────────────────────
@@ -627,7 +703,7 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 			];
 	}
 	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().FillHeight(1.f)[SNew(SScrollBox) + SScrollBox::Slot()[List]]
+		+ SVerticalBox::Slot().FillHeight(1.f)[SAssignNew(ContentScroll, SScrollBox) + SScrollBox::Slot()[List]]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0).HAlign(HAlign_Right)
 		[
 			SNew(STextBlock).Text(FText::Format(LOCTEXT("SellTotal", "Valeur de tout votre stock : {0}"), CoinsText(Total)))
@@ -687,7 +763,7 @@ TSharedRef<SWidget> SStorePanel::BuildVillage()
 				12.f)
 		];
 	}
-	return SNew(SScrollBox) + SScrollBox::Slot()[List];
+	return SAssignNew(ContentScroll, SScrollBox) + SScrollBox::Slot()[List];
 }
 
 #undef LOCTEXT_NAMESPACE

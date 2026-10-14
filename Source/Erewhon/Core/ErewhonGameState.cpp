@@ -55,12 +55,37 @@ void FSectorOwnerEntry::PreReplicatedRemove(const FSectorOwnerArray& Array)
 	}
 }
 
+void FFieldCellEntry::PostReplicatedAdd(const FFieldArray& Array)
+{
+	if (Array.Owner)
+	{
+		Array.Owner->NotifyField(*this, true);
+	}
+}
+
+void FFieldCellEntry::PostReplicatedChange(const FFieldArray& Array)
+{
+	if (Array.Owner)
+	{
+		Array.Owner->NotifyField(*this, true);
+	}
+}
+
+void FFieldCellEntry::PreReplicatedRemove(const FFieldArray& Array)
+{
+	if (Array.Owner)
+	{
+		Array.Owner->NotifyField(*this, false);
+	}
+}
+
 // ── AErewhonGameState ────────────────────────────────────────────────────────
 
 AErewhonGameState::AErewhonGameState()
 {
 	Harvests.Owner = this;
 	SectorOwners.Owner = this;
+	Fields.Owner = this;
 }
 
 void AErewhonGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -70,6 +95,7 @@ void AErewhonGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	DOREPLIFETIME(AErewhonGameState, WorldAgeAtStart);
 	DOREPLIFETIME(AErewhonGameState, Harvests);
 	DOREPLIFETIME(AErewhonGameState, SectorOwners);
+	DOREPLIFETIME(AErewhonGameState, Fields);
 	DOREPLIFETIME(AErewhonGameState, VillageUpgrades);
 }
 
@@ -107,6 +133,8 @@ void AErewhonGameState::SpawnLocalWorldActors()
 	// Les commerces de la place ; le tailleur ne vient qu'une fois sa boutique construite.
 	SpawnCabin(EShopKind::GeneralStore);
 	SpawnCabin(EShopKind::SectorManager);
+	SpawnCabin(EShopKind::Breeder);
+	SpawnCabin(EShopKind::Workshop);
 	ApplyVillage();
 	World->SpawnActor<AFountain>(Params);   // la fontaine de la place : elle arrête aussi le joueur sur le serveur
 	if (GetNetMode() != NM_DedicatedServer)
@@ -329,6 +357,76 @@ void AErewhonGameState::ClearSectorOwner(const FIntPoint& Sector)
 		SectorOwners.MarkArrayDirty();
 		NotifyOwner(Removed, false);
 	}
+}
+
+const FFieldCellEntry* AErewhonGameState::FindFieldCell(const FIntPoint& Sector, int32 Cell) const
+{
+	const TMap<int32, FFieldCellEntry>* Cells = FieldsBySector.Find(Sector);
+	return Cells ? Cells->Find(Cell) : nullptr;
+}
+
+void AErewhonGameState::SetFieldCell(const FIntPoint& Sector, int32 Cell, uint8 Crop, double SownAt)
+{
+	check(HasAuthority());
+	FFieldCellEntry* Entry = Fields.Items.FindByPredicate([&](const FFieldCellEntry& E) { return E.Cell == Cell && E.Sector == Sector; });
+	if (!Entry)
+	{
+		Entry = &Fields.Items.AddDefaulted_GetRef();
+		Entry->Sector = Sector;
+		Entry->Cell = Cell;
+	}
+	Entry->Crop = Crop;
+	Entry->SownAt = SownAt;
+	Fields.MarkItemDirty(*Entry);
+	NotifyField(*Entry, true);
+}
+
+void AErewhonGameState::ClearFieldCell(const FIntPoint& Sector, int32 Cell)
+{
+	check(HasAuthority());
+	const int32 Index = Fields.Items.IndexOfByPredicate([&](const FFieldCellEntry& E) { return E.Cell == Cell && E.Sector == Sector; });
+	if (Index != INDEX_NONE)
+	{
+		const FFieldCellEntry Removed = Fields.Items[Index];
+		Fields.Items.RemoveAtSwap(Index);
+		Fields.MarkArrayDirty();
+		NotifyField(Removed, false);
+	}
+}
+
+void AErewhonGameState::ClearFieldSector(const FIntPoint& Sector)
+{
+	check(HasAuthority());
+	TArray<FFieldCellEntry> Removed;
+	for (int32 i = Fields.Items.Num() - 1; i >= 0; --i)
+	{
+		if (Fields.Items[i].Sector == Sector)
+		{
+			Removed.Add(Fields.Items[i]);
+			Fields.Items.RemoveAtSwap(i);
+		}
+	}
+	if (Removed.Num() > 0)
+	{
+		Fields.MarkArrayDirty();
+		for (const FFieldCellEntry& Entry : Removed)
+		{
+			NotifyField(Entry, false);
+		}
+	}
+}
+
+void AErewhonGameState::NotifyField(const FFieldCellEntry& Entry, bool bPresent)
+{
+	if (bPresent)
+	{
+		FieldsBySector.FindOrAdd(Entry.Sector).Add(Entry.Cell, Entry);
+	}
+	else if (TMap<int32, FFieldCellEntry>* Cells = FieldsBySector.Find(Entry.Sector))
+	{
+		Cells->Remove(Entry.Cell);
+	}
+	OnFieldChanged.Broadcast(Entry.Sector);
 }
 
 void AErewhonGameState::NotifyHarvest(const FHarvestEntry& Entry, bool bHarvested)

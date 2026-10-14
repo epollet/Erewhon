@@ -94,6 +94,33 @@ struct FSavedSectorOwner
 };
 
 /** Une charrette posée dans le monde. */
+/** Un bhurak, son harnachement et le contenu de ses sacoches (12 places par place du harnais). */
+USTRUCT()
+struct FSavedBhurak
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FString OwnerKey;
+	UPROPERTY() FString OwnerName;
+	UPROPERTY() FTransform Transform;
+	UPROPERTY() bool bHarness = false;
+	UPROPERTY() uint8 Coat = 0;
+	UPROPERTY() TArray<FName> Gear;
+	UPROPERTY() TArray<FInventorySlot> BagSlots;
+};
+
+/** Une case de champ travaillée (voir FFieldCellEntry). */
+USTRUCT()
+struct FSavedField
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FIntPoint Sector = FIntPoint::ZeroValue;
+	UPROPERTY() int32 Cell = INDEX_NONE;
+	UPROPERTY() uint8 Crop = 0;
+	UPROPERTY() double SownAt = 0.0;
+};
+
 USTRUCT()
 struct FSavedCart
 {
@@ -104,6 +131,9 @@ struct FSavedCart
 	UPROPERTY() FTransform Transform;
 	/** Le petit bois en vrac. */
 	UPROPERTY() TArray<FInventorySlot> Wood;
+	/** Charrette, cultivateur ou semoir (ECartKind), et son levier. */
+	UPROPERTY() uint8 Kind = 0;
+	UPROPERTY() bool bEngaged = false;
 };
 
 /** Une cagette ou un tonneau, posé au sol, sur une pile ou dans une charrette. */
@@ -160,6 +190,12 @@ public:
 
 	UPROPERTY()
 	TArray<FSavedHarvest> Harvests;
+
+	UPROPERTY()
+	TArray<FSavedField> Fields;
+
+	UPROPERTY()
+	TArray<FSavedBhurak> Bhuraks;
 
 	UPROPERTY()
 	TMap<FString, FSavedPlayer> Players;

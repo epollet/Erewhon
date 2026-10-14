@@ -38,6 +38,25 @@ private:
 	/** Rotation du modèle généré pour qu'il regarde dans l'axe de l'acteur. */
 	UPROPERTY(EditAnywhere)
 	float MerchantMeshYaw = -90.f;
+
+public:
+	virtual void Tick(float DeltaSeconds) override;
+
+private:
+	/** Le marchand animé (squelette Meshy) : attentes au hasard, un salut quand on approche. */
+	UPROPERTY(Transient)
+	TObjectPtr<class USkeletalMeshComponent> Animated;
+
+	UPROPERTY(Transient)
+	TMap<FName, TObjectPtr<class UAnimSequence>> Animations;
+
+	void Play(FName Name, bool bLoop);
+	FName Playing;
+	double PlayingUntil = 0.0;
+	double NextFidget = 0.0;
+	double LastWave = -100.0;
+	/** Le salut lève le bras au-dessus de la tête : le squelette automatique le rend mal, on s'en passe. */
+	bool bWaves = false;
 };
 
 /**
@@ -75,6 +94,11 @@ private:
 	void BuildManagerInterior();
 	void BuildTailorInterior();
 	void BuildApothecaryInterior();
+	void BuildBreederInterior();
+	void BuildWorkshopInterior();
+	/** La grange de l'éleveur (trois box, un bhurak de chaque robe), la cour de l'atelier (ce qu'il vend, exposé). */
+	void BuildBarn();
+	void BuildYard();
 	FVector AddCounter();
 	void AddShelf(const FVector& Location, float Yaw, int32 Variant, EShelfGoods Goods);
 	class UStaticMeshComponent* AddBox(USceneComponent* Parent, const FVector& Min, const FVector& Max, const FLinearColor& Color,
@@ -90,6 +114,11 @@ private:
 	/** Rotation du comptoir généré pour que sa façade regarde la porte. */
 	UPROPERTY(EditAnywhere)
 	float CounterMeshYaw = 0.f;
+
+	/** Dimensions de la maison (voir ErewhonSpawn::CabinHalfSize). */
+	float HalfLength = 450.f;
+	float HalfWidth = 350.f;
+	float WallHeight = 300.f;
 
 	/** Profondeur du remblai et du perron sous le plancher (plus grande sur un terrain en pente). */
 	float FoundationDepth = 20.f;

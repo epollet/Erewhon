@@ -31,6 +31,10 @@ private:
 	void RebuildAll();
 	void OnSectorOwnerChanged(const FIntPoint& Sector);
 	void OnPlantHarvestChanged(const FIntPoint& Sector, int32 PlantIndex, bool bHarvested);
+	void OnFieldChanged(const FIntPoint& Sector);
+	/** Les secteurs dont un champ a changé : redessinés une fois par image, même si cent cases ont bougé. */
+	TSet<FIntPoint> DirtyFields;
+	FDelegateHandle FieldHandle;
 
 	UPROPERTY(Transient)
 	TMap<FIntPoint, TObjectPtr<ASector>> Loaded;

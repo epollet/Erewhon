@@ -16,6 +16,8 @@
 #include "Core/ErewhonGameState.h"
 #include "World/SpawnLayout.h"
 #include "World/Terrain.h"
+#include "World/Farm.h"
+#include "TimerManager.h"
 
 using namespace ErewhonVisuals;
 
@@ -91,6 +93,10 @@ void ASector::Initialize(const TSharedRef<const FSectorLayout>& InLayout, bool b
 #endif
 	BuildGround(GetNetMode() != NM_DedicatedServer);
 	BuildTrees(bWithPlants && GetNetMode() != NM_DedicatedServer);
+	if (InLayout->bFenced)
+	{
+		BuildFences(GetNetMode() != NM_DedicatedServer);
+	}
 	if (bWithPlants)
 	{
 		BuildDecor();
@@ -98,6 +104,317 @@ void ASector::Initialize(const TSharedRef<const FSectorLayout>& InLayout, bool b
 		BuildPlants();
 		BuildSignposts();
 	}
+	if (!InLayout->Fields.IsEmpty() && GetNetMode() != NM_DedicatedServer)
+	{
+		RefreshField();
+		GetWorldTimerManager().SetTimer(FieldTimer, this, &ASector::CheckFieldStages, 5.f, true, FMath::FRandRange(1.f, 5.f));
+	}
+}
+
+// ── Champs ───────────────────────────────────────────────────────────────────
+
+void ASector::BuildFences(bool bVisual)
+{
+	// Tout autour du secteur, un peu en retrait du bord : des travées de barrière qui suivent le relief.
+	// Au milieu d'un côté traversé par un chemin, une ouverture sous un portique de bois.
+	constexpr float Inset = 60.f;
+	constexpr float Span = 250.f;
+	constexpr float FenceHeight = 115.f;
+	const float GateHalf = ErewhonSpawn::AccessPathWidth * 0.5f + 70.f;
+	const float Size = UErewhonSettings::Get().SectorSize();
+	const FVector Origin = GetActorLocation();
+	UStaticMesh* FenceMesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_fence_segment"));
+	UStaticMesh* GateMesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_farm_gate"));
+	const auto MakeInstances = [this](UStaticMesh* Mesh, UMaterialInterface* Material, bool bCollision, bool bVisible)
+	{
+		UHierarchicalInstancedStaticMeshComponent* Part = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
+		Part->SetStaticMesh(Mesh);
+		if (Material)
+		{
+			Part->SetMaterial(0, Material);
+		}
+		Part->SetupAttachment(Root);
+		Part->SetCollisionProfileName(bCollision ? UCollisionProfile::BlockAll_ProfileName : UCollisionProfile::NoCollision_ProfileName);
+		Part->SetCanEverAffectNavigation(false);
+		Part->SetVisibility(bVisible);
+		Part->SetCullDistances(14000, 18000);
+		Part->RegisterComponent();
+		AddInstanceComponent(Part);
+		return Part;
+	};
+	// Repli sans modèle : des poteaux et deux lisses, en bois.
+	UMaterialInterface* Wood = bVisual ? MakePaintedMaterial(this, TEXT("wood_trim"), 140.f, Palette::WoodDark) : nullptr;
+	UHierarchicalInstancedStaticMeshComponent* Fences = MakeInstances(FenceMesh ? FenceMesh : GetShape(EShape::Cube), FenceMesh ? nullptr : Wood, true, bVisual);
+	UHierarchicalInstancedStaticMeshComponent* Posts = FenceMesh ? nullptr : MakeInstances(GetShape(EShape::Cube), Wood, true, bVisual);
+	const FTransform FenceFit = FenceMesh ? FitToLength(FenceMesh, Span, FenceHeight) * FTransform(FRotator(0.f, -90.f, 0.f)) : FTransform::Identity;
+	const auto Ground = [this, &Origin](const FVector2D& Local)
+	{
+		return ErewhonTerrain::Height(FVector2D(Origin) + Local, Layout->WorldSeed) - Origin.Z;
+	};
+
+	TArray<FTransform> FenceBatch, PostBatch, GateBatch, GateColliders;
+	for (int32 Side = 0; Side < 4; ++Side)
+	{
+		// Côtés : nord (X haut), sud (X bas), est (Y haut), ouest (Y bas) ; chacun parcouru selon son axe.
+		const bool bAlongY = Side < 2;
+		const float Fixed = (Side == 0 || Side == 2) ? Size - Inset : Inset;
+		const auto At = [&](float Along) { return bAlongY ? FVector2D(Fixed, Along) : FVector2D(Along, Fixed); };
+		const bool bGate = (Layout->FenceGates & (1 << Side)) != 0;
+		const float Mid = Size * 0.5f;
+		// Deux tronçons de part et d'autre du portique, ou un seul.
+		TArray<TPair<float, float>> Runs;
+		if (bGate)
+		{
+			Runs.Add({ Inset, Mid - GateHalf });
+			Runs.Add({ Mid + GateHalf, Size - Inset });
+		}
+		else
+		{
+			Runs.Add({ Inset, Size - Inset });
+		}
+		for (const TPair<float, float>& Run : Runs)
+		{
+			const int32 Count = FMath::Max(1, FMath::RoundToInt32((Run.Value - Run.Key) / Span));
+			const float Step = (Run.Value - Run.Key) / Count;
+			for (int32 i = 0; i < Count; ++i)
+			{
+				const FVector2D A = At(Run.Key + Step * i);
+				const FVector2D B = At(Run.Key + Step * (i + 1));
+				const FVector Start(A, Ground(A));
+				const FVector End(B, Ground(B));
+				const FVector Dir = (End - Start).GetSafeNormal();
+				if (FenceMesh)
+				{
+					FenceBatch.Add(FenceFit * FTransform(Dir.Rotation(), (Start + End) * 0.5f, FVector(Step / Span, 1.f, 1.f)));
+				}
+				else
+				{
+					// Deux lisses, et un poteau au début de la travée.
+					for (const float RailZ : { 45.f, 90.f })
+					{
+						FenceBatch.Add(FTransform(Dir.Rotation(), (Start + End) * 0.5f + FVector(0.f, 0.f, RailZ), FVector(Step / 100.f, 0.08f, 0.1f)));
+					}
+					PostBatch.Add(FTransform(FRotator::ZeroRotator, Start + FVector(0.f, 0.f, FenceHeight * 0.5f - 10.f), FVector(0.14f, 0.14f, FenceHeight / 100.f + 0.2f)));
+				}
+			}
+		}
+		if (bGate)
+		{
+			// Le portique, face au chemin ; deux poteaux invisibles l'arrêtent, le passage reste libre.
+			const FVector2D Center = At(Mid);
+			const FVector Foot(Center, Ground(Center));
+			const FRotator Facing(0.f, bAlongY ? 0.f : 90.f, 0.f);
+			GateBatch.Add(FTransform(Facing, Foot));
+			for (const float Offset : { -GateHalf, GateHalf })
+			{
+				const FVector2D PostAt = At(Mid + Offset);
+				GateColliders.Add(FTransform(FRotator::ZeroRotator, FVector(PostAt, Ground(PostAt) + 150.f), FVector(0.3f, 0.3f, 3.f)));
+			}
+		}
+	}
+	Fences->AddInstances(FenceBatch, false, false);
+	if (Posts)
+	{
+		Posts->AddInstances(PostBatch, false, false);
+	}
+	UHierarchicalInstancedStaticMeshComponent* Colliders = MakeInstances(GetShape(EShape::Cube), nullptr, true, false);
+	Colliders->AddInstances(GateColliders, false, false);
+	if (bVisual && !GateBatch.IsEmpty())
+	{
+		if (GateMesh)
+		{
+			UHierarchicalInstancedStaticMeshComponent* Gates = MakeInstances(GateMesh, nullptr, false, true);
+			// Large comme le passage et ses poteaux, la largeur sur Y (alignée sur le côté).
+			const FTransform GateFit = FitToLength(GateMesh, GateHalf * 2.f + 60.f);
+			for (FTransform& Gate : GateBatch)
+			{
+				Gate = GateFit * Gate;
+			}
+			Gates->AddInstances(GateBatch, false, false);
+		}
+		else
+		{
+			UHierarchicalInstancedStaticMeshComponent* Beams = MakeInstances(GetShape(EShape::Cube), Wood, false, true);
+			TArray<FTransform> BeamBatch;
+			for (const FTransform& Gate : GateBatch)
+			{
+				for (const float Offset : { -GateHalf, GateHalf })
+				{
+					BeamBatch.Add(FTransform(FRotator::ZeroRotator, Gate.TransformPosition(FVector(0.f, Offset, 150.f)), FVector(0.22f, 0.22f, 3.f)));
+				}
+				BeamBatch.Add(FTransform(Gate.Rotator(), Gate.TransformPosition(FVector(0.f, 0.f, 300.f)), FVector(0.25f, (GateHalf * 2.f + 60.f) / 100.f, 0.25f)));
+			}
+			Beams->AddInstances(BeamBatch, false, false);
+		}
+	}
+}
+
+int32 ASector::FieldStageSignature() const
+{
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	const TMap<int32, FFieldCellEntry>* Cells = State ? State->GetFieldCells(Layout->Coord) : nullptr;
+	if (!Cells)
+	{
+		return 0;
+	}
+	const double Now = State->GetWorldClock();
+	int32 Signature = 0;
+	for (const TPair<int32, FFieldCellEntry>& Pair : *Cells)
+	{
+		if (Pair.Value.Crop > 0)
+		{
+			Signature += ErewhonFarm::Stage(Pair.Value.SownAt, Now) + 1;
+		}
+	}
+	return Signature;
+}
+
+void ASector::CheckFieldStages()
+{
+	if (FieldStageSignature() != ShownStageSignature)
+	{
+		RefreshField();
+	}
+}
+
+void ASector::RefreshField()
+{
+	using namespace ErewhonFarm;
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	if (!Layout.IsValid() || Layout->Fields.IsEmpty() || !State || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	const FIntPoint Coord = Layout->Coord;
+	const TMap<int32, FFieldCellEntry>* Cells = State->GetFieldCells(Coord);
+	const double Now = State->GetWorldClock();
+	const FVector2D Origin(GetActorLocation());
+
+	// La terre, case par case : grossière ou retournée (un peu plus haute, pour passer devant).
+	TArray<FVector> Vertices[3];
+	TArray<FVector> Normals[3];
+	TArray<FVector2D> UVs[3];
+	TArray<int32> Triangles[3];
+	// Les touffes, par modèle.
+	TMap<FName, TArray<FTransform>> Batches;
+	const auto Clump = [&](const TCHAR* MeshName, float Height, const FVector2D& World, float Yaw)
+	{
+		Batches.FindOrAdd(MeshName).Add(FTransform(FRotator(0.f, Yaw, 0.f),
+			FVector(World - Origin, ErewhonTerrain::Height(World, Layout->WorldSeed)), FVector(Height / 100.f)));
+	};
+	for (const FBox2D& Box : Layout->Fields)
+	{
+		const int32 X0 = FMath::RoundToInt32((Box.Min.X - Origin.X) / CellSize);
+		const int32 X1 = FMath::RoundToInt32((Box.Max.X - Origin.X) / CellSize);
+		const int32 Y0 = FMath::RoundToInt32((Box.Min.Y - Origin.Y) / CellSize);
+		const int32 Y1 = FMath::RoundToInt32((Box.Max.Y - Origin.Y) / CellSize);
+		for (int32 Y = Y0; Y < Y1; ++Y)
+		{
+			for (int32 X = X0; X < X1; ++X)
+			{
+				const int32 Cell = Y * CellsPerSide + X;
+				const FFieldCellEntry* Entry = Cells ? Cells->Find(Cell) : nullptr;
+				// Grossière, retournée, ou semée (un peu plus sombre : on voit où l'on a semé).
+				const int32 Section = !Entry ? 0 : Entry->Crop == 0 ? 1 : 2;
+				const int32 Base = Vertices[Section].Num();
+				for (const FIntPoint Corner : { FIntPoint(0, 0), FIntPoint(1, 0), FIntPoint(1, 1), FIntPoint(0, 1) })
+				{
+					const FVector2D Local((X + Corner.X) * CellSize, (Y + Corner.Y) * CellSize);
+					const FVector2D World = Origin + Local;
+					Vertices[Section].Add(FVector(Local, ErewhonTerrain::Height(World, Layout->WorldSeed) + (Section ? 7.f : 5.f)));
+					Normals[Section].Add(ErewhonTerrain::Normal(World, Layout->WorldSeed));
+					UVs[Section].Add(Local / CellSize);
+				}
+				Triangles[Section].Append({ Base, Base + 3, Base + 1, Base + 1, Base + 3, Base + 2 });
+
+				// Ce qui y pousse : rien le premier jour, des pousses ensuite, la culture mûre au troisième.
+				if (!Entry || Entry->Crop == 0 || !Crops().IsValidIndex(Entry->Crop - 1))
+				{
+					continue;
+				}
+				const FCrop& Crop = Crops()[Entry->Crop - 1];
+				const int32 Stage = ErewhonFarm::Stage(Entry->SownAt, Now);
+				if (Stage == 0)
+				{
+					continue;
+				}
+				FRandomStream Rand(static_cast<int32>(HashCombine(GetTypeHash(Coord), GetTypeHash(Cell))));
+				const int32 Count = Stage == RipeStage ? Crop.PerCell : 8;
+				const FVector2D Center = Origin + FVector2D((X + 0.5f) * CellSize, (Y + 0.5f) * CellSize);
+				for (int32 i = 0; i < Count; ++i)
+				{
+					// En rangs (le long de X), un peu de désordre.
+					const float Row = (i % 2 == 0 ? -1.f : 1.f) * CellSize * 0.22f;
+					const float Along = ((i / 2 + 0.5f) / FMath::Max(1, (Count + 1) / 2) - 0.5f) * CellSize * 0.8f;
+					const FVector2D At = Center + FVector2D(Along + Rand.FRandRange(-12.f, 12.f), Row + Rand.FRandRange(-12.f, 12.f));
+					const float Yaw = Rand.FRandRange(0.f, 360.f);
+					const float Scale = Rand.FRandRange(0.85f, 1.1f);
+					if (Stage == RipeStage)
+					{
+						Clump(Crop.Mesh, Crop.Height * Scale, At, Yaw);
+					}
+					else
+					{
+						Clump(TEXT("SM_crop_sprout"), (Stage == 1 ? 20.f : 42.f) * Scale, At, Yaw);
+					}
+				}
+			}
+		}
+	}
+
+	if (!FieldSoil)
+	{
+		FieldSoil = NewObject<UProceduralMeshComponent>(this, TEXT("FieldSoil"));
+		FieldSoil->SetupAttachment(Root);
+		FieldSoil->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		FieldSoil->SetCastShadow(false);
+		FieldSoil->RegisterComponent();
+		AddInstanceComponent(FieldSoil);
+	}
+	for (int32 Section = 0; Section < 3; ++Section)
+	{
+		FieldSoil->ClearMeshSection(Section);
+		if (Vertices[Section].Num() > 0)
+		{
+			FieldSoil->CreateMeshSection_LinearColor(Section, Vertices[Section], Triangles[Section], Normals[Section], UVs[Section], {}, {}, false);
+		}
+	}
+	if (FieldSoil->GetNumMaterials() < 3 || !FieldSoil->GetMaterial(2))
+	{
+		FieldSoil->SetMaterial(2, MakePaintedMaterial(FieldSoil, TEXT("field_tilled"), 200.f, FLinearColor::FromSRGBColor(FColor(70, 48, 34)), FLinearColor(0.72f, 0.66f, 0.6f)));
+		FieldSoil->SetMaterial(0, MakePaintedMaterial(FieldSoil, TEXT("field_raw"), 400.f, FLinearColor::FromSRGBColor(FColor(128, 96, 66))));
+		FieldSoil->SetMaterial(1, MakePaintedMaterial(FieldSoil, TEXT("field_tilled"), 200.f, FLinearColor::FromSRGBColor(FColor(92, 64, 44))));
+	}
+
+	// Les touffes : on vide chaque modèle et on le remplit de nouveau.
+	for (const TPair<FName, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& Pair : CropParts)
+	{
+		if (Pair.Value)
+		{
+			Pair.Value->ClearInstances();
+		}
+	}
+	for (TPair<FName, TArray<FTransform>>& Pair : Batches)
+	{
+		TObjectPtr<UHierarchicalInstancedStaticMeshComponent>& Part = CropParts.FindOrAdd(Pair.Key);
+		UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), Pair.Key.ToString());
+		if (!Part)
+		{
+			if (!Mesh)
+			{
+				continue;
+			}
+			Part = MakeInstancedPart(Mesh, nullptr, 140.f);
+		}
+		// Ramené à 1 m de haut, posé au sol : l'échelle de chaque instance donne sa hauteur.
+		const FTransform Fit = FitToHeight(Mesh, 100.f);
+		for (FTransform& Instance : Pair.Value)
+		{
+			Instance = Fit * Instance;
+		}
+		Part->AddInstances(Pair.Value, false, false);
+	}
+	ShownStageSignature = FieldStageSignature();
 }
 
 void ASector::BuildSignposts()
@@ -539,6 +856,27 @@ void ASector::GetPlantVisual(int32 PlantIndex, TArray<TPair<UStaticMesh*, FTrans
 		for (int32 PartIndex = 0; PartIndex < Kind.Parts.Num(); ++PartIndex)
 		{
 			Out.Emplace(Kind.Parts[PartIndex]->GetStaticMesh(), Kind.PartLocal[PartIndex] * Member * GetActorTransform());
+		}
+	}
+}
+
+void ASector::GetRipeCropVisuals(const FVector2D& Center, float Radius, TArray<TPair<UStaticMesh*, FTransform>>& Out) const
+{
+	// Seules les cultures mûres portent le modèle de leur culture (les pousses ont le leur).
+	for (const ErewhonFarm::FCrop& Crop : ErewhonFarm::Crops())
+	{
+		const TObjectPtr<UHierarchicalInstancedStaticMeshComponent>* Part = CropParts.Find(FName(Crop.Mesh));
+		if (!Part || !*Part)
+		{
+			continue;
+		}
+		for (int32 Instance = 0; Instance < (*Part)->GetInstanceCount(); ++Instance)
+		{
+			FTransform World;
+			if ((*Part)->GetInstanceTransform(Instance, World, true) && FVector2D::Distance(FVector2D(World.GetLocation()), Center) <= Radius)
+			{
+				Out.Emplace((*Part)->GetStaticMesh(), World);
+			}
 		}
 	}
 }

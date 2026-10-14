@@ -67,7 +67,7 @@ def concepts(only: set[str], force: bool) -> None:
     for name, spec in manifest.MODELS.items():
         if _wanted(name, only):
             path = OUTPUT_ROOT / "concepts" / f"{name}.jpg"
-            prompt = manifest.CONCEPT_PROMPT.format(subject=spec["subject"], style=manifest.STYLE)
+            prompt = spec.get("concept_prompt", manifest.CONCEPT_PROMPT).format(subject=spec["subject"], style=manifest.STYLE)
             _run(f"concept {name}", path, force, lambda p=path, q=prompt: generate_image(q, p))
 
 

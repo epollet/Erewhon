@@ -1,6 +1,10 @@
 #include "World/SpawnCabin.h"
 
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimSequence.h"
+#include "Engine/SkeletalMesh.h"
+#include "GameFramework/PlayerController.h"
 #include "Components/PointLightComponent.h"
 #include "Core/ErewhonPlayerController.h"
 #include "Engine/StaticMesh.h"
@@ -15,6 +19,8 @@
 #include "World/Apothecary.h"
 #include "World/Terrain.h"
 #include "Core/ErewhonGameState.h"
+#include "World/Bhurak.h"
+#include "World/Storage.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonCabin"
 
@@ -63,6 +69,32 @@ namespace
 			Style.FloorTile = 200.f;
 			Style.bTimberFrame = true;
 		}
+		else if (Kind == EShopKind::Breeder)
+		{
+			// Grande ferme de planches peintes en rouge, toit de chaume épais, plancher de bois.
+			Style.Wall = TEXT("barn_red");
+			Style.WallTile = 300.f;
+			Style.WallColor = FLinearColor::FromSRGBColor(FColor(160, 70, 52));
+			Style.Roof = TEXT("thatch");
+			Style.RoofTile = 300.f;
+			Style.RoofColor = FLinearColor::FromSRGBColor(FColor(214, 178, 96));
+			Style.RoofSlope = 42.f;
+			Style.Floor = TEXT("floor_boards");
+			Style.FloorTile = 200.f;
+		}
+		else if (Kind == EShopKind::Workshop)
+		{
+			// Vieil atelier de bois goudronné, toit d'ardoise sombre peu pentu, sol de dalles.
+			Style.Wall = TEXT("dark_timber");
+			Style.WallTile = 260.f;
+			Style.WallColor = FLinearColor::FromSRGBColor(FColor(70, 52, 40));
+			Style.Roof = TEXT("roof_slate");
+			Style.RoofTile = 200.f;
+			Style.RoofColor = FLinearColor::FromSRGBColor(FColor(86, 92, 100));
+			Style.RoofSlope = 26.f;
+			Style.Floor = TEXT("stone_slabs");
+			Style.FloorTile = 220.f;
+		}
 		else if (Kind == EShopKind::Apothecary)
 		{
 			// Chaumière de pierre des champs, toit d'ardoise moussue, plancher de bois.
@@ -91,13 +123,98 @@ AMerchant::AMerchant()
 	Capsule->InitCapsuleSize(40.f, 90.f);
 	Capsule->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 	RootComponent = Capsule;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = 0.1f;
+}
+
+void AMerchant::Play(FName Name, bool bLoop)
+{
+	const TObjectPtr<UAnimSequence>* Sequence = Animations.Find(Name);
+	if (!Animated || !Sequence || !*Sequence)
+	{
+		return;
+	}
+	Playing = Name;
+	Animated->PlayAnimation(Sequence->Get(), bLoop);
+	PlayingUntil = bLoop ? 0.0 : GetWorld()->GetTimeSeconds() + (*Sequence)->GetPlayLength();
+}
+
+void AMerchant::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (!Animated)
+	{
+		return;
+	}
+	const double Now = GetWorld()->GetTimeSeconds();
+	// Un geste terminé : retour à l'attente ordinaire.
+	if (PlayingUntil > 0.0 && Now >= PlayingUntil)
+	{
+		PlayingUntil = 0.0;
+		Play(TEXT("idle"), true);
+	}
+	if (PlayingUntil > 0.0)
+	{
+		return;
+	}
+	// Quelqu'un arrive (le joueur de cette machine) : un salut de la main, pas plus d'une fois par minute.
+	const APlayerController* Local = GetWorld()->GetFirstPlayerController();
+	const APawn* Visitor = Local ? Local->GetPawn() : nullptr;
+	if (bWaves && Visitor && Now - LastWave > 60.0 && FVector::Dist2D(Visitor->GetActorLocation(), GetActorLocation()) < 450.f && Animations.Contains(TEXT("wave")))
+	{
+		LastWave = Now;
+		Play(TEXT("wave"), false);
+		return;
+	}
+	// De temps en temps, une autre attente : se dandiner, regarder autour, parler tout seul.
+	if (Now >= NextFidget)
+	{
+		NextFidget = Now + FMath::FRandRange(7.f, 16.f);
+		const FName Fidgets[] = { TEXT("idle2"), TEXT("idle3"), TEXT("look"), TEXT("idle2") };
+		const FName Pick = Fidgets[FMath::RandHelper(UE_ARRAY_COUNT(Fidgets))];
+		if (Animations.Contains(Pick))
+		{
+			Play(Pick, false);
+		}
+	}
 }
 
 void AMerchant::BeginPlay()
 {
 	Super::BeginPlay();
 	const TCHAR* MeshName = Kind == EShopKind::SectorManager ? TEXT("SM_sector_manager")
-		: Kind == EShopKind::Tailor ? TEXT("SM_tailor") : TEXT("SM_merchant");
+		: Kind == EShopKind::Tailor ? TEXT("SM_tailor") : Kind == EShopKind::Breeder ? TEXT("SM_breeder")
+		: Kind == EShopKind::Workshop ? TEXT("SM_craftsman") : TEXT("SM_merchant");
+	// Le personnage animé, s'il a été importé (Characters/<nom>/SK_<nom> et ses A_<nom>_<geste>) ;
+	// de préférence sa version modelée en T-pose (<nom>_tp), que le squelette automatique rend bien mieux.
+	FString Character = FString(MeshName).RightChop(3);
+	if (LoadGenerated<USkeletalMesh>(*FString::Printf(TEXT("Characters/%s_tp"), *Character), FString::Printf(TEXT("SK_%s_tp"), *Character)))
+	{
+		Character += TEXT("_tp");
+		bWaves = true;
+	}
+	if (USkeletalMesh* Skeletal = LoadGenerated<USkeletalMesh>(*FString::Printf(TEXT("Characters/%s"), *Character), FString::Printf(TEXT("SK_%s"), *Character)))
+	{
+		Animated = NewObject<USkeletalMeshComponent>(this, TEXT("Animated"));
+		Animated->SetupAttachment(Capsule);
+		Animated->SetRelativeLocationAndRotation(FVector(0, 0, -Capsule->GetScaledCapsuleHalfHeight()), FRotator(0.f, MerchantMeshYaw, 0.f));
+		Animated->SetSkeletalMesh(Skeletal);
+		Animated->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		Animated->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Animated->RegisterComponent();
+		AddInstanceComponent(Animated);
+		for (const TCHAR* Gesture : { TEXT("idle"), TEXT("idle2"), TEXT("idle3"), TEXT("look"), TEXT("wave"), TEXT("talk") })
+		{
+			if (UAnimSequence* Sequence = LoadGenerated<UAnimSequence>(*FString::Printf(TEXT("Characters/%s"), *Character), FString::Printf(TEXT("A_%s_%s"), *Character, Gesture)))
+			{
+				Animations.Add(Gesture, Sequence);
+			}
+		}
+		Play(TEXT("idle"), true);
+		// Pas tous en même temps : chacun commence à son rythme.
+		NextFidget = GetWorld()->GetTimeSeconds() + FMath::FRandRange(3.f, 12.f);
+		return;
+	}
 	if (UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), MeshName))
 	{
 		// Modèle Meshy, posé sur le plancher (bas de la capsule).
@@ -120,6 +237,8 @@ FText AMerchant::GetInteractionLabel() const
 	{
 	case EShopKind::SectorManager: return LOCTEXT("TalkToManager", "Parler au maire");
 	case EShopKind::Tailor:        return LOCTEXT("TalkToTailor", "Parler à la couturière");
+	case EShopKind::Breeder:       return LOCTEXT("TalkToBreeder", "Parler à l'éleveur");
+	case EShopKind::Workshop:      return LOCTEXT("TalkToCraftsman", "Parler à l'artisane");
 	default:                       return LOCTEXT("TalkToMerchant", "Parler au marchand");
 	}
 }
@@ -152,6 +271,9 @@ ASpawnCabin::ASpawnCabin()
 void ASpawnCabin::BeginPlay()
 {
 	Super::BeginPlay();
+	HalfLength = ErewhonSpawn::CabinHalfSize(Kind).X;
+	HalfWidth = ErewhonSpawn::CabinHalfSize(Kind).Y;
+	WallHeight = ErewhonSpawn::CabinWallHeightFor(Kind);
 	if (Kind == EShopKind::Apothecary)
 	{
 		// Au milieu d'une prairie vallonnée : le remblai descend jusqu'au point le plus bas de l'emprise.
@@ -172,6 +294,7 @@ void ASpawnCabin::BeginPlay()
 		return;
 	}
 	SetActorTransform(ErewhonSpawn::CabinTransform(Kind));
+	Lamp->SetRelativeLocation(FVector(0, 0, GFloorTop + WallHeight - 60.f));
 	BuildCabin();
 
 	// Le marchand se tient derrière son comptoir, face à la porte (−X de la cabane).
@@ -210,9 +333,9 @@ UStaticMeshComponent* ASpawnCabin::AddBox(USceneComponent* Parent, const FVector
 void ASpawnCabin::BuildCabin()
 {
 	using namespace ErewhonSpawn;
-	const float HL = CabinHalfLength;
-	const float HW = CabinHalfWidth;
-	const float H = CabinWallHeight;
+	const float HL = HalfLength;
+	const float HW = HalfWidth;
+	const float H = WallHeight;
 	const float T = GWallThickness;
 	const FCabinStyle Style = StyleFor(Kind);
 
@@ -444,7 +567,8 @@ void ASpawnCabin::BuildCabin()
 		const FVector Sign(-HL - 4.4f, 0.f, GFloorTop + 280.f);
 		const TCHAR* Texture = Kind == EShopKind::SectorManager ? TEXT("T_sign_town_hall")
 			: Kind == EShopKind::Tailor ? TEXT("T_sign_tailor")
-			: Kind == EShopKind::Apothecary ? TEXT("T_sign_apothecary") : TEXT("T_sign_general_store");
+			: Kind == EShopKind::Apothecary ? TEXT("T_sign_apothecary") : Kind == EShopKind::Breeder ? TEXT("T_sign_breeder")
+			: Kind == EShopKind::Workshop ? TEXT("T_sign_workshop") : TEXT("T_sign_general_store");
 		if (AddPicture(this, Root, Sign, 200.f, 84.f, 0.f, Texture))
 		{
 			Box(FVector(-HL - 3.8f, -106.f, 280.f - 48.f), FVector(-HL, 106.f, 280.f + 48.f), Palette::WoodDark);
@@ -461,6 +585,14 @@ void ASpawnCabin::BuildCabin()
 		break;
 	case EShopKind::Apothecary:
 		BuildApothecaryInterior();
+		break;
+	case EShopKind::Breeder:
+		BuildBreederInterior();
+		BuildBarn();
+		break;
+	case EShopKind::Workshop:
+		BuildWorkshopInterior();
+		BuildYard();
 		break;
 	default:
 		BuildStoreInterior();
@@ -548,9 +680,9 @@ void ASpawnCabin::BuildTimberFrame()
 	// Colombages : sablières, lisses et poteaux de chêne sombre posés sur l'enduit, croix de Saint-André
 	// dans les panneaux pleins. Tout est légèrement en saillie (3 cm) de la face extérieure.
 	using namespace ErewhonSpawn;
-	const float HL = CabinHalfLength;
-	const float HW = CabinHalfWidth;
-	const float H = CabinWallHeight;
+	const float HL = HalfLength;
+	const float HW = HalfWidth;
+	const float H = WallHeight;
 	constexpr float Beam = 12.f;
 	constexpr float Proud = 3.f;
 	constexpr float MidRail = 150.f;
@@ -623,8 +755,8 @@ void ASpawnCabin::BuildTimberFrame()
 void ASpawnCabin::BuildStoreInterior()
 {
 	using namespace ErewhonSpawn;
-	const float HL = CabinHalfLength;
-	const float HW = CabinHalfWidth;
+	const float HL = HalfLength;
+	const float HW = HalfWidth;
 	const float T = GWallThickness;
 
 	// Comptoir entre l'entrée et le marchand.
@@ -860,8 +992,8 @@ void ASpawnCabin::AddShelf(const FVector& Location, float Yaw, int32 Variant, ES
 void ASpawnCabin::BuildManagerInterior()
 {
 	using namespace ErewhonSpawn;
-	const float HL = CabinHalfLength;
-	const float HW = CabinHalfWidth;
+	const float HL = HalfLength;
+	const float HW = HalfWidth;
 	const float T = GWallThickness;
 	const FVector Merchant = GetActorTransform().InverseTransformPosition(MerchantLocation(Kind));
 
@@ -903,8 +1035,8 @@ void ASpawnCabin::BuildManagerInterior()
 void ASpawnCabin::BuildTailorInterior()
 {
 	using namespace ErewhonSpawn;
-	const float HL = CabinHalfLength;
-	const float HW = CabinHalfWidth;
+	const float HL = HalfLength;
+	const float HW = HalfWidth;
 	const float T = GWallThickness;
 
 	const FVector CounterCenter = AddCounter();
@@ -963,9 +1095,9 @@ void ASpawnCabin::BuildTailorInterior()
 void ASpawnCabin::BuildApothecaryInterior()
 {
 	using namespace ErewhonSpawn;
-	const float HL = CabinHalfLength;
-	const float HW = CabinHalfWidth;
-	const float H = CabinWallHeight;
+	const float HL = HalfLength;
+	const float HW = HalfWidth;
+	const float H = WallHeight;
 	const float T = GWallThickness;
 	const auto Stone = [this](const FVector& Min, const FVector& Max, const FLinearColor& Tint = FLinearColor::White)
 	{
@@ -1025,8 +1157,7 @@ void ASpawnCabin::BuildApothecaryInterior()
 		Stone(FVector(HL - 76.f, -48.f, H + RidgeRise + 70.f), FVector(HL + 12.f, 48.f, H + RidgeRise + 82.f));
 	}
 
-	// Le mobilier (table, mortier, chaudron, étagères) s'achète au General Store ; reste une étagère à bocaux, à gauche de l'entrée.
-	AddShelf(FVector(-HL * 0.5f, -HW + T + 20.f, GFloorTop), -90.f, 10, EShelfGoods::Pantry);
+	// Le mobilier (table, mortier, chaudron, étagères) s'achète : la maison est livrée vide.
 
 	// Des bouquets de plantes qui sèchent, pendus aux poutres, tête en bas.
 	{
@@ -1058,6 +1189,215 @@ void ASpawnCabin::BuildApothecaryInterior()
 			AddShape(this, Root, EShape::Cylinder, Basket + FVector(-12.f + i * 8.f, 0, 40.f + (i % 2) * 6.f), FVector(10, 10, 54),
 				FLinearColor::FromSRGBColor(FColor(110, 80, 52)), FRotator(90.f, 10.f + i * 25.f, 0.f), false);
 		}
+	}
+}
+
+// ── L'éleveur ────────────────────────────────────────────────────────────────
+
+void ASpawnCabin::BuildBreederInterior()
+{
+	const float HL = HalfLength;
+	const float HW = HalfWidth;
+	const float T = GWallThickness;
+	AddCounter();
+	// Le harnachement en montre : une selle sur un chevalet, des sacoches au mur ; du foin dans un coin.
+	const FVector Rack(-HL * 0.35f, HW - T - 70.f, GFloorTop);
+	AddBox(Root, Rack + FVector(-60.f, -12.f, 0.f), Rack + FVector(60.f, 12.f, 80.f), Palette::WoodDark, TEXT("wood_trim"), 140.f);
+	if (UStaticMesh* Saddle = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_saddle")))
+	{
+		AddGeneratedMesh(this, Root, Saddle, Rack + FVector(0.f, 0.f, 70.f), 45.f, 90.f, false);
+	}
+	if (UStaticMesh* Bag = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_saddlebag")))
+	{
+		for (const float X : { HL * 0.1f, HL * 0.35f })
+		{
+			AddGeneratedMesh(this, Root, Bag, FVector(X, HW - T - 22.f, GFloorTop + 120.f), 50.f, 180.f, false);
+		}
+	}
+	if (UStaticMesh* Hay = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_hay_bale")))
+	{
+		AddGeneratedMesh(this, Root, Hay, FVector(HL - 110.f, -HW + 100.f, GFloorTop), 55.f, 10.f);
+		AddGeneratedMesh(this, Root, Hay, FVector(HL - 110.f, -HW + 100.f, GFloorTop + 55.f), 55.f, -15.f);
+		AddGeneratedMesh(this, Root, Hay, FVector(-HL - 170.f, HW - 40.f, 0.f), 55.f, 30.f);
+	}
+	AddShelf(FVector(-HL * 0.4f, -HW + T + 20.f, GFloorTop), -90.f, 7, EShelfGoods::Pantry);
+}
+
+void ASpawnCabin::BuildBarn()
+{
+	// La grange, à côté de la maison : ouverte sur le devant (−X), trois box, un bhurak de chaque robe.
+	const FVector2D C = ErewhonSpawn::AnnexCenter(Kind);
+	const FVector2D Half = ErewhonSpawn::AnnexHalfSize(Kind);
+	constexpr float H = 380.f;
+	constexpr float T = 20.f;
+	const FLinearColor Red = FLinearColor::FromSRGBColor(FColor(160, 70, 52));
+	const auto Wall = [this, &Red](const FVector& Min, const FVector& Max)
+	{
+		return AddBox(Root, Min, Max, Red, TEXT("barn_red"), 300.f);
+	};
+	const auto Timber = [this](const FVector& Min, const FVector& Max, bool bCollision = true)
+	{
+		return AddBox(Root, Min, Max, Palette::WoodDark, TEXT("wood_trim"), 140.f, bCollision);
+	};
+	const float X0 = C.X - Half.X, X1 = C.X + Half.X;
+	const float Y0 = C.Y - Half.Y, Y1 = C.Y + Half.Y;
+	// Sol de paille, murs du fond et des côtés, poteaux de façade.
+	AddBox(Root, FVector(X0, Y0, -10.f), FVector(X1, Y1, 3.f), Palette::WoodLight, TEXT("straw_floor"), 260.f);
+	Wall(FVector(X1 - T, Y0, 0.f), FVector(X1, Y1, H));
+	Wall(FVector(X0, Y0, 0.f), FVector(X1, Y0 + T, H));
+	Wall(FVector(X0, Y1 - T, 0.f), FVector(X1, Y1, H));
+	for (int32 i = 0; i <= 3; ++i)
+	{
+		const float Y = FMath::Lerp(Y0 + 15.f, Y1 - 15.f, i / 3.f);
+		Timber(FVector(X0, Y - 15.f, 0.f), FVector(X0 + 30.f, Y + 15.f, H));
+	}
+	Timber(FVector(X0, Y0, H - 30.f), FVector(X0 + 30.f, Y1, H), false);
+	// Toit à deux pans de chaume, faîtage dans l'axe X ; pignon plein au fond, pignon au-dessus de l'ouverture.
+	constexpr float Slope = 40.f;
+	constexpr float Overhang = 60.f;
+	const float HalfSpan = Half.Y + Overhang;
+	const float SlabWidth = HalfSpan / FMath::Cos(FMath::DegreesToRadians(Slope));
+	const float Rise = HalfSpan * FMath::Tan(FMath::DegreesToRadians(Slope));
+	for (const float Side : { -1.f, 1.f })
+	{
+		UStaticMeshComponent* Slab = AddShape(this, Root, EShape::Cube, FVector(C.X, C.Y + Side * HalfSpan * 0.5f, H + Rise * 0.5f + 8.f),
+			FVector(2.f * Half.X + 2.f * Overhang, SlabWidth, 22.f), Palette::Roof, FRotator(0.f, 0.f, Side * Slope));
+		Slab->SetMaterial(0, MakePaintedMaterial(Slab, TEXT("thatch"), 300.f, FLinearColor::FromSRGBColor(FColor(214, 178, 96))));
+	}
+	UMaterialInterface* Gable = MakePaintedMaterial(this, TEXT("barn_red"), 300.f, Red);
+	const float EaveRise = Rise * Overhang / HalfSpan;
+	const TArray<FVector2D> GableShape = { FVector2D(Y0, H), FVector2D(Y1, H), FVector2D(Y1, H + EaveRise), FVector2D(C.Y, H + Rise - 4.f), FVector2D(Y0, H + EaveRise) };
+	AddPrism(this, Root, GableShape, X1 - T, X1, Gable);
+	AddPrism(this, Root, GableShape, X0, X0 + T, Gable);
+
+	// Trois box : des cloisons à mi-hauteur, une lisse devant chacun.
+	const float StallWidth = (Y1 - Y0) / 3.f;
+	for (int32 i = 1; i < 3; ++i)
+	{
+		const float Y = Y0 + StallWidth * i;
+		AddBox(Root, FVector(X0 + 120.f, Y - 6.f, 0.f), FVector(X1 - T, Y + 6.f, 150.f), Palette::WoodLight, TEXT("wood_planks"), 160.f);
+	}
+	for (int32 i = 0; i < 3; ++i)
+	{
+		const float Ya = Y0 + StallWidth * i + 30.f, Yb = Y0 + StallWidth * (i + 1) - 30.f;
+		for (const float Z : { 60.f, 110.f })
+		{
+			Timber(FVector(X0 + 110.f, Ya, Z), FVector(X0 + 124.f, Yb, Z + 12.f));
+		}
+		// Le bhurak du box, tourné vers l'allée, et une botte de foin au fond.
+		const FVector Stall(C.X + 60.f, Y0 + StallWidth * (i + 0.5f), 0.f);
+		FTransform Fit;
+		if (UStaticMesh* Beast = ABhurak::Mesh(Fit, static_cast<uint8>(i)))
+		{
+			AddFitted(Beast, Fit, Stall, 180.f, false);
+		}
+		if (UStaticMesh* Hay = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_hay_bale")))
+		{
+			AddGeneratedMesh(this, Root, Hay, FVector(X1 - 90.f, Stall.Y + 60.f, 0.f), 50.f, 90.f + 20.f * i, false);
+		}
+	}
+	// Une lanterne sous la panne, au milieu.
+	UPointLightComponent* BarnLamp = NewObject<UPointLightComponent>(this);
+	BarnLamp->SetupAttachment(Root);
+	BarnLamp->SetRelativeLocation(FVector(C.X, C.Y, H - 40.f));
+	BarnLamp->SetIntensityUnits(ELightUnits::Lumens);
+	BarnLamp->SetIntensity(1200.f);
+	BarnLamp->SetAttenuationRadius(1100.f);
+	BarnLamp->SetLightColor(FLinearColor::FromSRGBColor(FColor(255, 196, 120)));
+	BarnLamp->RegisterComponent();
+	AddInstanceComponent(BarnLamp);
+}
+
+// ── L'atelier ────────────────────────────────────────────────────────────────
+
+void ASpawnCabin::BuildWorkshopInterior()
+{
+	const float HL = HalfLength;
+	const float HW = HalfWidth;
+	const float T = GWallThickness;
+	AddCounter();
+	// L'enclume près du fond, un établi au mur, du bois débité, des barriques.
+	if (UStaticMesh* Anvil = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_anvil")))
+	{
+		AddGeneratedMesh(this, Root, Anvil, FVector(HL * 0.4f, -HW + 110.f, GFloorTop), 85.f, 20.f);
+	}
+	if (UStaticMesh* Bench = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_workbench")))
+	{
+		AddFitted(Bench, FitToBox(Bench, 200.f, 80.f, 110.f), FVector(-HL * 0.25f, HW - T - 50.f, GFloorTop), 0.f, true);
+	}
+	if (UStaticMesh* Lumber = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_lumber_pile")))
+	{
+		AddFitted(Lumber, FitToLength(Lumber, 260.f, 60.f), FVector(-HL * 0.45f, -HW + 80.f, GFloorTop), 90.f, true);
+	}
+	if (UStaticMesh* Barrel = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_barrel")))
+	{
+		AddGeneratedMesh(this, Root, Barrel, FVector(-HL - 150, -HW + 40, 0), 95.f, 25.f);
+	}
+}
+
+void ASpawnCabin::BuildYard()
+{
+	// La cour, à côté de l'atelier : un enclos de barrières ouvert vers la route (−X), et ce qui s'y vend, exposé.
+	const FVector2D C = ErewhonSpawn::AnnexCenter(Kind);
+	const FVector2D Half = ErewhonSpawn::AnnexHalfSize(Kind);
+	UStaticMesh* Fence = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_fence_segment"));
+	const auto FenceRun = [&](const FVector2D& A, const FVector2D& B)
+	{
+		const float Length = FVector2D::Distance(A, B);
+		const int32 Count = FMath::Max(1, FMath::RoundToInt32(Length / 250.f));
+		const FVector2D Dir = (B - A) / Length;
+		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Dir.Y, Dir.X));
+		for (int32 i = 0; i < Count; ++i)
+		{
+			const FVector2D Mid = A + Dir * (Length * (i + 0.5f) / Count);
+			if (Fence)
+			{
+				AddFitted(Fence, FitToLength(Fence, Length / Count, 110.f) * FTransform(FRotator(0.f, -90.f, 0.f)), FVector(Mid, 0.f), Yaw, true);
+			}
+			else
+			{
+				AddShape(this, Root, EShape::Cube, FVector(Mid, 80.f), FVector(Length / Count, 8.f, 10.f), Palette::WoodDark, FRotator(0.f, Yaw, 0.f));
+			}
+		}
+	};
+	const FVector2D A(C.X - Half.X, C.Y - Half.Y), B(C.X + Half.X, C.Y - Half.Y), D(C.X + Half.X, C.Y + Half.Y), E(C.X - Half.X, C.Y + Half.Y);
+	FenceRun(B, D);   // le fond
+	FenceRun(D, E);   // le côté loin de la maison
+	// Côté maison : on laisse un passage vers la porte de côté.
+	FenceRun(A + FVector2D(Half.X * 0.6f, 0.f), B);
+	FenceRun(E, E + FVector2D(Half.X * 0.35f, 0.f));
+	// Ce qui s'y vend : la charrette, le cultivateur, le semoir, alignés face à la route.
+	const ECartKind Shown[] = { ECartKind::Cart, ECartKind::Cultivator, ECartKind::Seeder };
+	for (int32 i = 0; i < 3; ++i)
+	{
+		const FVector Spot(C.X + 80.f, C.Y - Half.Y * 0.62f + Half.Y * 0.62f * i, 0.f);
+		FTransform Fit;
+		if (UStaticMesh* Body = ErewhonPlaceables::ImplementMesh(Shown[i], Fit))
+		{
+			AddFitted(Body, Fit, Spot, 0.f, true);   // brancards vers la route (−X)
+		}
+		if (Shown[i] == ECartKind::Cart)
+		{
+			// La charrette a ses roues à part.
+			if (UStaticMesh* WheelMesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_cart_wheel")))
+			{
+				const FVector Size = WheelMesh->GetBoundingBox().GetSize();
+				const float DiskYaw = Size.X < Size.Y ? 90.f : 0.f;
+				for (const float Side : { -1.f, 1.f })
+				{
+					const FVector Axle = FTransform(Spot).TransformPosition(FVector(ACart::AxleX, Side * ACart::WheelHalfTrack, 0.f));
+					AddFitted(WheelMesh, FitToHeight(WheelMesh, ACart::WheelDiameter), Axle, DiskYaw, false);
+				}
+			}
+		}
+	}
+	if (UStaticMesh* Lumber = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_lumber_pile")))
+	{
+		AddFitted(Lumber, FitToLength(Lumber, 300.f, 70.f), FVector(C.X + Half.X - 120.f, C.Y + Half.Y - 150.f, 0.f), 0.f, true);
+	}
+	if (UStaticMesh* Anvil = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_anvil")))
+	{
+		AddGeneratedMesh(this, Root, Anvil, FVector(C.X + Half.X - 120.f, C.Y - Half.Y + 120.f, 0.f), 85.f, -30.f);
 	}
 }
 

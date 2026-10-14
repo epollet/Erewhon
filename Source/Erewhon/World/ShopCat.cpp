@@ -45,6 +45,7 @@ void AShopCat::BeginPlay()
 		// Assise, pattes au ras du bas de la capsule.
 		Body->SetRelativeTransform(FitToHeight(Mesh, GCatHeight) * FTransform(FRotator(0.f, GMeshYaw, 0.f), FVector(0.f, 0.f, -Capsule->GetScaledCapsuleHalfHeight())));
 		BaseScale = Body->GetRelativeScale3D();
+		BaseTransform = Body->GetRelativeTransform();
 	}
 }
 
@@ -67,9 +68,39 @@ void AShopCat::Tick(float DeltaSeconds)
 		SetActorLocationAndRotation(Where.GetLocation() + FVector(0.f, 0.f, Capsule->GetScaledCapsuleHalfHeight()), Where.GetRotation());
 	}
 
+	// L'attente du moment, tirée au hasard quand la précédente se termine.
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (Now >= IdleEnd)
+	{
+		const float Roll = FMath::FRand();
+		Idle = Roll < 0.35f ? EIdle::Sit : Roll < 0.5f ? EIdle::LookLeft : Roll < 0.65f ? EIdle::LookRight
+			: Roll < 0.78f ? EIdle::Stretch : Roll < 0.92f ? EIdle::Loaf : EIdle::Twitch;
+		IdleStart = Now;
+		IdleEnd = Now + (Idle == EIdle::Loaf ? FMath::FRandRange(10.f, 20.f) : Idle == EIdle::Twitch ? 1.2f : FMath::FRandRange(3.f, 7.f));
+	}
+	const float T = static_cast<float>(Now - IdleStart);
+	FVector4 Wanted(0.f, 0.f, 0.f, 1.f);   // lacet, tangage, roulis, hauteur
+	switch (Idle)
+	{
+	case EIdle::LookLeft:  Wanted.X = -28.f; break;
+	case EIdle::LookRight: Wanted.X = 28.f; break;
+	case EIdle::Stretch:   Wanted.Y = -9.f; Wanted.W = 0.88f; break;   // le nez vers l'avant, le dos qui s'allonge
+	case EIdle::Loaf:      Wanted.W = 0.72f; break;                    // en boule
+	case EIdle::Twitch:    Wanted.Z = FMath::Sin(T * 40.f) * 4.f * (1.f - T / 1.2f); break;
+	default: break;
+	}
+	const float Blend = FMath::Clamp(DeltaSeconds * 3.f, 0.f, 1.f);
+	Pose = Pose + (Wanted - Pose) * Blend;
+	if (Idle == EIdle::Twitch)
+	{
+		Pose.Z = Wanted.Z;
+	}
 	// Respiration : le dos se soulève à peine.
-	const float Breath = 1.f + 0.02f * FMath::Sin(GetWorld()->GetTimeSeconds() * 2.4f);
-	Body->SetRelativeScale3D(FVector(BaseScale.X, BaseScale.Y * Breath, BaseScale.Z * Breath));
+	const float Breath = 1.f + 0.02f * FMath::Sin(Now * 2.4f);
+	FTransform Posed = BaseTransform * FTransform(FRotator(Pose.Y, Pose.X, Pose.Z));
+	const FVector Scale = BaseScale * FVector(Idle == EIdle::Stretch ? 1.f + (1.f - Pose.W) : 1.f, Breath, Breath * Pose.W);
+	Posed.SetScale3D(Scale);
+	Body->SetRelativeTransform(Posed);
 }
 
 FText AShopCat::GetInteractionLabel() const
@@ -79,6 +110,10 @@ FText AShopCat::GetInteractionLabel() const
 
 void AShopCat::Interact(AErewhonPlayerController* Controller)
 {
+	// Caressée, elle frissonne d'aise.
+	Idle = EIdle::Twitch;
+	IdleStart = GetWorld()->GetTimeSeconds();
+	IdleEnd = IdleStart + 1.2;
 	if (Controller)
 	{
 		static const FText Reactions[] = {

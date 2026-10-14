@@ -51,6 +51,9 @@ public:
 
 	/** Range dans les slots de rangement (les outils d'abord dans leurs slots s'il y a de la place). */
 	int32 StoreItem(FName ItemId, int32 Count, bool bToolSlotsFirst = false);
+
+	/** Poids de son contenu (kg). */
+	float GetTotalWeight() const;
 	bool RemoveStored(FName ItemId, int32 Count);
 
 	/** Pose le sac au sol devant le pion, ou le remet sur le dos. */

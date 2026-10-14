@@ -41,6 +41,20 @@ const FString& UBackpackComponent::OwnerKey() const
 	return State ? State->GetPlayerKey() : None;
 }
 
+float UBackpackComponent::GetTotalWeight() const
+{
+	const UItemDatabase* Items = UItemDatabase::Get(this);
+	float Total = 0.f;
+	for (const FInventorySlot& Slot : Slots)
+	{
+		if (const FItemDef* Def = Slot.IsEmpty() || !Items ? nullptr : Items->Find(Slot.ItemId))
+		{
+			Total += Def->GetWeight() * Slot.Count;
+		}
+	}
+	return Total;
+}
+
 int32 UBackpackComponent::CountStored(FName ItemId) const
 {
 	int32 Total = 0;

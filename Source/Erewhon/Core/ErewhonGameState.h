@@ -107,6 +107,56 @@ struct TStructOpsTypeTraits<FSectorOwnerArray> : public TStructOpsTypeTraitsBase
 	enum { WithNetDeltaSerializer = true };
 };
 
+/** Une case de champ travaillée ; une case absente est de la terre grossière (voir World/Farm.h). */
+USTRUCT()
+struct FFieldCellEntry : public FFastArraySerializerItem
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FIntPoint Sector = FIntPoint::ZeroValue;
+
+	/** Y · ErewhonFarm::CellsPerSide + X. */
+	UPROPERTY()
+	int32 Cell = INDEX_NONE;
+
+	/** 0 : retournée ; 1 + n : semée de la culture n (ErewhonFarm::Crops). */
+	UPROPERTY()
+	uint8 Crop = 0;
+
+	/** Horloge du monde au semis (s). */
+	UPROPERTY()
+	double SownAt = 0.0;
+
+	void PostReplicatedAdd(const struct FFieldArray& Array);
+	void PostReplicatedChange(const struct FFieldArray& Array);
+	void PreReplicatedRemove(const struct FFieldArray& Array);
+};
+
+USTRUCT()
+struct FFieldArray : public FFastArraySerializer
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TArray<FFieldCellEntry> Items;
+
+	UPROPERTY(NotReplicated)
+	TObjectPtr<AErewhonGameState> Owner = nullptr;
+
+	bool NetDeltaSerialize(FNetDeltaSerializeInfo& DeltaParams)
+	{
+		return FFastArraySerializer::FastArrayDeltaSerialize<FFieldCellEntry, FFieldArray>(Items, DeltaParams, *this);
+	}
+};
+
+template <>
+struct TStructOpsTypeTraits<FFieldArray> : public TStructOpsTypeTraitsBase2<FFieldArray>
+{
+	enum { WithNetDeltaSerializer = true };
+};
+
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnFieldChanged, const FIntPoint& /*Sector*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnPlantHarvestChanged, const FIntPoint& /*Sector*/, int32 /*PlantIndex*/, bool /*bHarvested*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnSectorOwnerChanged, const FIntPoint& /*Sector*/);
 DECLARE_MULTICAST_DELEGATE(FOnVillageChanged);
@@ -161,6 +211,21 @@ public:
 
 	uint8 GetPavedLinks(const FIntPoint& Sector) const;
 	uint8 GetBuildings(const FIntPoint& Sector) const;
+
+	// ── Champs ──
+
+	/** Les cases travaillées d'un secteur (par index de case), nul s'il n'y en a pas. */
+	const TMap<int32, FFieldCellEntry>* GetFieldCells(const FIntPoint& Sector) const { return FieldsBySector.Find(Sector); }
+	const FFieldCellEntry* FindFieldCell(const FIntPoint& Sector, int32 Cell) const;
+	const TArray<FFieldCellEntry>& GetFieldEntries() const { return Fields.Items; }
+	/** Serveur : une case retournée (Crop 0) ou semée (1 + culture). */
+	void SetFieldCell(const FIntPoint& Sector, int32 Cell, uint8 Crop, double SownAt);
+	/** Serveur : la case redevient terre grossière. */
+	void ClearFieldCell(const FIntPoint& Sector, int32 Cell);
+	/** Serveur : tous les champs du secteur redeviennent terre grossière (revente). */
+	void ClearFieldSector(const FIntPoint& Sector);
+	void NotifyField(const FFieldCellEntry& Entry, bool bPresent);
+	FOnFieldChanged OnFieldChanged;
 
 	// ── Serveur uniquement ──
 
@@ -218,6 +283,11 @@ private:
 
 	UPROPERTY(Replicated)
 	FSectorOwnerArray SectorOwners;
+
+	UPROPERTY(Replicated)
+	FFieldArray Fields;
+
+	TMap<FIntPoint, TMap<int32, FFieldCellEntry>> FieldsBySector;
 
 	/** Caches locaux, tenus à jour par les notifications des fast arrays. */
 	TMap<FIntPoint, TSet<int32>> HarvestedBySector;

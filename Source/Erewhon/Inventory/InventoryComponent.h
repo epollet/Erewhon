@@ -57,9 +57,18 @@ struct FInventoryAppearance
 	UPROPERTY(BlueprintReadOnly)
 	FName LegsItem;
 
+	/** L'emplacement de la barre qui est en main (0, 1 ou 2). */
+	UPROPERTY(BlueprintReadOnly)
+	uint8 ActiveHotbar = 0;
+
+	/** Ce que portent les autres emplacements de la barre (outils dans le dos, le reste à la ceinture) ; rien pour l'actif. */
+	UPROPERTY(BlueprintReadOnly)
+	TArray<FName> Stowed;
+
 	bool operator==(const FInventoryAppearance& Other) const
 	{
-		return HandItem == Other.HandItem && TorsoItem == Other.TorsoItem && LegsItem == Other.LegsItem;
+		return HandItem == Other.HandItem && TorsoItem == Other.TorsoItem && LegsItem == Other.LegsItem
+			&& ActiveHotbar == Other.ActiveHotbar && Stowed == Other.Stowed;
 	}
 };
 
@@ -84,6 +93,26 @@ public:
 	const FInventoryAppearance& GetAppearance() const { return Appearance; }
 	FName GetHandItem() const { return Appearance.HandItem; }
 
+	// ── La barre : les emplacements d'équipement de base ──
+
+	int32 GetHotbarSize() const;
+	int32 GetActiveHotbar() const { return Appearance.ActiveHotbar; }
+	/** Index dans les slots du N-ième emplacement de la barre (INDEX_NONE s'il n'existe pas). */
+	int32 HotbarSlotIndex(int32 Hotbar) const;
+	/** Le slot tenu en main : l'emplacement actif de la barre. */
+	int32 HandSlotIndex() const { return HotbarSlotIndex(ActiveHotbar); }
+	FInventorySlot* EditHandSlot() { return Slots.IsValidIndex(HandSlotIndex()) ? &Slots[HandSlotIndex()] : nullptr; }
+
+	/** Serveur : choisir l'emplacement en main. */
+	void SelectHotbar(int32 Hotbar);
+
+	UFUNCTION(Server, Reliable)
+	void ServerSelectHotbar(int32 Hotbar);
+
+	/** Glisser un objet d'une case à une autre de ses poches ou de sa barre (un outil, un objet qui se tient, dans la barre). */
+	UFUNCTION(Server, Reliable)
+	void ServerMoveSlot(int32 From, int32 To);
+
 	/** Nombre d'exemplaires rangés dans les slots d'inventaire (hors équipement). */
 	int32 CountStored(FName ItemId) const;
 
@@ -91,6 +120,9 @@ public:
 	bool Owns(FName ItemId) const;
 
 	bool CanStore(FName ItemId, int32 Count) const;
+
+	/** Poids de tout ce qu'on porte sur soi : poches, mains, barre, vêtements (kg). */
+	float GetTotalWeight() const;
 
 	// ── Serveur ──
 
@@ -148,4 +180,7 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_Appearance)
 	FInventoryAppearance Appearance;
+
+	/** Serveur : l'emplacement actif de la barre. */
+	int32 ActiveHotbar = 0;
 };

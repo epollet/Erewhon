@@ -32,7 +32,7 @@ namespace ErewhonVillage
 		const FLinearColor GIron = FLinearColor::FromSRGBColor(FColor(52, 46, 40));
 		const FLinearColor GLanternGlow = FLinearColor::FromSRGBColor(FColor(255, 196, 110));
 		const FLinearColor GTerracotta = FLinearColor::FromSRGBColor(FColor(186, 102, 64));
-		const FLinearColor GBark = FLinearColor::FromSRGBColor(FColor(104, 74, 52));
+		const FLinearColor GVillageBark = FLinearColor::FromSRGBColor(FColor(104, 74, 52));
 
 		/** Les objets de la place, posés en couronne autour de son centre (degrés, nord = 0). */
 		constexpr float GBenchAngles[] = { 45.f, 135.f, 225.f, 315.f };
@@ -270,6 +270,11 @@ void AVillageDecor::BuildSignposts(bool bTailor, bool bLanterns)
 			const EShopKind Shop = Exit.Dir.Y > 0.f ? EShopKind::SectorManager : EShopKind::Tailor;
 			Arms.Add(ErewhonSigns::ShopArm(Shop, GetActorLocation() + FVector(Foot, 0.f), Yaw));
 		}
+		// Au nord l'éleveur, au sud l'atelier.
+		if (Exit.Dir.X != 0.f)
+		{
+			Arms.Add(ErewhonSigns::ShopArm(Exit.Dir.X > 0.f ? EShopKind::Breeder : EShopKind::Workshop, GetActorLocation() + FVector(Foot, 0.f), Yaw));
+		}
 		ErewhonSigns::AddSignpost(this, Root, FVector(Foot, 0.f), Arms, bLanterns);
 	}
 
@@ -302,7 +307,7 @@ void AVillageDecor::BuildLanterns(bool bTailor, bool bSignposts)
 		const FTransform Cabin = CabinTransform(Shop);
 		for (const float Side : { -1.f, 1.f })
 		{
-			const FVector World = Cabin.TransformPosition(FVector(-CabinHalfLength - 3.f, Side * (DoorHalfWidth + 42.f), CabinFloorTop + 200.f));
+			const FVector World = Cabin.TransformPosition(FVector(-CabinHalfSize(Shop).X - 3.f, Side * (DoorHalfWidth + 42.f), CabinFloorTop + 200.f));
 			const float Yaw = Cabin.Rotator().Yaw + 180.f;   // la potence sort du mur vers l'avant
 			ErewhonVillage::AddLantern(this, Root, GetActorTransform().InverseTransformPosition(World), Yaw, true);
 		}
@@ -443,7 +448,7 @@ void AVillageDecor::BuildDecoration()
 		const FTransform Cabin = CabinTransform(Shop);
 		for (const float Side : { -1.f, 1.f })
 		{
-			Pot(GetActorTransform().InverseTransformPosition(Cabin.TransformPosition(FVector(-CabinHalfLength - 140.f, Side * 150.f, 0.f))));
+			Pot(GetActorTransform().InverseTransformPosition(Cabin.TransformPosition(FVector(-CabinHalfSize(Shop).X - 140.f, Side * 150.f, 0.f))));
 		}
 	}
 	if (UStaticMesh* Rose = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_bush_rose")))
@@ -471,20 +476,20 @@ void AVillageDecor::BuildDecoration()
 			const FVector Foot = OnRing(Angle, Rand.FRandRange(1450.f, 1650.f));
 			UStaticMesh* Model = TreeModels[TreeIndex++ % TreeModels.Num()];
 			AddGeneratedMesh(this, Root, Model, Foot, Rand.FRandRange(1000.f, 1200.f), Rand.FRandRange(0.f, 360.f), false);
-			UStaticMeshComponent* Trunk = AddShape(this, Root, EShape::Cylinder, Foot + FVector(0, 0, 150), FVector(60, 60, 300), GBark, FRotator::ZeroRotator, true);
+			UStaticMeshComponent* Trunk = AddShape(this, Root, EShape::Cylinder, Foot + FVector(0, 0, 150), FVector(60, 60, 300), GVillageBark, FRotator::ZeroRotator, true);
 			Trunk->SetHiddenInGame(true);
 			continue;
 		}
 		// Un grand tronc et une large couronne de feuillage (de grands buissons) qui ombrage la place.
 		const FVector Foot = OnRing(Angle, Rand.FRandRange(1450.f, 1600.f));
 		const float Height = Rand.FRandRange(650.f, 820.f);   // base de la couronne
-		UStaticMeshComponent* Trunk = AddShape(this, Root, EShape::Cylinder, Foot + FVector(0, 0, Height * 0.5f), FVector(55, 55, Height), GBark, FRotator::ZeroRotator, true);
-		Trunk->SetMaterial(0, MakePaintedMaterial(Trunk, TEXT("wood_trim"), 120.f, GBark, FLinearColor(0.8f, 0.7f, 0.6f)));
+		UStaticMeshComponent* Trunk = AddShape(this, Root, EShape::Cylinder, Foot + FVector(0, 0, Height * 0.5f), FVector(55, 55, Height), GVillageBark, FRotator::ZeroRotator, true);
+		Trunk->SetMaterial(0, MakePaintedMaterial(Trunk, TEXT("wood_trim"), 120.f, GVillageBark, FLinearColor(0.8f, 0.7f, 0.6f)));
 		for (const float Side : { -1.f, 1.f })
 		{
 			// Deux maîtresses branches qui partent en biais vers la couronne.
 			const FVector Branch = FRotator(0.f, Angle + Side * 70.f, 0.f).Vector() * 70.f;
-			AddShape(this, Root, EShape::Cylinder, Foot + Branch + FVector(0, 0, Height - 60.f), FVector(22, 22, 220), GBark,
+			AddShape(this, Root, EShape::Cylinder, Foot + Branch + FVector(0, 0, Height - 60.f), FVector(22, 22, 220), GVillageBark,
 				FRotator(0.f, Angle + Side * 70.f, 0.f) + FRotator(-35.f, 0.f, 0.f), false);
 		}
 		if (Crown)

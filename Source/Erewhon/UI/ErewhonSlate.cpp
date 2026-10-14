@@ -263,6 +263,12 @@ namespace ErewhonUI
 					[
 						SNew(STextBlock).Text(Def.Description).Font(Font(10)).ColorAndOpacity(MutedInk).AutoWrapText(true)
 					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+					[
+						SNew(STextBlock).Text(FText::Format(NSLOCTEXT("ErewhonSlate", "Weight", "Poids : {0} kg"),
+							FText::AsNumber(Def.GetWeight(), &FNumberFormattingOptions().SetMaximumFractionalDigits(2))))
+						.Font(Font(10, true)).ColorAndOpacity(MutedInk)
+					]
 				]
 			];
 	}

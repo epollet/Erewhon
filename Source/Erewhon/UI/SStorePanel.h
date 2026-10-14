@@ -44,7 +44,10 @@ private:
 
 	TWeakObjectPtr<AErewhonPlayerController> Controller;
 	TSharedPtr<SBox> Body;
+	/** La liste qui défile (achats, ventes) : on garde sa position quand le panneau se refait. */
+	TSharedPtr<class SScrollBox> ContentScroll;
 	EShopKind Kind = EShopKind::GeneralStore;
 	ETab Tab = ETab::Sell;
+	ETab LastTab = ETab::Sell;
 	FIntPoint Selected = FIntPoint(1, 1);
 };

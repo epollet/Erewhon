@@ -26,6 +26,16 @@ enum class EStorageKind : uint8
 	Potpourri,  // pot-pourri posé : parfume les alentours et apaise ceux qui passent, un temps
 	CauldronStand, // support de chaudron réglable en hauteur, posé dans la cheminée
 	FirewoodRack,  // rack à petit bois : 40 brassées, chacun peut s'y servir
+	Saddlebag,     // sacoche accrochée au harnais d'un bhurak : autant qu'un sac à dos
+};
+
+/** Ce qui se tire par les brancards : la charrette, et les outils tractés par un bhurak. */
+UENUM()
+enum class ECartKind : uint8
+{
+	Cart,        // charrette : conteneurs ou petit bois
+	Cultivator,  // cultivateur : levier baissé, il retourne la terre des champs sous lui
+	Seeder,      // semoir : roue enclenchée, il sème autour de lui (trémie à graines)
 };
 
 /** Ce qu'on peut poser dans le monde depuis ses mains (objet de l'inventaire). */
@@ -35,6 +45,8 @@ namespace ErewhonPlaceables
 	EREWHON_API TOptional<EStorageKind> StorageForItem(FName ItemId);
 	EREWHON_API FName ItemForStorage(EStorageKind Kind);
 	EREWHON_API bool IsCart(FName ItemId);
+	/** Le bhurak se pose depuis ses mains, comme la charrette. */
+	EREWHON_API bool IsBhurak(FName ItemId);
 
 	EREWHON_API int32 Capacity(EStorageKind Kind);
 	/** Mobilier de l'apothicairerie (étagère, table, mortier, chaudron) : ni pile ni charrette. */
@@ -47,6 +59,11 @@ namespace ErewhonPlaceables
 	/** Le modèle d'un conteneur ou de la charrette, et sa mise à l'échelle (posé sur Z = 0, grand côté sur Y). */
 	EREWHON_API UStaticMesh* StorageMesh(EStorageKind Kind, FTransform& OutFit);
 	EREWHON_API UStaticMesh* CartMesh(FTransform& OutFit);
+	/** Le modèle d'un outil tracté (brancards vers −X, comme la charrette) ; la charrette pour Cart. */
+	EREWHON_API UStaticMesh* ImplementMesh(ECartKind Kind, FTransform& OutFit);
+	/** L'objet de l'inventaire qui se pose en charrette ou en outil tracté. */
+	EREWHON_API TOptional<ECartKind> CartKindForItem(FName ItemId);
+	EREWHON_API FName ItemForCartKind(ECartKind Kind);
 
 	/**
 	 * Peut-on poser ceci là ? (Type : 0 au sol, 1 sur un autre, 2 dans une charrette.)
@@ -76,7 +93,7 @@ namespace ErewhonPlaceables
 	 * Un bouquet de plantes récoltées (SM_bundle_<plante>), long de Length (cm), au repère At (le long de Y) ;
 	 * séché (« dried_… ») : pâli et plus fin. Nul s'il n'y a pas de modèle pour cette plante.
 	 */
-	EREWHON_API class UStaticMeshComponent* AddBundle(AActor* Owner, USceneComponent* Parent, FName ItemId, const FTransform& At, float Length);
+	EREWHON_API class UStaticMeshComponent* AddBundle(AActor* Owner, USceneComponent* Parent, FName ItemId, const FTransform& At, float Length, bool bLying = false);
 
 	/** Nombre de cagettes au plus dans une pile. */
 	constexpr int32 MaxStack = 3;
@@ -289,6 +306,16 @@ public:
 	const FString& GetOwnerName() const { return OwnerName; }
 	APawn* GetDriver() const { return Driver; }
 
+	/** Charrette, cultivateur ou semoir. */
+	ECartKind GetCartKind() const { return CartKind; }
+	bool IsImplement() const { return CartKind != ECartKind::Cart; }
+	/** Le levier : cultivateur baissé, roue du semoir enclenchée. */
+	bool IsEngaged() const { return bEngaged; }
+	/** Ce qu'on peut verser en vrac sur la plate-forme : du petit bois (charrette), des sacs de graines (semoir). */
+	bool AcceptsBulk(FName ItemId) const;
+	/** Le ralentissement de qui la tire, levier baissé (1 sinon). */
+	float DragFactor() const;
+
 	/** Repère local : l'essieu (milieu entre les roues) et le bout des brancards, sur l'axe X. */
 	static constexpr float AxleX = 9.f;
 	static constexpr float GripX = -140.f;
@@ -319,7 +346,8 @@ public:
 
 	// ── Serveur ──
 
-	void Setup(const FString& InOwnerKey, const FString& InOwnerName);
+	void Setup(const FString& InOwnerKey, const FString& InOwnerName, ECartKind InKind = ECartKind::Cart);
+	void SetEngaged(bool bOn);
 	void SetLoad(int32 Slot, AStorageActor* Storage);
 	void StartDriving(APawn* Pawn);
 	void StopDriving();
@@ -328,9 +356,35 @@ private:
 	UFUNCTION()
 	void OnRep_Driver();
 
+	UFUNCTION()
+	void OnRep_Engaged();
+
+	/** Serveur : le cultivateur retourne, le semoir sème, sous lui et autour, s'il est tiré par un bhurak. */
+	void Work();
+	float WorkTimer = 0.f;
+	/** Semoir : cases qu'il reste à semer avec le sac entamé, et sa culture. */
+	int32 SeedCredit = 0;
+	int32 SeedCrop = INDEX_NONE;
+
+	UPROPERTY(Replicated)
+	ECartKind CartKind = ECartKind::Cart;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Engaged)
+	bool bEngaged = false;
+
+	/** Le corps de l'outil (il s'abaisse, levier baissé), et la roue de distribution du semoir. */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> ImplementBody;
+	FTransform ImplementRest;
+	UPROPERTY(Transient)
+	TObjectPtr<USceneComponent> Spinner;
+	float SpinAngle = 0.f;
+
 	void ApplyDriverCollision(APawn* Pawn, bool bIgnore);
 	/** La charrette suit son conducteur : les brancards dans ses mains, elle pivote autour de l'essieu. */
 	void FollowDriver();
+	/** La caisse de la charrette, placée ainsi, entrerait-elle dans un mur, un meuble, un tronc ? */
+	bool IsBlockedAt(const FTransform& Where) const;
 	float GroundAt(const FVector& World) const;
 	/** Les roues tournent selon le chemin parcouru par chacune (en pivotant, l'une avance, l'autre recule). */
 	void SpinWheels();

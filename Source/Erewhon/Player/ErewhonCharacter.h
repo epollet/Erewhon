@@ -20,6 +20,11 @@ struct FCharacterTarget
 	FPlantTarget Plant;
 	/** Faux si la plante est sur un secteur qui n'appartient pas au joueur. */
 	bool bPlantHarvestable = false;
+	/** Une case de son champ, sous le regard (INDEX_NONE sinon). */
+	FIntPoint FieldSector = FIntPoint::ZeroValue;
+	int32 FieldCell = INDEX_NONE;
+	/** Le quart de la case visé (bit 1 : côté +X, bit 2 : côté +Y) : la bêche retourne les 2 × 2 cases autour de ce coin. */
+	uint8 FieldCorner = 0;
 	FText Hint;
 };
 
@@ -55,6 +60,9 @@ public:
 
 	/** Le conteneur qu'on porte dans ses bras, la charrette qu'on conduit (le serveur les fixe). */
 	class AStorageActor* GetCarried() const { return Carried; }
+	/** Le bhurak qu'on monte (le serveur le fixe). */
+	class ABhurak* GetMount() const { return Mount; }
+	void SetMount(class ABhurak* Bhurak) { Mount = Bhurak; OnRep_Mount(); }
 	class ACart* GetDrivenCart() const { return DrivenCart; }
 	void SetCarried(class AStorageActor* Storage) { Carried = Storage; }
 	void SetDrivenCart(class ACart* Cart) { DrivenCart = Cart; }
@@ -62,12 +70,18 @@ public:
 	// ── Potions ──
 
 	/** Serveur : boire une potion, son effet pour ErewhonApothecary::PotionSeconds. */
-	void DrinkPotion(EPotionEffect Effect);
+	void DrinkPotion(EPotionEffect Effect, float Seconds = 0.f);
 	bool HasPotion(EPotionEffect Effect) const { return PotionRemaining(Effect) > 0.f; }
 	/** Secondes d'effet restantes (0 s'il est passé). */
 	float PotionRemaining(EPotionEffect Effect) const;
 	/** Serveur : un effet venu d'ailleurs (la sérénité d'un pot-pourri), prolongé s'il dure déjà. */
 	void GrantEffect(EPotionEffect Effect, double Seconds);
+
+	/** Ce qu'on porte sur soi (poches, barre, vêtements, sac sur le dos), en kg. */
+	float GetCarriedWeight() const;
+	/** Charge sans peine, et charge où l'on ne peut plus avancer (plus en selle, plus avec la potion de force). */
+	float GetCarryComfort() const;
+	float GetCarryMax() const;
 
 private:
 	void Move(const FInputActionValue& Value);
@@ -75,10 +89,21 @@ private:
 	void StartRun();
 	void StopRun();
 	void Primary();
+	void Secondary();
 	void Use();
 	void StartCrouch();
 	void StopCrouch();
 	void ToggleInventory();
+	void SelectHotbar(int32 Hotbar);
+	void ScrollHotbar(const FInputActionValue& Value);
+	void SelectHotbar1() { SelectHotbar(0); }
+	void SelectHotbar2() { SelectHotbar(1); }
+	void SelectHotbar3() { SelectHotbar(2); }
+	/** Les objets de la barre qui ne sont pas en main : outils en travers du dos, le reste à la ceinture. */
+	void ApplyStowed();
+	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> StowedParts;
+	/** Le harnais qui tient les outils dans le dos : deux sangles croisées, devant et derrière. */
+	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> HarnessStraps;
 	void BagAction();
 	void StashAction();
 	void ApplyView();
@@ -130,6 +155,12 @@ private:
 	UPROPERTY(Replicated)
 	TObjectPtr<class ACart> DrivenCart;
 
+	UFUNCTION()
+	void OnRep_Mount();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Mount)
+	TObjectPtr<class ABhurak> Mount;
+
 	/** Pour chaque effet de potion (index EPotionEffect), l'horloge du monde jusqu'à laquelle il dure. */
 	UPROPERTY(Replicated)
 	TArray<double> PotionUntil;
@@ -141,6 +172,10 @@ private:
 	void UpdatePotions(float DeltaSeconds);
 	float BodyScale = 1.f;
 	float NightVision = 0.f;
+	/** La potion de lumière : une lueur autour de soi, qui s'allume et s'éteint en douceur. */
+	UPROPERTY(Transient)
+	TObjectPtr<class UPointLightComponent> PotionGlow;
+	float GlowLevel = 0.f;
 
 	/** Aperçu translucide de ce qu'on va poser. */
 	UPROPERTY(Transient)
@@ -214,6 +249,19 @@ private:
 	TMap<TPair<FIntPoint, int32>, double> PendingHarvests;
 
 	float SwingTime = 0.f;
+	/** L'orientation de l'objet tenu, vu de soi : celle de la main, plus son demi-tour éventuel (faux lame en bas, bêche lame devant). */
+	FRotator HeldFirstRotation = FRotator(-20.f, 0.f, 10.f);
+	/** Le geste de la faux (deux secondes), et le bruit de l'outil du moment. */
+	float ScytheTime = 0.f;
+	/** Le coup de bêche (une seconde) : le fer s'enfonce vers l'avant, on fait levier, on revient. */
+	float DigTime = 0.f;
+	/** La place de l'objet tenu, vu de soi (pour le ramener après un geste qui le déplace). */
+	FVector HeldFirstLocation = FVector::ZeroVector;
+	void PlayToolSound(const TCHAR* SoundName, float Volume);
+	/** Le pichet en main, en visant un tonneau ou le chaudron : puiser (F) ou verser (G), ou arrêter. Vrai si c'était ça. */
+	bool TryPitcher(class AStorageActor* Storage, bool bDraw);
+	/** L'indication pour une case de champ, selon ce qu'on tient. */
+	FText FieldHint(const struct FFieldCellEntry* Entry, FName Hand) const;
 	bool bIsRunning = false;
 	float StrideDistance = 0.f;
 };

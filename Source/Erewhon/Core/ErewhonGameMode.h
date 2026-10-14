@@ -32,7 +32,8 @@ public:
 
 	void RegisterPlayer(AErewhonPlayerController* Controller, const FString& RequestedKey, const FString& DisplayName);
 
-	FText TryHarvest(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 PlantIndex);
+	/** Sans bNow, la cueillette prend son temps (une barre) et se fait au bout. */
+	FText TryHarvest(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 PlantIndex, bool bNow = false);
 	FText TryBuySector(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 	FText TrySellSector(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 	FText TryBuyRoadLink(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 Side);
@@ -43,11 +44,16 @@ public:
 	/** Au mortier ou au chaudron (meubles posés) : Count exemplaires, un à la fois. */
 	FText TryStartCraft(AErewhonPlayerController* Controller, class AStorageActor* Station, FName Output, int32 Count);
 	FText TryBuyStoreroom(AErewhonPlayerController* Controller, const FIntPoint& Sector);
+	/** « Débloquer » (menu) : on descend de selle, on lâche la charrette, et on se retrouve devant la mairie. */
+	FText Unstuck(AErewhonPlayerController* Controller);
+	/** Une place libre devant l'atelier, pour y livrer une charrette ou un outil attelé. */
+	TOptional<FVector> FindWorkshopSpot() const;
+	void DeliverCart(class AErewhonPlayerState* PlayerState, FName ItemId, const FVector& Spot);
 
 	// Les liquides (2 L/s d'un récipient à l'autre)
 	/**
-	 * Op : 2 remplir des fioles au récipient (Count : combien) ; 4 le pichet qu'on tient en main, qu'on remplit
-	 * s'il est vide, qu'on vide dans le récipient s'il est plein.
+	 * Op : 2 remplir des fioles au récipient (Count : combien) ; 5 puiser au pichet qu'on tient en main, 6 en verser :
+	 * un litre par seconde, jusqu'à ce que le pichet (2 L) ou le récipient soit plein ou vide.
 	 */
 	FText TryStartPour(AErewhonPlayerController* Controller, class AStorageActor* Container, uint8 Op, FName Item, int32 Count);
 	/** Vide un tonneau ou le chaudron (le liquide, et les ingrédients du chaudron) : perdu. */
@@ -56,6 +62,24 @@ public:
 	FText TryAdjustStand(AErewhonPlayerController* Controller, class AStorageActor* Stand, float Level);
 	FText TryChooseClass(AErewhonPlayerController* Controller, uint8 NewClass);
 
+	// Les champs du fermier (Core/ErewhonGameModeFarm.cpp)
+	/** Which : 0-3 un champ (ErewhonFarm::EQuarter), 4 la fusion des quatre. */
+	FText TryBuyField(AErewhonPlayerController* Controller, const FIntPoint& Sector, uint8 Which);
+	/** Selon ce qu'on tient : bêche, sac de graines, cerpe ou mains nues. */
+	FText TryWorkField(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 Cell, uint8 Corner = 0, bool bNow = false);
+	/** Un coup de faux : deux secondes, puis tout ce qui est à portée est récolté. */
+	FText TryScythe(AErewhonPlayerController* Controller);
+
+	// Le bhurak (Core/ErewhonGameModeBhurak.cpp)
+	/** Monter son bhurak sellé ; nul : descendre. */
+	FText TryRideBhurak(AErewhonPlayerController* Controller, class ABhurak* Bhurak);
+	/** Atteler (en selle près d'une charrette, ou en amenant la charrette) ou dételer. */
+	FText TryHitchBhurak(AErewhonPlayerController* Controller, class ABhurak* Aimed);
+	/** Slot 0-2 : sacoche ou selle (Item nul : retirer) ; 3 : le harnais ; 4 : reprendre le bhurak. */
+	FText TryEquipBhurak(AErewhonPlayerController* Controller, class ABhurak* Bhurak, uint8 Slot, FName Item);
+	/** Le levier d'un outil tracté (cultivateur, semoir). */
+	FText TryToggleImplement(AErewhonPlayerController* Controller, class ACart* Implement);
+
 	// Sac à dos
 	FText TryDropBackpack(AErewhonPlayerController* Controller);
 	FText TryPickUpBackpack(AErewhonPlayerController* Controller, class ABackpack* Backpack);
@@ -63,6 +87,10 @@ public:
 	FText TryMoveItem(AErewhonPlayerController* Controller, bool bFromBag, int32 From, bool bToBag, int32 To);
 	FText TryStashAll(AErewhonPlayerController* Controller);
 	FText TryDiscard(AErewhonPlayerController* Controller, bool bFromBag, int32 SlotIndex, class AStorageActor* Storage = nullptr);
+	/** Ramasser des objets posés à terre (au propriétaire du terrain, ou à tous sur un lieu public). */
+	FText TryPickUpDropped(AErewhonPlayerController* Controller, class ADroppedItem* Dropped);
+	/** Poser des objets à terre devant soi : ils y restent trois minutes. */
+	void DropOnGround(const APawn* Pawn, FName ItemId, int32 Count);
 
 	// Charrette et conteneurs
 	FText TryPickUpStorage(AErewhonPlayerController* Controller, class AStorageActor* Storage);
@@ -74,6 +102,12 @@ public:
 	/** Le petit bois en vrac de la charrette. */
 	FText TryMoveCartItem(AErewhonPlayerController* Controller, class ACart* Cart, bool bFromCart, int32 From, bool bToCart, int32 To);
 	FText TryStashInCart(AErewhonPlayerController* Controller, class ACart* Cart);
+	/**
+	 * Une partie d'une pile, d'une case à une autre : de ses poches (bFromOther faux) ou de l'autre côté (le sac,
+	 * ou Storage, ou Cart), vers une case vide ou de la même chose.
+	 */
+	FText TrySplitMove(AErewhonPlayerController* Controller, bool bFromOther, int32 From, bool bToOther, int32 To, int32 Count,
+		class AStorageActor* Storage, class ACart* Cart);
 
 	// Triche (hôte, ou build de développement)
 	FText TryCheatSetCoins(AErewhonPlayerController* Controller, int32 Coins);
@@ -105,6 +139,7 @@ private:
 	 */
 	void SpawnFurnishing(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName, const TArray<FInventorySlot>& Shelves);
 	class AStorageActor* SpawnStorage(EStorageKind Kind, const FTransform& At, const FString& OwnerKey, const FString& OwnerName);
+	class ABhurak* SpawnBhurak(const FTransform& At, const FString& OwnerKey, const FString& OwnerName, uint8 Coat = 0);
 	/** Un exemplaire de la préparation en cours est prêt : on l'échange contre ses ingrédients. */
 	void StepCraft(AErewhonPlayerController* Controller);
 	/** Le joueur est-il chez lui, assez près de sa maison (pour le feu) ? */
@@ -115,6 +150,17 @@ private:
 	void StepPour(AErewhonPlayerController* Controller);
 	/** Seul un apothicaire se sert des outils de l'apothicairerie. */
 	FText CheckApothecary(AErewhonPlayerController* Controller) const;
+	FText CheckFarmer(AErewhonPlayerController* Controller) const;
+	FText FinishScythe(AErewhonPlayerController* Controller);
+	void ReportResultTo(AErewhonPlayerController* Controller, const FText& Error);
+	/** Le coup de bêche en cours, par joueur : les cases qu'il retournera au bout d'une seconde. */
+	struct FPendingDig { FIntPoint Sector = FIntPoint::ZeroValue; TArray<int32> Cells; };
+	TMap<TWeakObjectPtr<AErewhonPlayerController>, FPendingDig> PendingDigs;
+	void FinishDig(AErewhonPlayerController* Controller);
+	/** Un geste qui prend du temps (cueillir à la main, à la cerpe) : sa barre, puis Finish au bout. Faux si un autre est en cours. */
+	bool StartTimedGesture(AErewhonPlayerController* Controller, float Seconds, uint8 Pour, TFunction<FText(AErewhonPlayerController*)> Finish);
+	/** La faux en cours, par joueur (heure de fin). */
+	TMap<TWeakObjectPtr<AErewhonPlayerController>, double> ScytheUntil;
 
 	/** Le joueur est-il à côté de son mortier ou de son chaudron ? */
 	FText CheckAtStation(AErewhonPlayerController* Controller, const class AStorageActor* Station) const;

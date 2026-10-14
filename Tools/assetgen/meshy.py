@@ -87,8 +87,21 @@ def rig(model_task_file: Path, out_fbx: Path, *, height: float) -> str:
     """Squelette automatique d'un personnage déjà généré (5 crédits). Renvoie l'id de la tâche de rigging."""
     model_task = json.loads(model_task_file.read_text())["id"]
     task_file = out_fbx.with_suffix(".rig.json")
-    task_id = _resumable(task_file, lambda: request_json(f"{_API}/rigging", method="POST", headers=_headers(),
-                                                         body={"input_task_id": model_task, "height_meters": height})["result"])
+
+    def create() -> str:
+        try:
+            return request_json(f"{_API}/rigging", method="POST", headers=_headers(),
+                                body={"input_task_id": model_task, "height_meters": height})["result"]
+        except RuntimeError as error:
+            if "Input task not found" not in str(error):
+                raise
+        # La tâche d'origine a expiré chez Meshy : on envoie le modèle lui-même.
+        glb = model_task_file.with_name(model_task_file.name.replace(".task.json", ".glb"))
+        data = "data:application/octet-stream;base64," + base64.b64encode(glb.read_bytes()).decode()
+        return request_json(f"{_API}/rigging", method="POST", headers=_headers(),
+                            body={"model_url": data, "height_meters": height})["result"]
+
+    task_id = _resumable(task_file, create)
     result = _wait("rigging", task_id, out_fbx.stem)
     if not out_fbx.exists():
         download(result["rigged_character_fbx_url"], out_fbx)

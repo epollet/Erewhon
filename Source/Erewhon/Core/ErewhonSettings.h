@@ -160,6 +160,21 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
 	int32 ApothecaryClassPrice = 500;
 
+	/** Prix de la classe de fermier, à la mairie. */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
+	int32 FarmerClassPrice = 500;
+
+	/** Prix d'un champ (un quart de secteur), et de la fusion des quatre en un seul. */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
+	int32 FieldPrice = 2000;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
+	int32 FieldMergePrice = 1500;
+
+	/** Prix de la clôture d'un secteur de champs, avec ses portiques. */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
+	int32 FencePrice = 800;
+
 	// ── Récolte ──────────────────────────────────────────────────────────────
 
 	/** Délai de repousse d'une plante récoltée (s). */
@@ -202,9 +217,16 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Inventory", meta = (ClampMin = 1))
 	int32 BaseInventorySlots = 9;
 
-	/** Slots d'équipement de base — le premier est « Mains ». */
+	/** Charge portée sans peine (kg) ; au-delà, on ralentit jusqu'à ne plus pouvoir avancer à CarryMaxKg. */
 	UPROPERTY(Config, EditAnywhere, Category = "Inventory", meta = (ClampMin = 1))
-	int32 BaseEquipmentSlots = 1;
+	float CarryComfortKg = 25.f;
+
+	UPROPERTY(Config, EditAnywhere, Category = "Inventory", meta = (ClampMin = 1))
+	float CarryMaxKg = 50.f;
+
+	/** Slots d'équipement de base : la barre (1, 2, 3 ou la molette) ; celui qui est actif est en main. */
+	UPROPERTY(Config, EditAnywhere, Category = "Inventory", meta = (ClampMin = 1))
+	int32 BaseEquipmentSlots = 3;
 
 	// ── Joueur ───────────────────────────────────────────────────────────────
 

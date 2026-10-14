@@ -63,8 +63,11 @@ namespace ErewhonApothecary
 	constexpr float StoreroomHalfLength = 200.f;
 	constexpr float StoreroomDepth = 300.f;
 
-	/** Une étagère à potions : quatre étages, une pile de dix par étage. */
+	/** Une étagère : quatre étages de cinq emplacements, une pile entière par emplacement. */
 	constexpr int32 ShelfRows = 4;
+	constexpr int32 ShelfSlotsPerRow = 5;
+	constexpr int32 ShelfSlots = ShelfRows * ShelfSlotsPerRow;
+	/** Séchoir et rack à petit bois : dix par place. */
 	constexpr int32 PotionsPerSlot = 10;
 	constexpr float ShelfWidth = 120.f;
 	constexpr float ShelfDepth = 36.f;
@@ -94,6 +97,14 @@ namespace ErewhonApothecary
 
 	/** L'emplacement du support de chaudron dans la cheminée de la maison de ce secteur (monde), s'il y en a une. */
 	EREWHON_API TOptional<FTransform> StandSpot(const UObject* WorldContext, const FIntPoint& Sector);
+
+	/** Les racks à petit bois assez près de la cheminée pour que le feu y puise (3,5 m). */
+	constexpr float WoodRackReach = 350.f;
+	EREWHON_API TArray<class AStorageActor*> WoodRacksNear(const class AApothecary* House);
+	/** Le petit bois à portée du feu, dans ces racks. */
+	EREWHON_API int32 WoodNearFire(const class AApothecary* House);
+	/** Serveur : prend une brassée dans un rack à portée ; faux s'il n'y en a pas. */
+	EREWHON_API bool TakeWoodNearFire(const class AApothecary* House);
 
 	/** Le support posé dans la cheminée de ce secteur, s'il y en a un. */
 	EREWHON_API AStorageActor* FindStand(const UObject* WorldContext, const FIntPoint& Sector);
@@ -127,21 +138,31 @@ namespace ErewhonApothecary
 	};
 	EREWHON_API const TArray<FBrew>& Brews();
 	EREWHON_API const FBrew* FindBrew(FName Liquid);
+	/** La base de potion (liquide) : elle se fait dans l'eau ; tous les autres breuvages se font dans la base. */
+	inline const FName BaseLiquid(TEXT("brew_base"));
+	EREWHON_API FName SolventOf(const FBrew& Brew);
 	/** Le breuvage que donneraient ces ingrédients dans tant de litres d'eau, s'il y en a un. */
 	EREWHON_API const FBrew* MatchBrew(const TArray<FInventorySlot>& Ingredients, float Liters);
+	/** Le breuvage dont on a mis exactement les ingrédients (sans regarder les quantités), s'il y en a un. */
+	EREWHON_API const FBrew* SameIngredientsBrew(const TArray<FInventorySlot>& Ingredients);
 	/** Ce qui peut entrer dans le chaudron : plantes, écrasés, plantes séchées, champignons. */
 	EREWHON_API bool IsIngredient(const struct FItemDef& Def);
 
 	/** Les liquides : leur nom, leur couleur ; le pichet plein de chacun. */
 	EREWHON_API FText LiquidName(FName Liquid);
 	EREWHON_API FLinearColor LiquidColor(FName Liquid);
-	EREWHON_API FName PitcherFor(FName Liquid);
+	/** Le pichet qui contient Liters (1 ou 2) de ce liquide ; vide sans liquide. */
+	EREWHON_API FName PitcherFor(FName Liquid, int32 Liters = 2);
 	EREWHON_API FName LiquidOfPitcher(FName Item);
+	/** Litres dans un pichet (0, 1 ou 2), -1 si ce n'est pas un pichet. */
+	EREWHON_API int32 PitcherLitersOf(FName Item);
+	/** Puiser ou verser au pichet : un litre par seconde ; un litre entamé et interrompu ne compte pas. */
+	constexpr float PitcherSecondsPerLiter = 1.f;
 	inline const FName Water(TEXT("water"));
 	inline const FName EmptyPitcher(TEXT("pitcher"));
 	inline const FName EmptyVial(TEXT("vial"));
 	constexpr float PitcherLiters = 2.f;
-	constexpr float VialLiters = 0.15f;
+	constexpr float VialLiters = 0.5f;
 	/** Débit d'un récipient à l'autre (L/s). */
 	constexpr float PourRate = 2.f;
 
@@ -211,6 +232,8 @@ private:
 	void BuildHouse();
 	void OnSectorOwnerChanged(const FIntPoint& Changed);
 	void UpdateFire(float DeltaSeconds);
+	/** Serveur : le feu qui faiblit prend une brassée au rack tout proche. */
+	float RefuelTimer = 0.f;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Root;

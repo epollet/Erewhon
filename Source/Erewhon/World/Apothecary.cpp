@@ -131,15 +131,17 @@ namespace ErewhonApothecary
 		UStaticMesh* Bowl = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_bowl"));
 		UMaterialInterface* GlowMaterial = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_Glow"));
 		UTexture* GlowTexture = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_star"));
-		for (int32 Row = 0; Row < Slots.Num() && Row < ShelfRows; ++Row)
+		for (int32 Index = 0; Index < Slots.Num() && Index < ShelfSlots; ++Index)
 		{
-			const FInventorySlot& Slot = Slots[Row];
+			const int32 Row = Index / ShelfSlotsPerRow;
+			const int32 Column = Index % ShelfSlotsPerRow;
+			const FInventorySlot& Slot = Slots[Index];
 			const FItemDef* Def = Slot.IsEmpty() ? nullptr : Items->Find(Slot.ItemId);
 			if (!Def)
 			{
 				continue;
 			}
-			// Une pile par étage : dix flacons (ou bols) sur deux rangs en quinconce.
+			// Un emplacement : un flacon (ou un bol) devant, un second derrière s'il y en a plusieurs.
 			const bool bCrushed = Def->Id.ToString().StartsWith(TEXT("crushed_"));
 			UStaticMesh* Model = bCrushed ? Bowl : Cast<UStaticMesh>(Def->Mesh.TryLoad());
 			UMaterialInstanceDynamic* Glow = nullptr;
@@ -147,12 +149,12 @@ namespace ErewhonApothecary
 			{
 				Glow = UMaterialInstanceDynamic::Create(GlowMaterial, Owner);
 				Glow->SetVectorParameterValue(TEXT("Color"), Def->Color);
-				Glow->SetScalarParameterValue(TEXT("Seed"), Row * 1.7f);
+				Glow->SetScalarParameterValue(TEXT("Seed"), Index * 1.7f);
 			}
-			for (int32 k = 0; k < FMath::Min(Slot.Count, PotionsPerSlot); ++k)
+			for (int32 k = 0; k < FMath::Min(Slot.Count, 2); ++k)
 			{
-				const bool bFront = k < 5;
-				const FVector Foot(bFront ? -8.f : 6.f, bFront ? -40.f + k * 20.f : -30.f + (k - 5) * 20.f, ShelfRowZ(Row));
+				const float SlotY = (Column - (ShelfSlotsPerRow - 1) * 0.5f) * (ShelfWidth - 20.f) / ShelfSlotsPerRow;
+				const FVector Foot(k == 0 ? -8.f : 6.f, SlotY + (k == 0 ? 0.f : 5.f), ShelfRowZ(Row));
 				if (Model)
 				{
 					Parts.Add(AddGeneratedMesh(Owner, Parent, Model, Foot, bCrushed ? 6.f : 20.f, 180.f + (k % 3 - 1) * 14.f, false));
@@ -330,6 +332,9 @@ namespace ErewhonApothecary
 			const auto C = [](const TCHAR* Plant) { return FName(*(FString(TEXT("crushed_")) + Plant)); };
 			const auto D = [](const TCHAR* Plant) { return FName(*(FString(TEXT("dried_")) + Plant)); };
 			TArray<FBrew> Out;
+			// La base : de l'herbe, beaucoup d'herbe, à feu doux.
+			Out.Add({ TEXT("brew_base"), TEXT("potion_base"), NSLOCTEXT("ErewhonBrew", "Base", "Base de potion"),
+				{ { C(TEXT("grass")), 20.f } }, 40.f, 65.f, 15.f });
 			Out.Add({ TEXT("brew_speed"), TEXT("potion_speed"), NSLOCTEXT("ErewhonBrew", "Speed", "Breuvage de vitesse"),
 				{ { C(TEXT("flower_blue")), 5.f }, { C(TEXT("grass")), 2.f } }, 60.f, 70.f, 20.f });
 			Out.Add({ TEXT("brew_night"), TEXT("potion_night"), NSLOCTEXT("ErewhonBrew", "Night", "Breuvage de nyctalopie"),
@@ -342,14 +347,49 @@ namespace ErewhonApothecary
 				{ { C(TEXT("herb")), 4.f }, { D(TEXT("flower_white")), 3.f } }, 52.f, 58.f, 30.f });
 			Out.Add({ TEXT("brew_grow"), TEXT("potion_grow"), NSLOCTEXT("ErewhonBrew", "Grow", "Breuvage de grandissement"),
 				{ { C(TEXT("weed_dock")), 5.f }, { TEXT("mushroom_cep"), 1.f } }, 100.f, 106.f, 25.f });
+			// La lumière : des girolles dorées et des fleurs blanches ; on luit autour de soi.
+			Out.Add({ TEXT("brew_light"), TEXT("potion_light"), NSLOCTEXT("ErewhonBrew", "Light", "Breuvage de lumière"),
+				{ { TEXT("mushroom_chanterelle"), 2.f }, { C(TEXT("flower_white")), 3.f } }, 74.f, 80.f, 25.f });
 			return Out;
 		}();
 		return List;
 	}
 
+	FName SolventOf(const FBrew& Brew)
+	{
+		return Brew.Liquid == BaseLiquid ? Water : BaseLiquid;
+	}
+
 	const FBrew* FindBrew(FName Liquid)
 	{
 		return Brews().FindByPredicate([Liquid](const FBrew& B) { return B.Liquid == Liquid; });
+	}
+
+	const FBrew* SameIngredientsBrew(const TArray<FInventorySlot>& Ingredients)
+	{
+		TSet<FName> Put;
+		for (const FInventorySlot& Slot : Ingredients)
+		{
+			if (!Slot.IsEmpty())
+			{
+				Put.Add(Slot.ItemId);
+			}
+		}
+		return Brews().FindByPredicate([&Put](const FBrew& Brew)
+		{
+			if (Brew.PerLiter.Num() != Put.Num())
+			{
+				return false;
+			}
+			for (const TPair<FName, float>& Need : Brew.PerLiter)
+			{
+				if (!Put.Contains(Need.Key))
+				{
+					return false;
+				}
+			}
+			return true;
+		});
 	}
 
 	const FBrew* MatchBrew(const TArray<FInventorySlot>& Ingredients, float Liters)
@@ -404,6 +444,7 @@ namespace ErewhonApothecary
 		if (const FBrew* Brew = FindBrew(Liquid))
 		{
 			static const TMap<FName, FLinearColor> Colors = {
+				{ TEXT("brew_base"), FLinearColor(0.62f, 0.75f, 0.45f) }, { TEXT("brew_light"), FLinearColor(1.f, 0.85f, 0.45f) },
 				{ TEXT("brew_speed"), FLinearColor(0.25f, 0.5f, 1.f) }, { TEXT("brew_night"), FLinearColor(0.45f, 0.2f, 0.75f) },
 				{ TEXT("brew_strength"), FLinearColor(0.15f, 0.55f, 0.2f) }, { TEXT("brew_jump"), FLinearColor(0.55f, 0.85f, 0.2f) },
 				{ TEXT("brew_shrink"), FLinearColor(0.95f, 0.6f, 0.8f) }, { TEXT("brew_grow"), FLinearColor(0.95f, 0.55f, 0.15f) } };
@@ -413,15 +454,86 @@ namespace ErewhonApothecary
 		return FLinearColor(0.55f, 0.75f, 0.9f);
 	}
 
-	FName PitcherFor(FName Liquid)
+	FName PitcherFor(FName Liquid, int32 Liters)
 	{
-		return Liquid.IsNone() ? EmptyPitcher : FName(*(TEXT("pitcher_") + Liquid.ToString()));
+		if (Liquid.IsNone() || Liters <= 0)
+		{
+			return EmptyPitcher;
+		}
+		return FName(*(TEXT("pitcher_") + Liquid.ToString() + (Liters == 1 ? TEXT("_1l") : TEXT(""))));
 	}
 
 	FName LiquidOfPitcher(FName Item)
 	{
-		const FString Id = Item.ToString();
-		return Id.StartsWith(TEXT("pitcher_")) ? FName(*Id.RightChop(8)) : NAME_None;
+		FString Id = Item.ToString();
+		if (!Id.StartsWith(TEXT("pitcher_")))
+		{
+			return NAME_None;
+		}
+		Id.RemoveFromEnd(TEXT("_1l"));
+		return FName(*Id.RightChop(8));
+	}
+
+	int32 PitcherLitersOf(FName Item)
+	{
+		if (Item == EmptyPitcher)
+		{
+			return 0;
+		}
+		if (LiquidOfPitcher(Item).IsNone())
+		{
+			return -1;
+		}
+		return Item.ToString().EndsWith(TEXT("_1l")) ? 1 : 2;
+	}
+
+	TArray<AStorageActor*> WoodRacksNear(const AApothecary* House)
+	{
+		TArray<AStorageActor*> Out;
+		const TOptional<FTransform> Spot = House ? StandSpot(House, House->GetSector()) : TOptional<FTransform>();
+		if (!Spot)
+		{
+			return Out;
+		}
+		for (TActorIterator<AStorageActor> It(House->GetWorld()); It; ++It)
+		{
+			if (It->GetKind() == EStorageKind::FirewoodRack && !It->GetCarrier()
+				&& FVector::Dist2D(It->GetActorLocation(), Spot->GetLocation()) <= WoodRackReach)
+			{
+				Out.Add(*It);
+			}
+		}
+		return Out;
+	}
+
+	int32 WoodNearFire(const AApothecary* House)
+	{
+		int32 Total = 0;
+		for (const AStorageActor* Rack : WoodRacksNear(House))
+		{
+			Total += Rack->CountStored(TEXT("firewood"));
+		}
+		return Total;
+	}
+
+	bool TakeWoodNearFire(const AApothecary* House)
+	{
+		for (AStorageActor* Rack : WoodRacksNear(House))
+		{
+			for (FInventorySlot& Slot : Rack->EditSlots())
+			{
+				if (!Slot.IsEmpty() && Slot.ItemId == TEXT("firewood"))
+				{
+					if (--Slot.Count <= 0)
+					{
+						Slot.Clear();
+					}
+					Rack->Commit();
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	TArray<FRecipe> Recipes(const UItemDatabase& Items, ECraft Craft)
@@ -454,6 +566,15 @@ namespace ErewhonApothecary
 		case ECraft::Workbench:
 			// Le pot-pourri, de fleurs et d'herbes séchées.
 			Add(TEXT("potpourri"), { { TEXT("dried_flower_white"), 2 }, { TEXT("dried_flower_purple"), 2 }, { TEXT("dried_herb"), 1 } });
+			// Les potions légères : une base et un écrasé ; les fortes : une base et quatre écrasés (et elles durent bien plus).
+			for (const TPair<const TCHAR*, const TCHAR*>& Light : { TPair<const TCHAR*, const TCHAR*>(TEXT("speed"), TEXT("flower_blue")),
+				{ TEXT("night"), TEXT("flower_purple") }, { TEXT("strength"), TEXT("weed_nettle") }, { TEXT("jump"), TEXT("flower_white") } })
+			{
+				Add(*FString::Printf(TEXT("potion_%s_light"), Light.Key), { { TEXT("potion_base"), 1 }, { Crushed(Light.Value), 1 } });
+				Add(*FString::Printf(TEXT("potion_%s_strong"), Light.Key), { { TEXT("potion_base"), 1 }, { Crushed(Light.Value), 4 } });
+			}
+			// La tisane de sérénité : une base, un écrasé d'herbe aromatique.
+			Add(TEXT("potion_calm"), { { TEXT("potion_base"), 1 }, { Crushed(TEXT("herb")), 1 } });
 			// Les teintures : trois écrasés d'une même plante.
 			Add(TEXT("dye_blue"), { { Crushed(TEXT("flower_blue")), 3 } });
 			Add(TEXT("dye_purple"), { { Crushed(TEXT("flower_purple")), 3 } });
@@ -723,6 +844,15 @@ void AApothecary::Tick(float DeltaSeconds)
 	{
 		UpdateFire(DeltaSeconds);
 	}
+	// Le feu qui faiblit se nourrit tout seul au rack à petit bois posé près de la cheminée.
+	if (HasAuthority() && (RefuelTimer += DeltaSeconds) >= 1.f)
+	{
+		RefuelTimer = 0.f;
+		if (IsFireLit() && FireRemaining() < 15.0 && ErewhonApothecary::TakeWoodNearFire(this))
+		{
+			AddFire(ErewhonApothecary::FireSecondsPerWood);
+		}
+	}
 }
 
 void AApothecary::UpdateFire(float DeltaSeconds)
@@ -815,10 +945,18 @@ FText AApothecaryStation::GetInteractionLabel() const
 		const AErewhonGameState* State = AErewhonGameState::Get(this);
 		return FText::Format(LOCTEXT("OthersHouse", "Apothicairerie de {0}"), FText::FromString(State ? State->GetSectorOwnerName(Home->GetSector()) : FString()));
 	}
+	const int32 RackWood = ErewhonApothecary::WoodNearFire(Home);
 	if (Home->IsFireLit())
 	{
-		return FText::Format(LOCTEXT("FeedFire", "Remettre du petit bois (le feu brûle encore {0} min)"),
-			FText::AsNumber(FMath::CeilToInt32(Home->FireRemaining() / 60.0)));
+		return RackWood > 0
+			? FText::Format(LOCTEXT("FeedFireRack", "Remettre du petit bois (le feu brûle encore {0} min ; {1} brassées au rack, il s'y sert)"),
+				FText::AsNumber(FMath::CeilToInt32(Home->FireRemaining() / 60.0)), FText::AsNumber(RackWood))
+			: FText::Format(LOCTEXT("FeedFire", "Remettre du petit bois (le feu brûle encore {0} min)"),
+				FText::AsNumber(FMath::CeilToInt32(Home->FireRemaining() / 60.0)));
+	}
+	if (RackWood > 0)
+	{
+		return FText::Format(LOCTEXT("LightFireRack", "Allumer le feu ({0} brassées au rack, à portée)"), FText::AsNumber(RackWood));
 	}
 	return LOCTEXT("LightFire", "Allumer le feu (petit bois)");
 }

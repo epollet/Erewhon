@@ -21,6 +21,7 @@ struct FErewhonInputActions
 	UPROPERTY() TObjectPtr<UInputAction> Jump;
 	UPROPERTY() TObjectPtr<UInputAction> Run;
 	UPROPERTY() TObjectPtr<UInputAction> Primary;
+	UPROPERTY() TObjectPtr<UInputAction> Secondary;   // clic droit
 	UPROPERTY() TObjectPtr<UInputAction> Inventory;
 	UPROPERTY() TObjectPtr<UInputAction> CloseMenu;
 	UPROPERTY() TObjectPtr<UInputAction> Use;
@@ -28,6 +29,10 @@ struct FErewhonInputActions
 	UPROPERTY() TObjectPtr<UInputAction> Bag;     // F : poser / ouvrir le sac à dos
 	UPROPERTY() TObjectPtr<UInputAction> Stash;   // G : tout ranger dans le sac
 	UPROPERTY() TObjectPtr<UInputAction> View;    // V : vue à la 1re / 3e personne
+	UPROPERTY() TObjectPtr<UInputAction> Hotbar1; // 1 / & : premier emplacement de la barre
+	UPROPERTY() TObjectPtr<UInputAction> Hotbar2; // 2 / é
+	UPROPERTY() TObjectPtr<UInputAction> Hotbar3; // 3 / "
+	UPROPERTY() TObjectPtr<UInputAction> HotbarScroll;   // molette
 };
 
 /** Une préparation en cours à l'apothicairerie : un exemplaire à la fois, jusqu'à épuisement. */
@@ -42,6 +47,8 @@ struct FErewhonCraftJob
 	/** Horloge du monde à laquelle l'exemplaire en cours sera prêt. */
 	UPROPERTY() double StepEnd = 0.0;
 	UPROPERTY() float StepSeconds = 1.f;
+	/** Au pichet : 1 on puise, 2 on verse ; 3 un coup de bêche ; 4 on cueille à la main, 5 à la cerpe (0 : une préparation). */
+	UPROPERTY() uint8 Pour = 0;
 
 	bool IsActive() const { return Remaining > 0 && !Output.IsNone(); }
 };
@@ -83,6 +90,8 @@ public:
 	void OpenCauldron(class AStorageActor* Cauldron);
 	/** Le livre des breuvages, page par page. */
 	void OpenBook();
+	/** Le harnachement de son bhurak. */
+	void OpenBhurak(class ABhurak* Bhurak);
 
 	/** Panneau de triche (Ctrl+Alt+ù puis Ctrl+Maj+*). */
 	void OpenCheats();
@@ -141,6 +150,10 @@ public:
 	/** Déplace un objet entre l'inventaire et le sac ; To = INDEX_NONE : là où il y a de la place. */
 	UFUNCTION(Server, Reliable)
 	void ServerMoveItem(bool bFromBag, int32 From, bool bToBag, int32 To);
+
+	/** Une partie d'une pile, posée dans une case (voir AErewhonGameMode::TrySplitMove). */
+	UFUNCTION(Server, Reliable)
+	void ServerSplitMove(bool bFromOther, int32 From, bool bToOther, int32 To, int32 Count, class AStorageActor* Storage, class ACart* Cart);
 
 	UFUNCTION(Server, Reliable)
 	void ServerStashAll();
@@ -210,12 +223,43 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerChooseClass(uint8 NewClass);
 
+	/** Les champs du fermier (voir AErewhonGameMode::TryBuyField, TryWorkField, TryScythe). */
+	UFUNCTION(Server, Reliable)
+	void ServerBuyField(FIntPoint Sector, uint8 Which);
+
+	UFUNCTION(Server, Reliable)
+	void ServerWorkField(FIntPoint Sector, int32 Cell, uint8 Corner);
+
+	UFUNCTION(Server, Reliable)
+	void ServerScythe();
+
+	/** Le bhurak (voir AErewhonGameMode::TryRideBhurak, TryHitchBhurak, TryEquipBhurak). */
+	UFUNCTION(Server, Reliable)
+	void ServerRideBhurak(class ABhurak* Bhurak);
+
+	UFUNCTION(Server, Reliable)
+	void ServerHitchBhurak(class ABhurak* Bhurak);
+
+	UFUNCTION(Server, Reliable)
+	void ServerEquipBhurak(class ABhurak* Bhurak, uint8 Slot, FName Item);
+
+	UFUNCTION(Server, Reliable)
+	void ServerToggleImplement(class ACart* Implement);
+
+	/** Ramasser des objets posés à terre. */
+	UFUNCTION(Server, Reliable)
+	void ServerPickUpDropped(class ADroppedItem* Dropped);
+
 	UFUNCTION(Server, Reliable)
 	void ServerEmptyWater(class AStorageActor* Barrel);
 
 	/** La remise de l'apothicairerie. */
 	UFUNCTION(Server, Reliable)
 	void ServerBuyStoreroom(FIntPoint Sector);
+
+	/** Le bouton « Débloquer » du menu : devant la mairie. */
+	UFUNCTION(Server, Reliable)
+	void ServerUnstuck();
 
 	/** Un exemplaire est prêt : le bruit du pilon ou du chaudron. */
 	UFUNCTION(Client, Unreliable)
@@ -255,6 +299,8 @@ private:
 	TWeakObjectPtr<class AStorageActor> OpenedStorage;
 	TWeakObjectPtr<class ACart> OpenedCart;
 	TWeakObjectPtr<AActor> OpenedStation;
+	TWeakObjectPtr<class ABhurak> OpenedBhurak;
+	TWeakPtr<SWidget> BhurakWidget;
 	TWeakPtr<SWidget> ApothecaryWidget;
 
 	UFUNCTION()

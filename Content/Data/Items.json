@@ -2,7 +2,7 @@
   "_doc": "Catalogue des objets. Couleurs en sRGB 0-255. L'ordre des plantes fixe l'ordre de génération : ajouter une plante à la fin pour ne pas déplacer les autres. Les assets générés sont trouvés par convention (/Game/Generated/Meshes/SM_<id>, /Game/Generated/Icons/T_Icon_<id>) ; 'mesh', 'icon' et 'material' ne servent qu'à imposer un autre asset.",
   "items": [
     {
-      "id": "grass", "name": "Herbe", "category": "plant",
+      "id": "grass", "name": "Herbe", "category": "plant", "weight": 0.2,
       "description": "Touffe d'herbe haute des prairies.",
       "sell_price": 1, "max_stack": 10, "color": [70, 170, 55],
       "meshes": ["/Game/Generated/Foliage/SM_grass_tall_a.SM_grass_tall_a", "/Game/Generated/Foliage/SM_grass_tall_b.SM_grass_tall_b", "/Game/Generated/Foliage/SM_grass_seed.SM_grass_seed"],
@@ -11,70 +11,70 @@
                  "count": { "prairie": 18000, "spawn": 11000, "edge": 10000, "forest": 3500 } }
     },
     {
-      "id": "flower_white", "name": "Fleur blanche", "category": "plant",
+      "id": "flower_white", "name": "Fleur blanche", "category": "plant", "weight": 0.1,
       "description": "Fleur délicate aux pétales nacrés.",
       "sell_price": 3, "max_stack": 10, "color": [242, 242, 235],
       "plant": { "shape": "flower", "height_min": 1.0, "height_max": 1.4, "accent_color": [250, 217, 31], "seed_salt": 10, "cluster": [3, 6], "cluster_radius": 0.3,
                  "count": { "prairie": 260, "spawn": 120, "edge": 120, "forest": 20 } }
     },
     {
-      "id": "flower_blue", "name": "Fleur bleue", "category": "plant",
+      "id": "flower_blue", "name": "Fleur bleue", "category": "plant", "weight": 0.1,
       "description": "Petite fleur bleue des prairies.",
       "sell_price": 3, "max_stack": 10, "color": [72, 133, 235],
       "plant": { "shape": "flower", "height_min": 1.0, "height_max": 1.4, "accent_color": [250, 230, 46], "seed_salt": 11, "cluster": [3, 6], "cluster_radius": 0.3,
                  "count": { "prairie": 180, "spawn": 80, "edge": 80, "forest": 10 } }
     },
     {
-      "id": "flower_purple", "name": "Fleur violette", "category": "plant",
+      "id": "flower_purple", "name": "Fleur violette", "category": "plant", "weight": 0.1,
       "description": "Fleur rare aux teintes violacées.",
       "sell_price": 3, "max_stack": 10, "color": [158, 56, 199],
       "plant": { "shape": "flower", "height_min": 1.0, "height_max": 1.4, "accent_color": [250, 217, 31], "seed_salt": 12, "cluster": [3, 6], "cluster_radius": 0.3,
                  "count": { "prairie": 90, "spawn": 40, "edge": 50, "forest": 15 } }
     },
     {
-      "id": "herb", "name": "Herbe aromatique", "category": "plant",
+      "id": "herb", "name": "Herbe aromatique", "category": "plant", "weight": 0.15,
       "description": "Herbe odorante aux vertus médicinales.",
       "sell_price": 1, "max_stack": 30, "color": [60, 155, 40],
       "plant": { "shape": "herb", "height_min": 0.45, "height_max": 0.7, "accent_color": [40, 120, 30], "seed_salt": 91, "cluster": [1, 3], "cluster_radius": 0.25,
                  "count": { "prairie": 60, "spawn": 30, "edge": 50, "forest": 20 } }
     },
     {
-      "id": "fern", "name": "Fougère", "category": "plant",
+      "id": "fern", "name": "Fougère", "category": "plant", "weight": 0.3,
       "description": "Grande fougère des sous-bois, qui aime la fraîcheur.",
       "sell_price": 2, "max_stack": 20, "color": [70, 140, 60],
       "plant": { "shape": "herb", "height_min": 0.6, "height_max": 1.1, "accent_color": [50, 115, 45], "seed_salt": 101, "patch": [4, 7], "cull_distance": 90,
                  "count": { "prairie": 520, "spawn": 200, "edge": 800, "forest": 1400 } }
     },
     {
-      "id": "broadleaf", "name": "Plantain", "category": "plant",
+      "id": "broadleaf", "name": "Plantain", "category": "plant", "weight": 0.3,
       "description": "Larges feuilles nervurées, apaisantes pour les piqûres.",
       "sell_price": 1, "max_stack": 30, "color": [90, 150, 60],
       "plant": { "shape": "herb", "height_min": 0.4, "height_max": 0.8, "accent_color": [70, 125, 45], "seed_salt": 102, "patch": [3, 6], "cull_distance": 80,
                  "count": { "prairie": 420, "spawn": 160, "edge": 450, "forest": 300 } }
     },
     {
-      "id": "weed_dock", "name": "Patience", "category": "plant",
+      "id": "weed_dock", "name": "Patience", "category": "plant", "weight": 0.3,
       "description": "Oseille sauvage aux hautes tiges rousses.",
       "sell_price": 2, "max_stack": 20, "color": [110, 140, 60],
       "plant": { "shape": "herb", "height_min": 0.8, "height_max": 1.4, "accent_color": [150, 90, 50], "seed_salt": 103, "patch": [3, 4], "cull_distance": 90,
                  "count": { "prairie": 300, "spawn": 120, "edge": 250, "forest": 100 } }
     },
     {
-      "id": "weed_nettle", "name": "Ortie", "category": "plant",
+      "id": "weed_nettle", "name": "Ortie", "category": "plant", "weight": 0.3,
       "description": "Ortie piquante, mais excellente en soupe.",
       "sell_price": 2, "max_stack": 30, "color": [60, 130, 50],
       "plant": { "shape": "herb", "height_min": 0.5, "height_max": 0.9, "accent_color": [45, 105, 40], "seed_salt": 104, "patch": [3.5, 7], "cull_distance": 80,
                  "count": { "prairie": 380, "spawn": 150, "edge": 450, "forest": 350 } }
     },
     {
-      "id": "mushroom_cep", "name": "Cèpe", "category": "plant",
+      "id": "mushroom_cep", "name": "Cèpe", "category": "plant", "weight": 0.25,
       "description": "Champignon des sous-bois, charnu et parfumé. Il ne pousse qu'en forêt (et un peu en lisière).",
       "sell_price": 6, "max_stack": 20, "color": [150, 105, 60],
       "plant": { "shape": "herb", "height_min": 0.18, "height_max": 0.3, "accent_color": [235, 220, 190], "seed_salt": 105, "patch": [4, 5], "cull_distance": 50,
                  "count": { "edge": 30, "forest": 170 } }
     },
     {
-      "id": "mushroom_chanterelle", "name": "Girolle", "category": "plant",
+      "id": "mushroom_chanterelle", "name": "Girolle", "category": "plant", "weight": 0.15,
       "description": "Petits champignons dorés en trompette, qui poussent en cercles sous les arbres.",
       "sell_price": 5, "max_stack": 30, "color": [235, 170, 50],
       "plant": { "shape": "herb", "height_min": 0.15, "height_max": 0.25, "accent_color": [240, 190, 70], "seed_salt": 106, "patch": [3, 7], "cull_distance": 50,
@@ -82,325 +82,510 @@
     },
 
     {
-      "id": "crushed_grass", "name": "Écrasé d'herbe", "category": "resource",
+      "id": "crushed_grass", "name": "Écrasé d'herbe", "category": "resource", "weight": 0.15,
       "description": "Herbe pilée au mortier de l'apothicairerie.",
       "sell_price": 2, "max_stack": 30, "color": [56,  136,  44]
     },
     {
-      "id": "crushed_flower_white", "name": "Écrasé de fleur blanche", "category": "resource",
+      "id": "crushed_flower_white", "name": "Écrasé de fleur blanche", "category": "resource", "weight": 0.15,
       "description": "Fleur blanche pilée au mortier de l'apothicairerie.",
       "sell_price": 5, "max_stack": 30, "color": [193,  193,  188]
     },
     {
-      "id": "crushed_flower_blue", "name": "Écrasé de fleur bleue", "category": "resource",
+      "id": "crushed_flower_blue", "name": "Écrasé de fleur bleue", "category": "resource", "weight": 0.15,
       "description": "Fleur bleue pilée au mortier de l'apothicairerie.",
       "sell_price": 5, "max_stack": 30, "color": [57,  106,  188]
     },
     {
-      "id": "crushed_flower_purple", "name": "Écrasé de fleur violette", "category": "resource",
+      "id": "crushed_flower_purple", "name": "Écrasé de fleur violette", "category": "resource", "weight": 0.15,
       "description": "Fleur violette pilée au mortier de l'apothicairerie.",
       "sell_price": 5, "max_stack": 30, "color": [126,  44,  159]
     },
     {
-      "id": "crushed_herb", "name": "Écrasé d'herbe aromatique", "category": "resource",
+      "id": "crushed_herb", "name": "Écrasé d'herbe aromatique", "category": "resource", "weight": 0.15,
       "description": "Herbe aromatique pilée au mortier de l'apothicairerie.",
       "sell_price": 2, "max_stack": 30, "color": [48,  124,  32]
     },
     {
-      "id": "crushed_fern", "name": "Écrasé de fougère", "category": "resource",
+      "id": "crushed_fern", "name": "Écrasé de fougère", "category": "resource", "weight": 0.15,
       "description": "Fougère pilée au mortier de l'apothicairerie.",
       "sell_price": 3, "max_stack": 30, "color": [56,  112,  48]
     },
     {
-      "id": "crushed_broadleaf", "name": "Écrasé de plantain", "category": "resource",
+      "id": "crushed_broadleaf", "name": "Écrasé de plantain", "category": "resource", "weight": 0.15,
       "description": "Plantain pilée au mortier de l'apothicairerie.",
       "sell_price": 2, "max_stack": 30, "color": [72,  120,  48]
     },
     {
-      "id": "crushed_weed_dock", "name": "Écrasé de patience", "category": "resource",
+      "id": "crushed_weed_dock", "name": "Écrasé de patience", "category": "resource", "weight": 0.15,
       "description": "Patience pilée au mortier de l'apothicairerie.",
       "sell_price": 3, "max_stack": 30, "color": [88,  112,  48]
     },
     {
-      "id": "crushed_weed_nettle", "name": "Écrasé d'ortie", "category": "resource",
+      "id": "crushed_weed_nettle", "name": "Écrasé d'ortie", "category": "resource", "weight": 0.15,
       "description": "Ortie pilée au mortier de l'apothicairerie.",
       "sell_price": 3, "max_stack": 30, "color": [48,  104,  40]
     },
     {
-      "id": "potion_base", "name": "Base de potion", "category": "resource",
-      "description": "Deux écrasés d'herbe mijotés au chaudron.\nAvec deux écrasés d'une autre plante, elle devient potion.",
+      "id": "potion_base", "name": "Base de potion", "category": "resource", "weight": 0.3,
+      "description": "Une fiole de base de potion : de l'herbe, beaucoup d'herbe (vingt écrasés par litre d'eau), mijotée à feu doux au chaudron.\nToutes les potions se brassent dans la base ; à l'atelier, une fiole et un écrasé de fleur font une potion légère, quatre une potion forte.",
       "sell_price": 4, "max_stack": 10, "color": [170, 200, 140]
     },
     {
-      "id": "potion_speed", "name": "Potion de vitesse", "category": "potion", "potion_effect": "speed",
+      "id": "potion_speed_light", "name": "Potion légère de vitesse", "category": "potion", "potion_effect": "speed", "potion_seconds": 45, "weight": 0.3,
+      "description": "On court plus vite, mais pas longtemps : trois quarts de minute.\nUne base de potion et un écrasé, à l'atelier.",
+      "sell_price": 7, "max_stack": 10, "color": [60, 140, 255], "mesh": "/Game/Generated/Meshes/SM_potion_speed.SM_potion_speed", "icon": "/Game/Generated/Icons/T_Icon_potion_speed.T_Icon_potion_speed"
+    },
+    {
+      "id": "potion_speed_strong", "name": "Potion forte de vitesse", "category": "potion", "potion_effect": "speed", "potion_seconds": 300, "weight": 0.4,
+      "description": "On court plus vite, cinq bonnes minutes.\nUne base de potion et quatre écrasés, à l'atelier.",
+      "sell_price": 45, "max_stack": 10, "color": [60, 140, 255], "mesh": "/Game/Generated/Meshes/SM_potion_speed.SM_potion_speed", "icon": "/Game/Generated/Icons/T_Icon_potion_speed.T_Icon_potion_speed"
+    },
+    {
+      "id": "potion_night_light", "name": "Potion légère de nyctalopie", "category": "potion", "potion_effect": "night", "potion_seconds": 45, "weight": 0.3,
+      "description": "On voit dans le noir, mais pas longtemps : trois quarts de minute.\nUne base de potion et un écrasé, à l'atelier.",
+      "sell_price": 7, "max_stack": 10, "color": [120, 60, 200], "mesh": "/Game/Generated/Meshes/SM_potion_night.SM_potion_night", "icon": "/Game/Generated/Icons/T_Icon_potion_night.T_Icon_potion_night"
+    },
+    {
+      "id": "potion_night_strong", "name": "Potion forte de nyctalopie", "category": "potion", "potion_effect": "night", "potion_seconds": 300, "weight": 0.4,
+      "description": "On voit dans le noir, cinq bonnes minutes.\nUne base de potion et quatre écrasés, à l'atelier.",
+      "sell_price": 45, "max_stack": 10, "color": [120, 60, 200], "mesh": "/Game/Generated/Meshes/SM_potion_night.SM_potion_night", "icon": "/Game/Generated/Icons/T_Icon_potion_night.T_Icon_potion_night"
+    },
+    {
+      "id": "potion_strength_light", "name": "Potion légère de force", "category": "potion", "potion_effect": "strength", "potion_seconds": 45, "weight": 0.3,
+      "description": "On porte sans peine, mais pas longtemps : trois quarts de minute.\nUne base de potion et un écrasé, à l'atelier.",
+      "sell_price": 7, "max_stack": 10, "color": [50, 150, 70], "mesh": "/Game/Generated/Meshes/SM_potion_strength.SM_potion_strength", "icon": "/Game/Generated/Icons/T_Icon_potion_strength.T_Icon_potion_strength"
+    },
+    {
+      "id": "potion_strength_strong", "name": "Potion forte de force", "category": "potion", "potion_effect": "strength", "potion_seconds": 300, "weight": 0.4,
+      "description": "On porte sans peine, cinq bonnes minutes.\nUne base de potion et quatre écrasés, à l'atelier.",
+      "sell_price": 45, "max_stack": 10, "color": [50, 150, 70], "mesh": "/Game/Generated/Meshes/SM_potion_strength.SM_potion_strength", "icon": "/Game/Generated/Icons/T_Icon_potion_strength.T_Icon_potion_strength"
+    },
+    {
+      "id": "potion_jump_light", "name": "Potion légère de saut", "category": "potion", "potion_effect": "jump", "potion_seconds": 45, "weight": 0.3,
+      "description": "On saute bien plus haut, mais pas longtemps : trois quarts de minute.\nUne base de potion et un écrasé, à l'atelier.",
+      "sell_price": 7, "max_stack": 10, "color": [150, 220, 70], "mesh": "/Game/Generated/Meshes/SM_potion_jump.SM_potion_jump", "icon": "/Game/Generated/Icons/T_Icon_potion_jump.T_Icon_potion_jump"
+    },
+    {
+      "id": "potion_jump_strong", "name": "Potion forte de saut", "category": "potion", "potion_effect": "jump", "potion_seconds": 300, "weight": 0.4,
+      "description": "On saute bien plus haut, cinq bonnes minutes.\nUne base de potion et quatre écrasés, à l'atelier.",
+      "sell_price": 45, "max_stack": 10, "color": [150, 220, 70], "mesh": "/Game/Generated/Meshes/SM_potion_jump.SM_potion_jump", "icon": "/Game/Generated/Icons/T_Icon_potion_jump.T_Icon_potion_jump"
+    },
+    {
+      "id": "potion_calm", "name": "Tisane de sérénité", "category": "potion", "potion_effect": "calm", "potion_seconds": 180, "weight": 0.3,
+      "description": "Une tisane qui apaise : herbes hautes et buissons ne vous retiennent plus, trois minutes.\nUne base de potion et un écrasé d'herbe aromatique, à l'atelier.",
+      "sell_price": 9, "max_stack": 10, "color": [150, 200, 160], "mesh": "/Game/Generated/Meshes/SM_potion_jump.SM_potion_jump", "icon": "/Game/Generated/Icons/T_Icon_potion_calm.T_Icon_potion_calm"
+    },
+    {
+      "id": "pitcher_brew_base", "name": "Pichet de base de potion", "category": "resource", "holdable": true, "weight": 3,
+      "description": "Deux litres de base de potion.\nEn main, [F] en visant le chaudron ou un tonneau pour le vider.",
+      "max_stack": 1, "color": [160, 190, 120], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "potion_light", "name": "Potion de lumière", "category": "potion", "potion_effect": "light", "weight": 0.35,
+      "description": "Une lueur chaude rayonne autour de vous pendant deux minutes : de quoi traverser la forêt la nuit.\nCliquez-la dans l'inventaire pour la boire.",
+      "sell_price": 32, "max_stack": 10, "color": [255, 220, 120], "mesh": "/Game/Generated/Meshes/SM_potion_grow.SM_potion_grow", "icon": "/Game/Generated/Icons/T_Icon_potion_light.T_Icon_potion_light"
+    },
+    {
+      "id": "pitcher_brew_light", "name": "Pichet de breuvage de lumière", "category": "resource", "holdable": true, "weight": 3,
+      "description": "Deux litres de breuvage de lumière.\nEn main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser.",
+      "max_stack": 1, "color": [255, 220, 120], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_light_1l", "name": "Pichet à moitié plein (1 L de breuvage de lumière)", "category": "resource", "holdable": true, "weight": 2,
+      "description": "Un litre de breuvage de lumière dans le pichet.\nEn main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser.",
+      "max_stack": 1, "color": [255, 220, 120], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "potion_speed", "name": "Potion de vitesse", "category": "potion", "potion_effect": "speed", "weight": 0.35,
       "description": "On court bien plus vite pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
       "sell_price": 28, "max_stack": 10, "color": [60,  140,  255]
     },
     {
-      "id": "potion_night", "name": "Potion de nyctalopie", "category": "potion", "potion_effect": "night",
+      "id": "potion_night", "name": "Potion de nyctalopie", "category": "potion", "potion_effect": "night", "weight": 0.35,
       "description": "On voit clair dans la nuit pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
       "sell_price": 28, "max_stack": 10, "color": [130,  60,  200]
     },
     {
-      "id": "potion_strength", "name": "Potion de force", "category": "potion", "potion_effect": "strength",
+      "id": "potion_strength", "name": "Potion de force", "category": "potion", "potion_effect": "strength", "weight": 0.35,
       "description": "Les charges ne ralentissent plus pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
       "sell_price": 20, "max_stack": 10, "color": [40,  140,  60]
     },
     {
-      "id": "potion_jump", "name": "Potion de saut", "category": "potion", "potion_effect": "jump",
+      "id": "potion_jump", "name": "Potion de saut", "category": "potion", "potion_effect": "jump", "weight": 0.35,
       "description": "On saute bien plus haut pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
       "sell_price": 20, "max_stack": 10, "color": [150,  220,  60]
     },
     {
-      "id": "potion_shrink", "name": "Potion de rapetissement", "category": "potion", "potion_effect": "shrink",
+      "id": "potion_shrink", "name": "Potion de rapetissement", "category": "potion", "potion_effect": "shrink", "weight": 0.35,
       "description": "On devient tout petit pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
       "sell_price": 16, "max_stack": 10, "color": [240,  160,  200]
     },
     {
-      "id": "potion_grow", "name": "Potion de grandissement", "category": "potion", "potion_effect": "grow",
+      "id": "potion_grow", "name": "Potion de grandissement", "category": "potion", "potion_effect": "grow", "weight": 0.35,
       "description": "On devient très grand pendant deux minutes.\nCliquez-la dans l'inventaire pour la boire.",
       "sell_price": 20, "max_stack": 10, "color": [240,  150,  50]
     },
 
     {
-      "id": "firewood", "name": "Petit bois", "category": "resource",
+      "id": "firewood", "name": "Petit bois", "category": "resource", "weight": 2.5,
       "description": "Une brassée de petit bois sec, pour allumer la cheminée de l'apothicairerie.\nChaque brassée la fait brûler cinq minutes.",
       "buy_price": 10, "max_stack": 10, "color": [150, 105, 60]
     },
 
     {
-      "id": "firewood_rack", "name": "Rack à petit bois", "category": "placeable",
+      "id": "firewood_rack", "name": "Rack à petit bois", "category": "placeable", "weight": 15,
       "description": "Pour ranger son petit bois : quarante brassées. Chacun peut s'y servir.\nEn main, cliquez pour le poser (sur vos secteurs).",
       "buy_price": 90, "max_stack": 1, "color": [140, 100, 60]
     },
     {
-      "id": "cerpe", "name": "Cerpe", "category": "tool",
+      "id": "spade", "name": "Bêche", "category": "tool", "weight": 2.2, "farmer_only": true,
+      "description": "Pour retourner la terre grossière d'un champ : un carré de 4 m à chaque coup de bêche (une seconde).\nEn main, cliquez sur votre champ.",
+      "buy_price": 200, "max_stack": 1, "color": [150, 120, 90]
+    },
+    {
+      "id": "scythe", "name": "Faux", "category": "tool", "farmer_only": true, "weight": 3,
+      "description": "Le grand geste du fermier : deux secondes, et tout ce qui pousse à portée, autour de soi, est récolté (cultures mûres comme plantes sauvages).",
+      "buy_price": 400, "max_stack": 1, "color": [170, 170, 180]
+    },
+    {
+      "id": "seeds_wheat", "name": "Graines de blé", "category": "resource", "holdable": true, "weight": 1, "farmer_only": true,
+      "description": "Un sac de graines de blé : en main, cliquez sur une terre retournée pour semer trois cases sur trois.\nMûr au bout de trois jours.",
+      "buy_price": 12, "max_stack": 20, "color": [220, 190, 110], "mesh": "/Game/Generated/Meshes/SM_seed_sack.SM_seed_sack"
+    },
+    {
+      "id": "seeds_flax", "name": "Graines de lin", "category": "resource", "holdable": true, "weight": 1, "farmer_only": true,
+      "description": "Un sac de graines de lin : en main, cliquez sur une terre retournée pour semer trois cases sur trois.\nMûr au bout de trois jours.",
+      "buy_price": 14, "max_stack": 20, "color": [150, 120, 80], "mesh": "/Game/Generated/Meshes/SM_seed_sack.SM_seed_sack"
+    },
+    {
+      "id": "seeds_cabbage", "name": "Graines de chou", "category": "resource", "holdable": true, "weight": 1, "farmer_only": true,
+      "description": "Un sac de graines de chou : en main, cliquez sur une terre retournée pour semer trois cases sur trois.\nMûr au bout de trois jours.",
+      "buy_price": 15, "max_stack": 20, "color": [120, 160, 90], "mesh": "/Game/Generated/Meshes/SM_seed_sack.SM_seed_sack"
+    },
+    {
+      "id": "wheat", "name": "Blé", "category": "resource", "weight": 0.6, "mesh": "/Game/Generated/Meshes/SM_crop_wheat.SM_crop_wheat",
+      "description": "Une gerbe de blé mûr, tout juste récoltée.",
+      "sell_price": 2, "max_stack": 30, "color": [225, 190, 100]
+    },
+    {
+      "id": "flax", "name": "Lin", "category": "resource", "weight": 0.5, "mesh": "/Game/Generated/Meshes/SM_crop_flax.SM_crop_flax",
+      "description": "Une botte de lin, aux tiges solides et aux fleurs bleues.",
+      "sell_price": 3, "max_stack": 30, "color": [110, 150, 210]
+    },
+    {
+      "id": "cabbage", "name": "Chou", "category": "resource", "weight": 1.5, "mesh": "/Game/Generated/Meshes/SM_crop_cabbage.SM_crop_cabbage",
+      "description": "Un beau chou bien pommé.",
+      "sell_price": 6, "max_stack": 15, "color": [130, 180, 90]
+    },
+    {
+      "id": "bhurak", "name": "Bhurak", "category": "placeable", "shop": "breeder", "weight": 0,
+      "description": "Un gros bovin poilu, placide et costaud, un peu plus grand que vous.\nEn main, cliquez pour le poser. [E] dessus : le harnacher (harnais, sacoches, selle).",
+      "buy_price": 3000, "max_stack": 1, "color": [150, 98, 56]
+    },
+    {
+      "id": "harness", "name": "Harnais de bhurak", "category": "resource", "shop": "breeder", "weight": 6,
+      "description": "Le harnais du bhurak : deux places sur les flancs, une sur le dos. Harnaché, il tire aussi une charrette.",
+      "buy_price": 500, "max_stack": 1, "color": [90, 60, 40]
+    },
+    {
+      "id": "saddlebag", "name": "Sacoche de bhurak", "category": "resource", "shop": "breeder", "weight": 3,
+      "description": "Une sacoche à accrocher au harnais : elle contient autant qu'un sac à dos.",
+      "buy_price": 300, "max_stack": 3, "color": [150, 120, 80]
+    },
+    {
+      "id": "saddle", "name": "Selle de bhurak", "category": "resource", "shop": "breeder", "weight": 9,
+      "description": "La selle, sur le dos du harnais : on monte le bhurak, et on va moitié plus vite.",
+      "buy_price": 500, "max_stack": 1, "color": [120, 72, 44]
+    },
+    {
+      "id": "bhurak_cream", "name": "Bhurak crème", "category": "placeable", "shop": "breeder", "weight": 0,
+      "description": "Un bhurak à la toison crème et dorée, placide et costaud.\nEn main, cliquez pour le poser. [E] dessus : le harnacher.",
+      "buy_price": 3000, "max_stack": 1, "color": [235, 215, 170]
+    },
+    {
+      "id": "bhurak_dark", "name": "Bhurak charbon", "category": "placeable", "shop": "breeder", "weight": 0,
+      "description": "Un bhurak à la toison noire, une étoile blanche au front.\nEn main, cliquez pour le poser. [E] dessus : le harnacher.",
+      "buy_price": 3000, "max_stack": 1, "color": [60, 58, 56]
+    },
+    {
+      "id": "cultivator", "name": "Cultivateur", "category": "placeable", "shop": "workshop", "farmer_only": true, "weight": 55,
+      "description": "Tiré par un bhurak harnaché, il retourne la terre des champs sous lui, levier baissé (on avance moitié moins vite).\nEn selle : [Clic] lever ou baisser le levier.",
+      "buy_price": 1500, "max_stack": 1, "color": [120, 100, 80]
+    },
+    {
+      "id": "seeder", "name": "Semoir", "category": "placeable", "shop": "workshop", "farmer_only": true, "weight": 50,
+      "description": "Tiré par un bhurak harnaché : roue enclenchée, il sème autour de lui la terre retournée (on avance 30 % moins vite). On verse des sacs de graines dans sa trémie.\nEn selle : [Clic] enclencher ou non.",
+      "buy_price": 1800, "max_stack": 1, "color": [150, 120, 80]
+    },
+    {
+      "id": "cerpe", "name": "Cerpe", "category": "tool", "weight": 0.6,
       "description": "Faucille pour récolter plus efficacement : vise les plantes dans un cône devant soi.",
       "buy_price": 50, "max_stack": 1, "color": [180, 140, 60], "harvest_tool": true
     },
 
     {
-      "id": "backpack", "name": "Sac à dos", "category": "backpack",
+      "id": "backpack", "name": "Sac à dos", "category": "backpack", "weight": 1.5,
       "description": "Sac de toile robuste : 12 places de rangement et deux outils accrochés sur les côtés.\nSe porte sur le dos ; [F] pour le poser, puis l'ouvrir.",
       "buy_price": 200, "max_stack": 1, "color": [112, 128, 72]
     },
 
     {
-      "id": "cart", "name": "Charrette", "category": "placeable",
+      "id": "cart", "name": "Charrette", "category": "placeable", "shop": "workshop", "weight": 40,
       "description": "Deux roues, deux brancards, deux places pour des cagettes ou des tonneaux.\nPrenez-la en main pour la poser ; [F] devant les brancards pour la conduire.",
       "buy_price": 1000, "max_stack": 1, "color": [150, 110, 70]
     },
     {
-      "id": "crate", "name": "Cagette", "category": "placeable",
+      "id": "crate", "name": "Cagette", "category": "placeable", "weight": 3,
       "description": "Pour ranger ses plantes : 12 places. Elles s'empilent par trois.\nEn main, cliquez au sol pour la poser ; [E] pour la reprendre, [F] pour l'ouvrir.",
       "buy_price": 200, "max_stack": 3, "color": [200, 160, 100]
     },
     {
-      "id": "barrel", "name": "Tonneau", "category": "placeable",
+      "id": "barrel", "name": "Tonneau", "category": "placeable", "weight": 12,
       "description": "Deux cagettes et demie de plantes : 30 places. Lourd : on avance moitié moins vite en le portant.",
       "buy_price": 420, "max_stack": 1, "color": [120, 80, 50]
     },
 
     {
-      "id": "shelf", "name": "Étagère à potions", "category": "placeable",
+      "id": "shelf", "name": "Étagère à potions", "category": "placeable", "weight": 20,
       "description": "Quatre étages, une pile de dix potions ou écrasés par étage. [F] pour y ranger.\nEn main, cliquez pour le poser (sur vos secteurs) ; [E] pour le reprendre.",
       "buy_price": 180, "max_stack": 1, "color": [170, 120, 75]
     },
     {
-      "id": "table", "name": "Table de travail", "category": "placeable",
+      "id": "table", "name": "Table de travail", "category": "placeable", "weight": 25,
       "description": "Une solide table de chêne : on y pose le mortier.\nEn main, cliquez pour le poser (sur vos secteurs) ; [E] pour le reprendre.",
       "buy_price": 150, "max_stack": 1, "color": [160, 115, 70]
     },
     {
-      "id": "mortar", "name": "Mortier", "category": "placeable", "apothecary_only": true,
+      "id": "mortar", "name": "Mortier", "category": "placeable", "apothecary_only": true, "weight": 8,
       "description": "Pour piler les plantes en écrasés. [F] pour s'en servir ; il se pose aussi sur une table.\nEn main, cliquez pour le poser (sur vos secteurs) ; [E] pour le reprendre.",
       "buy_price": 120, "max_stack": 1, "color": [150, 150, 145]
     },
     {
-      "id": "cauldron", "name": "Chaudron", "category": "placeable", "apothecary_only": true,
+      "id": "cauldron", "name": "Chaudron", "category": "placeable", "apothecary_only": true, "weight": 15,
       "description": "Pour les bases et les potions. Posé près d'une cheminée, il pend à la crémaillère ; il faut un feu allumé.\nEn main, cliquez pour le poser (sur vos secteurs) ; [E] pour le reprendre.",
       "buy_price": 300, "max_stack": 1, "color": [60, 60, 64]
     },
 
     {
-      "id": "dried_grass", "name": "Herbe séchée", "category": "resource",
+      "id": "dried_grass", "name": "Herbe séchée", "category": "resource", "weight": 0.08,
       "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
       "sell_price": 2, "max_stack": 30, "color": [190,  170,  90]
     },
     {
-      "id": "dried_flower_white", "name": "Fleur blanche séchée", "category": "resource",
+      "id": "dried_flower_white", "name": "Fleur blanche séchée", "category": "resource", "weight": 0.08,
       "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
       "sell_price": 6, "max_stack": 30, "color": [225,  215,  185]
     },
     {
-      "id": "dried_flower_blue", "name": "Fleur bleue séchée", "category": "resource",
+      "id": "dried_flower_blue", "name": "Fleur bleue séchée", "category": "resource", "weight": 0.08,
       "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
       "sell_price": 6, "max_stack": 30, "color": [110,  130,  180]
     },
     {
-      "id": "dried_flower_purple", "name": "Fleur violette séchée", "category": "resource",
+      "id": "dried_flower_purple", "name": "Fleur violette séchée", "category": "resource", "weight": 0.08,
       "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
       "sell_price": 6, "max_stack": 30, "color": [140,  100,  160]
     },
     {
-      "id": "dried_herb", "name": "Herbe aromatique séchée", "category": "resource",
+      "id": "dried_herb", "name": "Herbe aromatique séchée", "category": "resource", "weight": 0.08,
       "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
       "sell_price": 2, "max_stack": 30, "color": [120,  130,  80]
     },
     {
-      "id": "dried_fern", "name": "Fougère séchée", "category": "resource",
+      "id": "dried_fern", "name": "Fougère séchée", "category": "resource", "weight": 0.08,
       "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
       "sell_price": 4, "max_stack": 30, "color": [150,  120,  70]
     },
     {
-      "id": "dried_broadleaf", "name": "Plantain séché", "category": "resource",
+      "id": "dried_broadleaf", "name": "Plantain séché", "category": "resource", "weight": 0.08,
       "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
       "sell_price": 2, "max_stack": 30, "color": [140,  130,  80]
     },
     {
-      "id": "dried_weed_dock", "name": "Patience séchée", "category": "resource",
+      "id": "dried_weed_dock", "name": "Patience séchée", "category": "resource", "weight": 0.08,
       "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
       "sell_price": 4, "max_stack": 30, "color": [150,  100,  60]
     },
     {
-      "id": "dried_weed_nettle", "name": "Ortie séchée", "category": "resource",
+      "id": "dried_weed_nettle", "name": "Ortie séchée", "category": "resource", "weight": 0.08,
       "description": "Séchée au séchoir : pour les pots-pourris et les bouquets secs.",
       "sell_price": 4, "max_stack": 30, "color": [110,  120,  70]
     },
     {
-      "id": "dye_blue", "name": "Teinture bleue", "category": "resource",
+      "id": "dye_blue", "name": "Teinture bleue", "category": "resource", "weight": 0.3,
       "description": "Trois écrasés de fleur bleue. La couturière la rachète bon prix.",
       "sell_price": 30, "max_stack": 10, "color": [50,  90,  200]
     },
     {
-      "id": "dye_purple", "name": "Teinture violette", "category": "resource",
+      "id": "dye_purple", "name": "Teinture violette", "category": "resource", "weight": 0.3,
       "description": "Trois écrasés de fleur violette. La couturière la rachète bon prix.",
       "sell_price": 30, "max_stack": 10, "color": [130,  60,  180]
     },
     {
-      "id": "dye_green", "name": "Teinture verte", "category": "resource",
+      "id": "dye_green", "name": "Teinture verte", "category": "resource", "weight": 0.3,
       "description": "Trois écrasés d'ortie. La couturière la rachète bon prix.",
       "sell_price": 18, "max_stack": 10, "color": [50,  130,  60]
     },
     {
-      "id": "dye_rust", "name": "Teinture rouille", "category": "resource",
+      "id": "dye_rust", "name": "Teinture rouille", "category": "resource", "weight": 0.3,
       "description": "Trois écrasés de patience. La couturière la rachète bon prix.",
       "sell_price": 18, "max_stack": 10, "color": [170,  80,  40]
     },
     {
-      "id": "bouquet_fresh", "name": "Bouquet des prés en pot", "category": "resource",
+      "id": "bouquet_fresh", "name": "Bouquet des prés en pot", "category": "resource", "weight": 0.5,
       "description": "Fleurs blanches, bleues, violettes et une fougère, dans un petit pot.",
       "sell_price": 34, "max_stack": 5, "color": [240,  200,  210]
     },
     {
-      "id": "bouquet_dry", "name": "Bouquet sec en pot", "category": "resource",
+      "id": "bouquet_dry", "name": "Bouquet sec en pot", "category": "resource", "weight": 0.4,
       "description": "Fleurs séchées et herbe dorée : il ne fane plus.",
       "sell_price": 56, "max_stack": 5, "color": [210,  180,  120]
     },
     {
-      "id": "potpourri", "name": "Pot-pourri", "category": "placeable",
+      "id": "potpourri", "name": "Pot-pourri", "category": "placeable", "weight": 0.6,
       "description": "Posez-le : dix minutes durant, il parfume les alentours et apaise ceux qui passent (sérénité : herbes hautes et buissons ne retiennent plus, cinq minutes).\nEn main, cliquez pour le poser (sur vos secteurs).",
       "sell_price": 40, "max_stack": 5, "color": [230,  150,  190]
     },
     {
-      "id": "drying_rack", "name": "Séchoir", "category": "placeable", "apothecary_only": true,
+      "id": "drying_rack", "name": "Séchoir", "category": "placeable", "apothecary_only": true, "weight": 12,
       "description": "Six crochets où pendre ses plantes : elles sèchent en quatre minutes. [F] pour y mettre des plantes.\nEn main, cliquez pour le poser (sur vos secteurs).",
       "buy_price": 160, "max_stack": 1, "color": [160,  120,  80]
     },
     {
-      "id": "workbench", "name": "Atelier d'apothicaire", "category": "placeable", "apothecary_only": true,
+      "id": "workbench", "name": "Atelier d'apothicaire", "category": "placeable", "apothecary_only": true, "weight": 30,
       "description": "Pots-pourris de fleurs séchées, teintures d'écrasés, bouquets en pot. [F] pour y travailler.\nEn main, cliquez pour le poser (sur vos secteurs).",
       "buy_price": 350, "max_stack": 1, "color": [150,  110,  75]
     },
 
     {
-      "id": "pitcher", "name": "Pichet", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
-      "description": "Un pichet de terre vernissée : il tient 2 L. En main, [F] en visant un tonneau ou le chaudron : on le remplit, ou on le vide.",
+      "id": "pitcher", "name": "Pichet", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "weight": 1,
+      "description": "Un pichet de terre vernissée : il tient 2 L. En main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser (un litre par seconde).",
       "buy_price": 30, "max_stack": 1, "color": [190, 120, 80]
     },
     {
-      "id": "pitcher_water", "name": "Pichet d'eau", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "id": "pitcher_water", "name": "Pichet d'eau", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "weight": 3,
       "description": "Deux litres d'eau fraîche.",
       "max_stack": 1, "color": [120,  170,  220], "icon": "/Game/Generated/Icons/T_Icon_pitcher_water.T_Icon_pitcher_water"
     },
     {
-      "id": "pitcher_brew_speed", "name": "Pichet de breuvage de vitesse", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "id": "pitcher_brew_speed", "name": "Pichet de breuvage de vitesse", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "weight": 3,
       "description": "Deux litres de breuvage, à mettre en fioles au chaudron… ou à reverser.",
       "max_stack": 1, "color": [60,  140,  255], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
     },
     {
-      "id": "pitcher_brew_night", "name": "Pichet de breuvage de nyctalopie", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "id": "pitcher_brew_night", "name": "Pichet de breuvage de nyctalopie", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "weight": 3,
       "description": "Deux litres de breuvage, à reverser au chaudron pour en remplir des fioles.",
       "max_stack": 1, "color": [130,  60,  200], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
     },
     {
-      "id": "pitcher_brew_strength", "name": "Pichet de breuvage de force", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "id": "pitcher_brew_strength", "name": "Pichet de breuvage de force", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "weight": 3,
       "description": "Deux litres de breuvage, à reverser au chaudron pour en remplir des fioles.",
       "max_stack": 1, "color": [40,  140,  60], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
     },
     {
-      "id": "pitcher_brew_jump", "name": "Pichet de breuvage de saut", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "id": "pitcher_brew_jump", "name": "Pichet de breuvage de saut", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "weight": 3,
       "description": "Deux litres de breuvage, à reverser au chaudron pour en remplir des fioles.",
       "max_stack": 1, "color": [150,  220,  60], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
     },
     {
-      "id": "pitcher_brew_shrink", "name": "Pichet de breuvage de rapetissement", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "id": "pitcher_brew_shrink", "name": "Pichet de breuvage de rapetissement", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "weight": 3,
       "description": "Deux litres de breuvage, à reverser au chaudron pour en remplir des fioles.",
       "max_stack": 1, "color": [240,  160,  200], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
     },
     {
-      "id": "pitcher_brew_grow", "name": "Pichet de breuvage de grandissement", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "id": "pitcher_brew_grow", "name": "Pichet de breuvage de grandissement", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "weight": 3,
       "description": "Deux litres de breuvage, à reverser au chaudron pour en remplir des fioles.",
       "max_stack": 1, "color": [240,  150,  50], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
     },
     {
-      "id": "vial", "name": "Fiole vide", "category": "resource",
-      "description": "Une petite fiole de verre : remplie de breuvage (0,15 L) au chaudron, c'est une potion. Une potion bue rend sa fiole.",
+      "id": "pitcher_water_1l", "name": "Pichet à moitié plein (1 L d'eau)", "category": "resource", "holdable": true, "weight": 2,
+      "description": "Un litre d'eau dans le pichet.\nEn main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser.",
+      "max_stack": 1, "color": [120, 170, 220], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_water.T_Icon_pitcher_water"
+    },
+    {
+      "id": "pitcher_brew_base_1l", "name": "Pichet à moitié plein (1 L de base de potion)", "category": "resource", "holdable": true, "weight": 2,
+      "description": "Un litre de base de potion dans le pichet.\nEn main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser.",
+      "max_stack": 1, "color": [160, 190, 120], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_speed_1l", "name": "Pichet à moitié plein (1 L de breuvage de vitesse)", "category": "resource", "holdable": true, "weight": 2,
+      "description": "Un litre de breuvage de vitesse dans le pichet.\nEn main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser.",
+      "max_stack": 1, "color": [60, 140, 255], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_night_1l", "name": "Pichet à moitié plein (1 L de breuvage de nyctalopie)", "category": "resource", "holdable": true, "weight": 2,
+      "description": "Un litre de breuvage de nyctalopie dans le pichet.\nEn main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser.",
+      "max_stack": 1, "color": [120, 60, 200], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_strength_1l", "name": "Pichet à moitié plein (1 L de breuvage de force)", "category": "resource", "holdable": true, "weight": 2,
+      "description": "Un litre de breuvage de force dans le pichet.\nEn main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser.",
+      "max_stack": 1, "color": [50, 150, 70], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_jump_1l", "name": "Pichet à moitié plein (1 L de breuvage de saut)", "category": "resource", "holdable": true, "weight": 2,
+      "description": "Un litre de breuvage de saut dans le pichet.\nEn main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser.",
+      "max_stack": 1, "color": [150, 220, 70], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_shrink_1l", "name": "Pichet à moitié plein (1 L de breuvage de rapetissement)", "category": "resource", "holdable": true, "weight": 2,
+      "description": "Un litre de breuvage de rapetissement dans le pichet.\nEn main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser.",
+      "max_stack": 1, "color": [240, 150, 200], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_grow_1l", "name": "Pichet à moitié plein (1 L de breuvage de grandissement)", "category": "resource", "holdable": true, "weight": 2,
+      "description": "Un litre de breuvage de grandissement dans le pichet.\nEn main, en visant un tonneau ou le chaudron : clic gauche : puiser, clic droit : verser.",
+      "max_stack": 1, "color": [240, 140, 40], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "vial", "name": "Fiole vide", "category": "resource", "holdable": true, "weight": 0.1,
+      "description": "Une fiole de verre : remplie d'un demi-litre de breuvage, c'est une potion. En main, clic droit sur le chaudron pour la remplir. Une potion bue rend sa fiole.",
       "buy_price": 4, "max_stack": 20, "color": [200, 225, 235]
     },
     {
-      "id": "cauldron_stand", "name": "Support de chaudron", "category": "placeable", "apothecary_only": true,
+      "id": "cauldron_stand", "name": "Support de chaudron", "category": "placeable", "apothecary_only": true, "weight": 10,
       "description": "Une potence de fer forgé à crémaillère, à poser dans la cheminée : le chaudron y pend, plus ou moins haut au-dessus du feu.\nEn main, cliquez pour le poser.",
       "buy_price": 120, "max_stack": 1, "color": [60, 58, 56]
     },
     {
-      "id": "herbal_book", "name": "Herbier des breuvages", "category": "resource",
+      "id": "herbal_book", "name": "Herbier des breuvages", "category": "resource", "weight": 1.2,
       "description": "Le livre des breuvages du chaudron, page par page : ingrédients par litre, chaleur, temps.\nCliquez-le dans l'inventaire pour le lire.",
       "buy_price": 500, "max_stack": 1, "color": [120, 80, 50]
     },
 
     {
-      "id": "tshirt_orange", "name": "T-shirt orange", "category": "clothing", "clothing_slot": "torso",
+      "id": "tshirt_orange", "name": "T-shirt orange", "category": "clothing", "clothing_slot": "torso", "weight": 0.3,
       "description": "T-shirt léger, couleur mandarine.",
       "buy_price": 30, "color": [230, 120, 40]
     },
     {
-      "id": "tshirt_blue", "name": "T-shirt bleu", "category": "clothing", "clothing_slot": "torso",
+      "id": "tshirt_blue", "name": "T-shirt bleu", "category": "clothing", "clothing_slot": "torso", "weight": 0.3,
       "description": "T-shirt léger, couleur océan.",
       "buy_price": 30, "color": [50, 100, 200]
     },
     {
-      "id": "veste_dark", "name": "Veste bleu sombre", "category": "clothing", "clothing_slot": "torso",
+      "id": "veste_dark", "name": "Veste bleu sombre", "category": "clothing", "clothing_slot": "torso", "weight": 1,
       "description": "Veste résistante avec deux poches intérieures.\n+2 slots d'inventaire.",
       "buy_price": 100, "pocket_slots": 2, "color": [30, 60, 130]
     },
     {
-      "id": "manteau_brun", "name": "Manteau marron", "category": "clothing", "clothing_slot": "torso",
+      "id": "manteau_brun", "name": "Manteau marron", "category": "clothing", "clothing_slot": "torso", "weight": 2,
       "description": "Manteau chaud avec de nombreuses poches.\n+4 slots d'inventaire, +1 slot d'équipement.",
       "buy_price": 200, "pocket_slots": 4, "extra_equip_slots": 1, "color": [100, 60, 30]
     },
     {
-      "id": "jean", "name": "Jean", "category": "clothing", "clothing_slot": "legs",
+      "id": "jean", "name": "Jean", "category": "clothing", "clothing_slot": "legs", "weight": 0.8,
       "description": "Jean robuste avec deux poches latérales.\n+2 slots d'inventaire.",
       "buy_price": 60, "pocket_slots": 2, "color": [50, 80, 150]
     },
     {
-      "id": "short_red", "name": "Short rouge", "category": "clothing", "clothing_slot": "legs",
+      "id": "short_red", "name": "Short rouge", "category": "clothing", "clothing_slot": "legs", "weight": 0.3,
       "description": "Short léger, idéal par beau temps.",
       "buy_price": 25, "short_legs": true, "color": [200, 40, 40]
     },
     {
-      "id": "short_blue", "name": "Short bleu", "category": "clothing", "clothing_slot": "legs",
+      "id": "short_blue", "name": "Short bleu", "category": "clothing", "clothing_slot": "legs", "weight": 0.3,
       "description": "Short léger, couleur cobalt.",
       "buy_price": 25, "short_legs": true, "color": [40, 80, 200]
     }

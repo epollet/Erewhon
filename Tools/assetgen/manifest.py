@@ -23,6 +23,12 @@ TEXTURES: dict[str, str] = {
     "plaster": "a smooth lime plaster cottage wall, warm off-white cream with very subtle soft patches and faint brush marks, no bricks, no cracks",
     "roof_slate": "overlapping rounded slate roof shingles in rows, soft blue-grey with a few lighter and greener shingles",
     "cobbles": "a village path of rounded cobblestones seen from above, warm grey and ochre stones of varied sizes tightly fitted with thin earthy joints, a few tiny moss tufts",
+    "field_raw": "rough untilled farm field soil seen from above: lumpy clods of brown earth, a few dry roots and tiny stones, no grass",
+    "field_tilled": "freshly tilled farm field soil seen from above: neat straight parallel furrows of dark rich brown earth running vertically, no plants",
+    "barn_red": "vertical weathered barn wall boards painted faded warm red, with darker gaps between boards and a little worn paint showing wood",
+    "thatch": "a thick golden straw thatched roof seen from above, dense parallel bundles of dry straw in overlapping rows",
+    "dark_timber": "horizontal dark weathered tarred wooden wall planks, deep brown almost black with soft warm highlights, a few old nail heads",
+    "straw_floor": "a floor covered with loose scattered dry golden straw seen from above",
     "floor_boards": "a wooden floor of long parallel planks running vertically, warm golden oak with darker thin joints and small knots",
 }
 
@@ -40,6 +46,8 @@ PAINTINGS: dict[str, tuple[str, str]] = {
     "map_wall": ("a hand-painted parchment map of a countryside divided into a grid of square plots, meadows, a crossroads of dirt roads and a small cottage at the center, compass rose, no readable text, the parchment fills the entire frame", "4:3"),
     "sign_apothecary": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the word \"Apothecary\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
     "flame": ("a single stylized hand-painted campfire flame shape seen from the front: one tall soft teardrop of fire with a few licking tongues, bright yellow-white core fading to orange then deep red at the tips, centered, filling the frame height, on a pure flat black background, nothing else", "1:1"),
+    "sign_breeder": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the word \"Éleveur\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
+    "sign_workshop": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the word \"Atelier\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
     "sign_town_hall": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the word \"Mairie\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
     "moon": ("a full moon seen through a telescope: a perfectly round pale cream and soft grey disc with gentle painted craters and maria, softly glowing edge, centered, filling about 90% of the frame, on a pure flat black background, nothing else", "1:1"),
 }
@@ -101,6 +109,24 @@ ICONS: dict[str, str] = {
     "cauldron_stand": "a black wrought iron tripod stand with an adjustable ratchet hook for hanging a cauldron over a fire",
     "herbal_book": "a thick old leather-bound herbal recipe book with a pressed flower and a brass clasp on the cover",
     "firewood_rack": "a rustic wooden firewood rack stacked with split logs",
+    "bhurak_cream": "the friendly face of a bhurak with long creamy white and pale golden hair, a big shaggy bovine like a yak, short dark curved horns",
+    "bhurak_dark": "the friendly face of a bhurak with long charcoal black hair and a white blaze, a big shaggy bovine like a yak, short pale curved horns",
+    "potion_light": "a small round glass potion vial filled with glowing warm golden liquid with tiny floating sparkles, a cork stopper, radiating soft light",
+    "potion_calm": "a small round glass vial of pale green herbal tea with a cork stopper and a sprig of fresh herb tied to its neck, soft calm glow",
+    "cultivator": "an old wooden and iron field cultivator with curved iron tines and two wooden shafts",
+    "seeder": "an old wooden seed drill cart with a grain hopper and one big spoked wheel",
+    "scythe": "a long farming scythe with a curved steel blade and a wooden snath",
+    "spade": "a garden spade with a wooden D-grip handle and a steel blade",
+    "seeds_wheat": "a small burlap seed sack tied with string, a few golden wheat grains spilling out, a wheat ear drawn on a little paper tag",
+    "seeds_flax": "a small burlap seed sack tied with string, a few tiny brown flax seeds spilling out, a blue flax flower tucked in the string",
+    "seeds_cabbage": "a small burlap seed sack tied with string, a few tiny round seeds spilling out, a small cabbage leaf tucked in the string",
+    "wheat": "a sheaf of ripe golden wheat tied with straw",
+    "flax": "a bundle of harvested flax stems with a few blue flowers, tied with string",
+    "cabbage": "a fresh round green cabbage",
+    "bhurak": "the friendly face of a bhurak, a big shaggy brown bovine like a yak with long hair and short curved horns",
+    "harness": "a sturdy brown leather draft harness with brass buckles and rings for a big beast",
+    "saddlebag": "a rustic canvas and leather saddlebag pannier with a buckled flap",
+    "saddle": "a rustic brown leather riding saddle on a wool blanket, with stirrups",
     "firewood": "a small bundle of dry firewood sticks and kindling tied with a twine string",
     "crushed_grass": "a small wooden bowl of crushed green grass paste",
     "crushed_flower_white": "a small wooden bowl of crushed white daisy petals with yellow specks",
@@ -127,7 +153,142 @@ ICON_PROMPT = (
 
 # ── Modèles 3D (Gemini → Meshy) ─────────────────────────────────────────────
 # Une image de concept est générée d'abord, puis convertie en modèle par Meshy.
+# Les personnages à animer : une vue de face en T-pose, ce qu'attend le squelette automatique de Meshy.
+TPOSE_PROMPT = (
+    "Character sheet render of {subject}. {style}. Stylized game character, full body, strict front view, standing in a T-pose: "
+    "both arms stretched straight out horizontally to the sides at shoulder height, palms facing down, fingers together, "
+    "legs straight and slightly apart, feet flat, face looking forward with a calm neutral smile, nothing held in the hands, "
+    "nothing touching the body, plain pure white background, no ground shadow, no text."
+)
+
 MODELS: dict[str, dict] = {
+    "merchant_tp": {
+        "subject": "a friendly old countryside merchant, round straw hat, green apron over a cream shirt, brown trousers",
+        "concept_prompt": TPOSE_PROMPT,
+        "polycount": 15000,
+    },
+    "sector_manager_tp": {
+        "subject": "a friendly countryside land surveyor manager, round spectacles, neat waistcoat over a white shirt with rolled sleeves, flat cap",
+        "concept_prompt": TPOSE_PROMPT,
+        "polycount": 15000,
+    },
+    "tailor_tp": {
+        "subject": "a cheerful middle-aged countryside tailor woman, yellow measuring tape around her neck, white blouse with rolled-up sleeves, a teal patterned headscarf, a knee-length rust-red skirt with a small apron",
+        "concept_prompt": TPOSE_PROMPT,
+        "polycount": 15000,
+    },
+    "breeder_tp": {
+        "subject": "a friendly sturdy countryside cattle breeder man, wide-brimmed straw hat, green work shirt with rolled sleeves, brown leather vest, suspenders, sturdy boots",
+        "concept_prompt": TPOSE_PROMPT,
+        "polycount": 15000,
+    },
+    "craftsman_tp": {
+        "subject": "a cheerful countryside carpenter and blacksmith woman, short brown leather apron over a striped shirt, rolled sleeves, a red bandana in her hair, sturdy boots",
+        "concept_prompt": TPOSE_PROMPT,
+        "polycount": 15000,
+    },
+    "firewood_rack_empty": {
+        "subject": "a rustic empty wooden firewood rack: a simple open frame of planks with two empty shelves, nothing on it, no logs at all",
+        "polycount": 4000,
+        "ai_model": "meshy-6-lite",
+    },
+    "bhurak_cream": {
+        "subject": "a bhurak: a big gentle shaggy bovine beast like a yak crossed with a highland cow, very long thick creamy white and pale golden hair hanging down to the ground, short dark curved horns, small kind eyes, sturdy short legs, standing calmly on all four legs, side view, no saddle, no harness",
+        "polycount": 15000,
+    },
+    "bhurak_dark": {
+        "subject": "a bhurak: a big gentle shaggy bovine beast like a yak crossed with a highland cow, very long thick charcoal black and dark grey hair with a white blaze on the face, hanging down to the ground, short pale curved horns, small kind eyes, sturdy short legs, standing calmly on all four legs, side view, no saddle, no harness",
+        "polycount": 15000,
+    },
+    "breeder": {
+        "subject": "a friendly sturdy countryside cattle breeder man standing upright, wide-brimmed straw hat, green work shirt with rolled sleeves, brown leather vest, suspenders, sturdy boots, a coil of rope on his belt, kind smile, arms relaxed along the body, full body",
+        "polycount": 12000,
+    },
+    "craftsman": {
+        "subject": "a cheerful countryside carpenter and blacksmith woman standing upright, thick brown leather apron over a striped shirt, rolled sleeves, a pencil behind her ear, a red bandana in her hair, work gloves tucked in the belt, kind smile, arms relaxed along the body, full body",
+        "polycount": 12000,
+    },
+    "cultivator": {
+        "subject": "an old wooden and iron horse-drawn field cultivator: a low rectangular wooden frame on two small iron wheels, a row of curved iron tines pointing down into the ground under it, two long straight wooden shafts extending forward to hitch an animal, a small iron lever on the frame, side view three-quarter",
+        "polycount": 8000,
+    },
+    "seeder": {
+        "subject": "an old wooden horse-drawn seed drill cart: a small wooden grain hopper box on top of a low wooden frame, one big wooden spoked wheel in the middle driving a little seed distribution wheel, two long straight wooden shafts extending forward to hitch an animal, a small iron lever on the side, side view three-quarter",
+        "polycount": 8000,
+    },
+    "hay_bale": {
+        "subject": "a single rectangular golden hay bale tied with two strings, isolated",
+        "polycount": 2000,
+        "ai_model": "meshy-6-lite",
+    },
+    "fence_segment": {
+        "subject": "a single straight segment of a rustic wooden farm fence: two thick round wooden posts at each end joined by two horizontal split-log rails, about three times wider than tall, front view, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "farm_gate": {
+        "subject": "a rustic wooden farm entrance arch: two tall thick wooden posts with a wooden crossbeam on top and a small gabled shingle roof above it, open passage with no gate doors, front view, isolated",
+        "polycount": 4000,
+    },
+    "anvil": {
+        "subject": "an old blacksmith anvil on a thick wooden tree stump, isolated",
+        "polycount": 3000,
+        "ai_model": "meshy-6-lite",
+    },
+    "lumber_pile": {
+        "subject": "a neat stack of sawn wooden planks and beams lying on two small logs, isolated",
+        "polycount": 3000,
+        "ai_model": "meshy-6-lite",
+    },
+    "seed_sack": {
+        "subject": "a small round burlap seed sack, open at the top and tied loosely with string, full of golden grain seeds, isolated",
+        "polycount": 2000,
+        "ai_model": "meshy-6-lite",
+    },
+    "scythe": {
+        "subject": "a long farming scythe: a long curved wooden snath with two small hand grips and a large curved steel blade at the end",
+        "polycount": 3000,
+        "ai_model": "meshy-6-lite",
+    },
+    "spade": {
+        "subject": "a garden spade: a straight wooden handle with a D-shaped grip and a flat rectangular steel blade",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "crop_sprout": {
+        "subject": "a small cluster of tiny fresh green seedling sprouts with two round leaves each, growing from a little mound of brown soil",
+        "polycount": 2000,
+        "ai_model": "meshy-6-lite",
+    },
+    "crop_wheat": {
+        "subject": "a dense clump of ripe golden wheat stalks with full heavy ears of grain, growing from the ground, isolated",
+        "polycount": 3500,
+        "ai_model": "meshy-6-lite",
+    },
+    "crop_flax": {
+        "subject": "a dense clump of flax plants: thin tall green stems with small sky blue flowers on top, growing from the ground, isolated",
+        "polycount": 3500,
+        "ai_model": "meshy-6-lite",
+    },
+    "crop_cabbage": {
+        "subject": "a single round green cabbage with large curling outer leaves, growing from the ground, isolated",
+        "polycount": 3000,
+        "ai_model": "meshy-6-lite",
+    },
+    "bhurak": {
+        "subject": "a bhurak: a big gentle shaggy bovine beast like a yak crossed with a highland cow, very long thick warm brown hair hanging down to the ground, short curved horns, small kind eyes, sturdy short legs, standing calmly on all four legs, side view, no saddle, no harness",
+        "polycount": 15000,
+    },
+    "saddle": {
+        "subject": "a rustic brown leather riding saddle for a big beast, with a thick wool blanket under it and two stirrups hanging, isolated",
+        "polycount": 3000,
+        "ai_model": "meshy-6-lite",
+    },
+    "saddlebag": {
+        "subject": "a single rustic canvas and leather saddlebag pannier with a buckled flap, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
     "cauldron_stand": {
         "subject": "a black wrought iron cauldron stand for an open hearth: three splayed legs, one tall upright post at the back with a toothed ratchet bar, and a horizontal arm at the top ending in a hanging chain with a hook, empty, no cauldron, no fire",
         "polycount": 4000,
@@ -468,6 +629,46 @@ CONCEPT_PROMPT = (
 # modèle → hauteur (m) et animations {nom: action_id}. Fichiers : SourceArt/Generated/models/<modèle>_rigged.fbx,
 # SourceArt/Generated/models/anims/<modèle>_<nom>.fbx.
 RIGS: dict[str, dict] = {
+    "merchant_tp": {
+        "height": 1.75,
+        "animations": {"idle": 0, "idle2": 11, "idle3": 12, "look": 338, "wave": 290, "talk": 313},
+    },
+    "sector_manager_tp": {
+        "height": 1.75,
+        "animations": {"idle": 0, "idle2": 11, "idle3": 12, "look": 338, "wave": 290, "talk": 313},
+    },
+    "tailor_tp": {
+        "height": 1.65,
+        "animations": {"idle": 0, "idle2": 11, "idle3": 12, "look": 338, "wave": 290, "talk": 313},
+    },
+    "breeder_tp": {
+        "height": 1.8,
+        "animations": {"idle": 0, "idle2": 11, "idle3": 12, "look": 338, "wave": 290, "talk": 313},
+    },
+    "craftsman_tp": {
+        "height": 1.7,
+        "animations": {"idle": 0, "idle2": 11, "idle3": 12, "look": 338, "wave": 290, "talk": 313},
+    },
+    "merchant": {
+        "height": 1.75,
+        "animations": {"idle": 0, "idle2": 11, "idle3": 12, "look": 338, "wave": 290, "talk": 313},
+    },
+    "sector_manager": {
+        "height": 1.75,
+        "animations": {"idle": 0, "idle2": 11, "idle3": 12, "look": 338, "wave": 290, "talk": 313},
+    },
+    "tailor": {
+        "height": 1.65,
+        "animations": {"idle": 0, "idle2": 11, "idle3": 12, "look": 338, "wave": 290, "talk": 313},
+    },
+    "breeder": {
+        "height": 1.8,
+        "animations": {"idle": 0, "idle2": 11, "idle3": 12, "look": 338, "wave": 290, "talk": 313},
+    },
+    "craftsman": {
+        "height": 1.7,
+        "animations": {"idle": 0, "idle2": 11, "idle3": 12, "look": 338, "wave": 290, "talk": 313},
+    },
     "player": {
         "height": 1.72,
         "animations": {"idle": 0, "walk": 30, "run": 14, "jump": 466, "sit": 33, "crouch": 524,
@@ -502,6 +703,10 @@ SOUNDS: dict[str, tuple] = {
     "sickle_swish": ("a quick swish of a small sickle cutting through tall grass, one short swing", 0.6, False, 0.45),
     "amb_cart_roll": ("the steady rolling of a wooden hand cart on a dirt path: wooden wheels creaking softly, light rumble of the axle, gravel crunch, continuous", 8.0, True),
     "amb_water_pour": ("a steady stream of fresh water pouring from a fountain spout into a wooden barrel, splashing and gurgling, continuous", 8.0, True),
+    "spade_dig": ("a garden spade digging into soft soil and turning it over, one dig", 1.0, False, 0.8),
+    "scythe_sweep": ("a long sweeping scythe cutting through a wide swath of tall grass and grain, one slow sweep", 2.0, False),
+    "seeds_scatter": ("a handful of seeds scattered onto soft tilled soil, light pattering", 1.0, False),
+    "bhurak_low": ("a big gentle shaggy bovine giving a soft low contented grunt and huff, calm", 2.0, False),
     "mortar_grind": ("a stone pestle grinding and crushing fresh herbs in a stone mortar, two short grinding strokes", 1.0, False),
     "cauldron_bubble": ("a small cauldron of thick potion bubbling and blooping gently, short", 2.5, False),
     "potion_drink": ("a person uncorking a small glass bottle with a pop and drinking a gulp, then a small satisfied breath", 1.6, False),

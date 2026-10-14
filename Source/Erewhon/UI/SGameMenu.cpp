@@ -104,6 +104,18 @@ TSharedRef<SWidget> SGameMenu::BuildMain()
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
 		[
+			// Coincé quelque part : retour devant la mairie.
+			Entry(Button(LOCTEXT("Unstuck", "Débloquer"), [WeakController]()
+			{
+				if (WeakController.IsValid())
+				{
+					WeakController->ServerUnstuck();
+					WeakController->CloseMenu();
+				}
+			}, EButton::Secondary, true, 0.f, 14))
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
+		[
 			Entry(Button(LOCTEXT("Quit", "Quitter le jeu"), [WeakController]()
 			{
 				if (WeakController.IsValid())

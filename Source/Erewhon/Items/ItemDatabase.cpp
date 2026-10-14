@@ -69,8 +69,25 @@ namespace
 		Obj->TryGetNumberField(TEXT("max_stack"), Def.MaxStack);
 		Def.MaxStack = FMath::Max(1, Def.MaxStack);
 		Obj->TryGetBoolField(TEXT("harvest_tool"), Def.bHarvestTool);
+		double ItemWeight = -1.0;
+		if (Obj->TryGetNumberField(TEXT("weight"), ItemWeight))
+		{
+			Def.Weight = static_cast<float>(ItemWeight);
+		}
 		Obj->TryGetBoolField(TEXT("holdable"), Def.bHoldable);
 		Obj->TryGetBoolField(TEXT("apothecary_only"), Def.bApothecaryOnly);
+		Obj->TryGetBoolField(TEXT("farmer_only"), Def.bFarmerOnly);
+		double Seconds = 0.0;
+		if (Obj->TryGetNumberField(TEXT("potion_seconds"), Seconds))
+		{
+			Def.PotionSeconds = static_cast<float>(Seconds);
+		}
+		FString ShopName;
+		if (Obj->TryGetStringField(TEXT("shop"), ShopName))
+		{
+			Def.bShopOverride = ShopName == TEXT("breeder") || ShopName == TEXT("workshop");
+			Def.ShopOverride = ShopName == TEXT("breeder") ? EShopKind::Breeder : EShopKind::Workshop;
+		}
 		Def.Color = ParseColor(Obj, TEXT("color"), FLinearColor::White);
 
 		if (Obj->TryGetStringField(TEXT("clothing_slot"), Text))

@@ -125,6 +125,14 @@ namespace ErewhonTerrain
 			const FVector2D Cabin(ErewhonSpawn::CabinTransform(Kind).GetLocation());
 			Flatten = FMath::Min(Flatten, FMath::SmoothStep(1300.f, 3300.f, static_cast<float>(FVector2D::Distance(World, Cabin))));
 		}
+		for (const EShopKind Kind : { EShopKind::Breeder, EShopKind::Workshop })
+		{
+			const FTransform House = ErewhonSpawn::CabinTransform(Kind);
+			const FVector2D Annex(House.TransformPosition(FVector(ErewhonSpawn::AnnexCenter(Kind), 0.f)));
+			const float ToHouse = FVector2D::Distance(World, FVector2D(House.GetLocation()));
+			const float ToAnnex = FVector2D::Distance(World, Annex);
+			Flatten = FMath::Min(Flatten, FMath::SmoothStep(1500.f, 3500.f, FMath::Min(ToHouse, ToAnnex)));
+		}
 		return Height * Flatten;
 	}
 

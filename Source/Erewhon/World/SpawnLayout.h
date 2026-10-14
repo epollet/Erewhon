@@ -30,7 +30,19 @@ namespace ErewhonSpawn
 	constexpr float ManagerClearingRadius = 900.f;
 
 	/** Les commerces de la place, dans l'ordre de construction. */
-	inline constexpr EShopKind ShopKinds[] = { EShopKind::GeneralStore, EShopKind::SectorManager, EShopKind::Tailor };
+	inline constexpr EShopKind ShopKinds[] = { EShopKind::GeneralStore, EShopKind::SectorManager, EShopKind::Tailor, EShopKind::Breeder, EShopKind::Workshop };
+
+	/** Demi-longueur (X) et demi-largeur (Y) d'une maison : l'éleveur et l'atelier sont plus grands. */
+	EREWHON_API FVector2D CabinHalfSize(EShopKind Kind);
+	EREWHON_API float CabinWallHeightFor(EShopKind Kind);
+
+	/**
+	 * L'annexe d'une maison, dans son repère : la grange de l'éleveur (ouverte vers −X, trois box),
+	 * la cour de l'atelier (où sont exposés charrette et outils). Centre et demi-taille.
+	 */
+	EREWHON_API FVector2D AnnexCenter(EShopKind Kind);
+	EREWHON_API FVector2D AnnexHalfSize(EShopKind Kind);
+	EREWHON_API bool HasAnnex(EShopKind Kind);
 
 	/**
 	 * Repère d'une cabane (monde) : le General Store au centre de la place, porte au sud ;

@@ -16,6 +16,7 @@
 #include "World/SectorLayout.h"
 #include "World/Door.h"
 #include "World/Terrain.h"
+#include "Components/CapsuleComponent.h"
 #include "Inventory/BackpackComponent.h"
 #include "World/Backpack.h"
 #include "World/Village.h"
@@ -24,6 +25,9 @@
 #include "EngineUtils.h"
 #include "World/SpawnLayout.h"
 #include "World/Apothecary.h"
+#include "World/Farm.h"
+#include "World/Bhurak.h"
+#include "World/DroppedItem.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonGameMode"
 
@@ -108,6 +112,13 @@ void AErewhonGameMode::InitGameState()
 			State->AddHarvest(Harvest.Sector, Harvest.PlantIndex, Harvest.HarvestTime);
 		}
 	}
+	for (const FSavedField& Field : WorldSave->Fields)
+	{
+		if (ErewhonFarm::IsFieldCell(Field.Sector, State->GetBuildings(Field.Sector), Field.Cell))
+		{
+			State->SetFieldCell(Field.Sector, Field.Cell, Field.Crop, Field.SownAt);
+		}
+	}
 }
 
 void AErewhonGameMode::BeginPlay()
@@ -184,6 +195,11 @@ void AErewhonGameMode::SaveWorld()
 	for (const FHarvestEntry& Entry : State->GetHarvestEntries())
 	{
 		WorldSave->Harvests.Add({ Entry.Sector, Entry.PlantIndex, Entry.HarvestTime });
+	}
+	WorldSave->Fields.Reset();
+	for (const FFieldCellEntry& Entry : State->GetFieldEntries())
+	{
+		WorldSave->Fields.Add({ Entry.Sector, Entry.Cell, Entry.Crop, Entry.SownAt });
 	}
 	for (const APlayerState* PlayerState : State->PlayerArray)
 	{
@@ -290,7 +306,8 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 	if (const FSavedPlayer* Saved = WorldSave ? WorldSave->Players.Find(Key) : nullptr)
 	{
 		PlayerState->SetCoins(Saved->Coins);
-		PlayerState->SetPlayerClass(Saved->PlayerClass == static_cast<uint8>(EPlayerClass::Apothecary) ? EPlayerClass::Apothecary : EPlayerClass::None);
+		PlayerState->SetPlayerClass(Saved->PlayerClass == static_cast<uint8>(EPlayerClass::Apothecary) ? EPlayerClass::Apothecary
+			: Saved->PlayerClass == static_cast<uint8>(EPlayerClass::Farmer) ? EPlayerClass::Farmer : EPlayerClass::None);
 		Inventory->RestoreSlots(Saved->Slots);
 		PlayerState->GetBackpack()->Restore(Saved->bHasBackpack, Saved->bBackpackWorn, Saved->BackpackSlots, Saved->BackpackTransform);
 		if (APawn* Pawn = Controller->GetPawn(); Pawn && Saved->bHasLocation)
@@ -360,6 +377,145 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 		const FVector At(Spot.X, Spot.Y, ErewhonTerrain::Height(FVector2D(Spot), GetGameState<AErewhonGameState>()->GetWorldSeed()));
 		SpawnStorage(EStorageKind::Barrel, FTransform(At), Key, DisplayName);
 	}
+	// -ErewhonTestFarm : le secteur 1:1 au joueur avec ses quatre champs (-ErewhonTestFarmMerged : réunis), un peu
+	// de chaque étape dans le champ nord-est (retourné, semé, pousses d'un et deux jours, mûr), et un fermier outillé.
+	if (APawn* TestPawn = Controller->GetPawn(); TestPawn && FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestFarm")))
+	{
+		using namespace ErewhonFarm;
+		AErewhonGameState* TestState = GetGameState<AErewhonGameState>();
+		const FIntPoint TestSector(1, 1);
+		const uint8 TestFields = AllQuarters | FenceBit | (FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestFarmMerged")) ? MergedBit : 0);
+		TestState->SetSectorOwner(TestSector, Key, DisplayName, (1 << 1) | (1 << 3), 0, TestFields);
+		PlayerState->SetPlayerClass(EPlayerClass::Farmer);
+		for (const TPair<const TCHAR*, int32>& Gift : { TPair<const TCHAR*, int32>(TEXT("spade"), 1), { TEXT("scythe"), 1 },
+			{ TEXT("seeds_wheat"), 5 }, { TEXT("seeds_flax"), 5 }, { TEXT("seeds_cabbage"), 5 } })
+		{
+			Inventory->StoreItem(Gift.Key, Gift.Value);
+		}
+		// -ErewhonTestDrop : du blé et du petit bois posés à terre devant le joueur (voir après la téléportation).
+		// -ErewhonTestHotbar : la bêche, la faux et les graines de blé dans la barre (la bêche en main).
+		if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestHotbar")))
+		{
+			const TPair<const TCHAR*, int32> Bar[] = { { TEXT("spade"), 1 }, { TEXT("scythe"), 1 }, { TEXT("seeds_wheat"), 5 } };
+			for (int32 Hotbar = 0; Hotbar < UE_ARRAY_COUNT(Bar); ++Hotbar)
+			{
+				const int32 Index = Inventory->HotbarSlotIndex(Hotbar);
+				if (Inventory->EditSlots().IsValidIndex(Index) && Inventory->RemoveStored(Bar[Hotbar].Key, Bar[Hotbar].Value))
+				{
+					Inventory->EditSlots()[Index].ItemId = Bar[Hotbar].Key;
+					Inventory->EditSlots()[Index].Count = Bar[Hotbar].Value;
+				}
+			}
+			int32 TestSlot = 0;
+			FParse::Value(FCommandLine::Get(), TEXT("ErewhonTestHotbarSlot="), TestSlot);
+			Inventory->SelectHotbar(TestSlot);
+			Inventory->CommitChanges();
+		}
+		// Par bandes vers l'est : retourné, semé, pousses d'un jour, de deux, mûr ; blé, lin, chou vers le nord.
+		const double Now = TestState->GetWorldClock();
+		for (int32 Y = 26; Y < 44; ++Y)
+		{
+			const int32 Band = FMath::Min((Y - 26) / 3, 4);
+			for (int32 X = 30; X < 47; ++X)
+			{
+				const uint8 Crop = Band == 0 ? 0 : static_cast<uint8>(1 + FMath::Min((X - 30) / 6, 2));
+				TestState->SetFieldCell(TestSector, Y * CellsPerSide + X, Crop, Now - DaySeconds() * FMath::Max(0, Band - 1) - 5.0);
+			}
+		}
+		FString FarmMenu;
+		const bool bFarmAtManager = FParse::Value(FCommandLine::Get(), TEXT("ErewhonOpenMenu="), FarmMenu) && (FarmMenu == TEXT("sectors") || FarmMenu == TEXT("store"));
+		const FVector2D Foot = FVector2D(ErewhonSector::Origin(TestSector)) + FVector2D(7600.f, 4980.f);
+		if (!bFarmAtManager)   // pour la mairie ou la boutique, on reste au village
+		TestPawn->TeleportTo(FVector(Foot, ErewhonTerrain::Height(Foot, TestState->GetWorldSeed()) + 100.f), FRotator(0.f, 90.f, 0.f));
+		if (!bFarmAtManager)
+		{
+			Controller->SetControlRotation(FRotator(-15.f, 90.f, 0.f));
+		}
+		if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestDrop")))
+		{
+			DropOnGround(TestPawn, TEXT("wheat"), 12);
+			TestPawn->AddActorWorldOffset(FVector(0.f, -150.f, 0.f));
+			DropOnGround(TestPawn, TEXT("firewood"), 3);
+			TestPawn->AddActorWorldOffset(FVector(0.f, -120.f, 0.f));
+			Inventory->StoreItem(TEXT("firewood"), 8);   // de quoi peser lourd : 20 kg de petit bois
+		}
+		// -ErewhonTestTow=cultivator|seeder : en selle sur un bhurak, l'outil attelé derrière, levier baissé
+		// (le semoir garni de graines de blé), au bord du champ sud-est, face à l'est.
+		FString TowName;
+		if (FParse::Value(FCommandLine::Get(), TEXT("ErewhonTestTow="), TowName))
+		{
+			const ECartKind TowKind = TowName == TEXT("seeder") ? ECartKind::Seeder : ECartKind::Cultivator;
+			const FVector2D Start = FVector2D(ErewhonSector::Origin(TestSector)) + FVector2D(2500.f, 5600.f);
+			const FTransform BeastAt(FRotator(0.f, 90.f, 0.f), FVector(Start, ErewhonTerrain::Height(Start, TestState->GetWorldSeed())));
+			ABhurak* Beast = SpawnBhurak(BeastAt, Key, DisplayName);
+			Beast->SetHarness(true);
+			Beast->SetGear(ABhurak::BackSlot, ABhurak::SaddleItem, nullptr);
+			const FVector2D Behind = Start - FVector2D(0.f, 300.f);
+			const FTransform ToolAt(FRotator(0.f, 90.f, 0.f), FVector(Behind, ErewhonTerrain::Height(Behind, TestState->GetWorldSeed())));
+			ACart* Tool = GetWorld()->SpawnActorDeferred<ACart>(ACart::StaticClass(), ToolAt);
+			Tool->Setup(Key, DisplayName, TowKind);
+			if (TowKind == ECartKind::Seeder)
+			{
+				Tool->EditWood()[0].ItemId = TEXT("seeds_wheat");
+				Tool->EditWood()[0].Count = 10;
+			}
+			Tool->FinishSpawning(ToolAt);
+			Tool->CommitWood();
+			TestPawn->TeleportTo(BeastAt.GetLocation() + FVector(0.f, 0.f, 100.f), BeastAt.Rotator());
+			TryRideBhurak(Controller, Beast);
+			Tool->StartDriving(Beast);
+			Beast->SetTowedCart(Tool);
+			Tool->SetEngaged(true);
+			// Le semoir passe sur de la terre retournée : une bande retournée vers l'est.
+			if (TowKind == ECartKind::Seeder)
+			{
+				for (int32 Y = 28; Y < 46; ++Y)
+				{
+					for (int32 X = 10; X < 15; ++X)
+					{
+						TestState->SetFieldCell(TestSector, Y * CellsPerSide + X, 0, Now);
+					}
+				}
+			}
+		}
+		else
+		{
+			PlayerState->SetCoins(9000);
+		}
+	}
+	// -ErewhonTestBhurak : un bhurak harnaché et sellé, deux sacoches (l'une garnie), une charrette derrière lui ;
+	// -ErewhonTestRide : le joueur en selle, la charrette attelée.
+	if (APawn* TestPawn = Controller->GetPawn(); TestPawn && FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestBhurak")))
+	{
+		const AErewhonGameState* TestState = GetGameState<AErewhonGameState>();
+		const FVector2D Foot = FVector2D(TestPawn->GetActorLocation()) + FVector2D(450.f, 0.f);
+		const FTransform BeastAt(FRotator(0.f, 90.f, 0.f), FVector(Foot, ErewhonTerrain::Height(Foot, TestState->GetWorldSeed())));
+		ABhurak* Beast = SpawnBhurak(BeastAt, Key, DisplayName);
+		Beast->SetHarness(true);
+		Beast->SetGear(ABhurak::BackSlot, ABhurak::SaddleItem, nullptr);
+		for (const int32 Slot : { 0, 2 })
+		{
+			AStorageActor* Bag = SpawnStorage(EStorageKind::Saddlebag, Beast->GearTransform(Slot) * BeastAt, Key, DisplayName);
+			if (Slot == 0)
+			{
+				Bag->StoreItem(TEXT("wheat"), 20);
+				Bag->StoreItem(TEXT("firewood"), 6);
+			}
+			Beast->SetGear(Slot, ABhurak::SaddlebagItem, Bag);
+		}
+		Inventory->StoreItem(TEXT("saddlebag"), 1);
+		const FVector2D CartFoot = Foot - FVector2D(0.f, 380.f);
+		const FTransform CartAt(FRotator(0.f, 90.f, 0.f), FVector(CartFoot, ErewhonTerrain::Height(CartFoot, TestState->GetWorldSeed())));
+		ACart* TestCart = GetWorld()->SpawnActorDeferred<ACart>(ACart::StaticClass(), CartAt);
+		TestCart->Setup(Key, DisplayName);
+		TestCart->FinishSpawning(CartAt);
+		if (AErewhonCharacter* Rider = Cast<AErewhonCharacter>(TestPawn); Rider && FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestRide")))
+		{
+			TryRideBhurak(Controller, Beast);
+			TestCart->StartDriving(Beast);
+			Beast->SetTowedCart(TestCart);
+		}
+	}
 	// -ErewhonTestApothecary : le secteur 1:1 au joueur, avec ses chemins et son apothicairerie (feu allumé),
 	// de quoi y travailler ; le joueur entre dans la maison.
 	if (APawn* TestPawn = Controller->GetPawn(); TestPawn && FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestApothecary")))
@@ -412,6 +568,40 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 			AStorageActor* WaterBarrel = SpawnStorage(EStorageKind::Barrel,
 				FTransform(FVector(-90.f, -210.f, 0.f)) * FTransform(Spot->GetRotation(), Spot->GetLocation()), Key, DisplayName);
 			WaterBarrel->SetLiquid(ErewhonApothecary::Water, 60.f);
+			// -ErewhonTestPitcher : le pichet en main, on puise 2 L au tonneau, puis on en verse au chaudron en s'arrêtant à 1,5 s.
+			if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestPitcher")))
+			{
+				if (FInventorySlot* Hand = Inventory->EditHandSlot())
+				{
+					Inventory->RemoveStored(ErewhonApothecary::EmptyPitcher, 1);
+					Hand->ItemId = ErewhonApothecary::EmptyPitcher;
+					Hand->Count = 1;
+					Inventory->CommitChanges();
+				}
+				TWeakObjectPtr<AErewhonPlayerController> WeakPC = Controller;
+				TWeakObjectPtr<AStorageActor> WeakBarrel = WaterBarrel;
+				const auto Report = [WeakPC, WeakBarrel, this](const TCHAR* When)
+				{
+					AStorageActor* Cauldron = nullptr;
+					for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It) { if (It->GetKind() == EStorageKind::Cauldron) { Cauldron = *It; } }
+					if (WeakPC.IsValid() && WeakBarrel.IsValid())
+					{
+						UE_LOG(LogTemp, Warning, TEXT("PITCHER %s hand=%s barrel=%.1f cauldron=%.1f"), When, *WeakPC->GetPlayerState<AErewhonPlayerState>()->GetInventory()->GetHandItem().ToString(),
+							WeakBarrel->GetWater(), Cauldron ? Cauldron->GetWater() : -1.f);
+					}
+				};
+				FTimerHandle T1, T2, T3, T4;
+				GetWorldTimerManager().SetTimer(T1, FTimerDelegate::CreateWeakLambda(this, [this, WeakPC, WeakBarrel, Report]() { if (APawn* Near = WeakPC.IsValid() ? WeakPC->GetPawn() : nullptr) { Near->TeleportTo(WeakBarrel->GetActorLocation() + FVector(0.f, 0.f, 160.f), Near->GetActorRotation()); } Report(TEXT("start")); UE_LOG(LogTemp, Warning, TEXT("PITCHER draw: %s"), *TryStartPour(WeakPC.Get(), WeakBarrel.Get(), 5, NAME_None, 1).ToString()); }), 8.f, false);
+				GetWorldTimerManager().SetTimer(T2, FTimerDelegate::CreateWeakLambda(this, [this, WeakPC, Report]()
+				{
+					Report(TEXT("after draw"));
+					AStorageActor* Cauldron = nullptr;
+					for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It) { if (It->GetKind() == EStorageKind::Cauldron) { Cauldron = *It; } }
+					UE_LOG(LogTemp, Warning, TEXT("PITCHER pour: %s"), *TryStartPour(WeakPC.Get(), Cauldron, 6, NAME_None, 1).ToString());
+				}), 11.f, false);
+				GetWorldTimerManager().SetTimer(T3, FTimerDelegate::CreateWeakLambda(this, [WeakPC]() { if (WeakPC.IsValid()) { WeakPC->ServerStopCraft(); } }), 12.5f, false);
+				GetWorldTimerManager().SetTimer(T4, FTimerDelegate::CreateWeakLambda(this, [Report]() { Report(TEXT("after stopped pour")); }), 14.f, false);
+			}
 			// Un rack à petit bois garni, de l'autre côté de la cheminée, et une charrette de bois devant la porte.
 			AStorageActor* WoodRack = SpawnStorage(EStorageKind::FirewoodRack,
 				FTransform(FRotator(0.f, 180.f, 0.f), FVector(-70.f, 230.f, 0.f)) * FTransform(Spot->GetRotation(), Spot->GetLocation()), Key, DisplayName);
@@ -438,9 +628,34 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 						{
 							Stand->SetLevel(0.75f);
 							It->SetActorLocation(ErewhonApothecary::CauldronSpotOn(Stand).GetLocation());
-							It->SetLiquid(ErewhonApothecary::Water, 4.f);
+							It->SetLiquid(ErewhonApothecary::BaseLiquid, 4.f);   // les potions se brassent dans la base
 							It->StoreItem(TEXT("crushed_flower_blue"), 20);
 							It->StoreItem(TEXT("crushed_grass"), 8);
+							// -ErewhonTestVial : une fois le breuvage prêt, une fiole en main se remplit au chaudron.
+							if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestVial")))
+							{
+								TWeakObjectPtr<AErewhonPlayerController> WeakPC = Controller;
+								TWeakObjectPtr<AStorageActor> WeakPot = *It;
+								FTimerHandle VialTimer, VialReport;
+								GetWorldTimerManager().SetTimer(VialTimer, FTimerDelegate::CreateWeakLambda(this, [this, WeakPC, WeakPot]()
+								{
+									if (!WeakPC.IsValid() || !WeakPot.IsValid()) { return; }
+									UInventoryComponent* Inv = WeakPC->GetPlayerState<AErewhonPlayerState>()->GetInventory();
+									Inv->RemoveStored(ErewhonApothecary::EmptyVial, 2);
+									FInventorySlot* Hand = Inv->EditHandSlot();
+									Hand->ItemId = ErewhonApothecary::EmptyVial;
+									Hand->Count = 2;
+									Inv->CommitChanges();
+									if (APawn* Near = WeakPC->GetPawn()) { Near->TeleportTo(WeakPot->GetActorLocation() + FVector(-120.f, 0.f, 100.f), Near->GetActorRotation()); }
+									UE_LOG(LogTemp, Warning, TEXT("VIAL liquid=%s %.2f L, start: %s"), *WeakPot->GetLiquid().ToString(), WeakPot->GetWater(), *TryStartPour(WeakPC.Get(), WeakPot.Get(), 2, NAME_None, 1).ToString());
+								}), 95.f, false);
+								GetWorldTimerManager().SetTimer(VialReport, FTimerDelegate::CreateWeakLambda(this, [WeakPC, WeakPot]()
+								{
+									if (!WeakPC.IsValid() || !WeakPot.IsValid()) { return; }
+									const UInventoryComponent* Inv = WeakPC->GetPlayerState<AErewhonPlayerState>()->GetInventory();
+									UE_LOG(LogTemp, Warning, TEXT("VIAL after: hand=%s x? cauldron %.2f L, speed potions stored=%d"), *Inv->GetHandItem().ToString(), WeakPot->GetWater(), Inv->CountStored(TEXT("potion_speed")));
+								}), 97.f, false);
+							}
 						}
 					}
 				}
@@ -478,7 +693,7 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 
 // ── Récolte ──────────────────────────────────────────────────────────────────
 
-FText AErewhonGameMode::TryHarvest(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 PlantIndex)
+FText AErewhonGameMode::TryHarvest(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 PlantIndex, bool bNow)
 {
 	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
 	AErewhonGameState* State = GetGameState<AErewhonGameState>();
@@ -519,6 +734,14 @@ FText AErewhonGameMode::TryHarvest(AErewhonPlayerController* Controller, const F
 		{
 			return LOCTEXT("HandsBusy", "Les plantes se cueillent à main nue ou à la cerpe.");
 		}
+	}
+	// On cueille d'abord (une seconde à la main, une demi à la cerpe), on ramasse au bout.
+	if (!bNow)
+	{
+		const bool bSickle = !Hand.IsNone();
+		StartTimedGesture(Controller, bSickle ? ErewhonFarm::SickleHarvestSeconds : ErewhonFarm::HandHarvestSeconds, bSickle ? 5 : 4,
+			[this, Sector, PlantIndex](AErewhonPlayerController* Picker) { return TryHarvest(Picker, Sector, PlantIndex, true); });
+		return FText::GetEmpty();
 	}
 
 	if (Inventory->StoreItem(Plant.ItemId, 1) != 1)
@@ -631,6 +854,10 @@ FText AErewhonGameMode::TryBuyApothecary(AErewhonPlayerController* Controller, c
 	{
 		return LOCTEXT("AlreadyBuilt", "L'apothicairerie est déjà construite.");
 	}
+	if (State->GetBuildings(Sector) & ErewhonFarm::AnyField)
+	{
+		return LOCTEXT("HouseOnFields", "Des champs occupent ce secteur : l'apothicairerie n'y a pas sa place.");
+	}
 	if (const FText NotOne = CheckApothecary(Controller); !NotOne.IsEmpty())
 	{
 		return NotOne;
@@ -720,6 +947,48 @@ namespace
 		return PlayerState->GetBackpack()->IsOwned() && PlayerState->GetBackpack()->StoreItem(ItemId, 1) > 0;
 	}
 
+	/**
+	 * Une fois les ingrédients pris (poches d'abord, puis sac), le résultat aurait-il sa place ?
+	 * On le simule sur une copie des poches et du sac.
+	 */
+	bool FitsAfterCraft(const AErewhonPlayerState* PlayerState, const ErewhonApothecary::FRecipe& Recipe, const UItemDatabase& Items)
+	{
+		TArray<FInventorySlot> Pockets = PlayerState->GetInventory()->GetSlots();
+		Pockets.RemoveAll([](const FInventorySlot& S) { return S.Kind != ESlotKind::Inventory; });
+		const UBackpackComponent* Bag = PlayerState->GetBackpack();
+		TArray<FInventorySlot> BagSlots = Bag && Bag->IsOwned() ? Bag->GetSlots() : TArray<FInventorySlot>();
+		BagSlots.RemoveAll([](const FInventorySlot& S) { return S.Kind != ESlotKind::Inventory; });
+		const auto Take = [](TArray<FInventorySlot>& Slots, FName Item, int32& Left)
+		{
+			for (FInventorySlot& Slot : Slots)
+			{
+				if (Left > 0 && !Slot.IsEmpty() && Slot.ItemId == Item)
+				{
+					const int32 Taken = FMath::Min(Left, Slot.Count);
+					Slot.Count -= Taken;
+					Left -= Taken;
+					if (Slot.Count <= 0)
+					{
+						Slot.Clear();
+					}
+				}
+			}
+		};
+		for (const TPair<FName, int32>& Input : Recipe.Inputs)
+		{
+			int32 Left = Input.Value;
+			Take(Pockets, Input.Key, Left);
+			Take(BagSlots, Input.Key, Left);
+		}
+		const FItemDef* Output = Items.Find(Recipe.Output);
+		const int32 MaxStack = Output ? Output->MaxStack : 1;
+		const auto HasRoom = [&Recipe, MaxStack](const TArray<FInventorySlot>& Slots)
+		{
+			return Slots.ContainsByPredicate([&Recipe, MaxStack](const FInventorySlot& S) { return S.IsEmpty() || (S.ItemId == Recipe.Output && S.Count < MaxStack); });
+		};
+		return HasRoom(Pockets) || HasRoom(BagSlots);
+	}
+
 	bool HasIngredients(const AErewhonPlayerState* PlayerState, const ErewhonApothecary::FRecipe& Recipe)
 	{
 		for (const TPair<FName, int32>& Input : Recipe.Inputs)
@@ -748,9 +1017,10 @@ FText AErewhonGameMode::TryFeedFire(AErewhonPlayerController* Controller, AApoth
 	{
 		return LOCTEXT("FireFull", "Le feu est déjà bien nourri.");
 	}
-	if (!TakeOwned(Controller->GetPlayerState<AErewhonPlayerState>(), TEXT("firewood"), 1))
+	// Son petit bois, ou celui du rack posé près de la cheminée.
+	if (!TakeOwned(Controller->GetPlayerState<AErewhonPlayerState>(), TEXT("firewood"), 1) && !ErewhonApothecary::TakeWoodNearFire(House))
 	{
-		return LOCTEXT("NoFirewood", "Il vous faut du petit bois (au General Store).");
+		return LOCTEXT("NoFirewood", "Il vous faut du petit bois (au General Store), ou un rack garni près de la cheminée.");
 	}
 	House->AddFire(ErewhonApothecary::FireSecondsPerWood);
 	return FText::GetEmpty();
@@ -785,6 +1055,10 @@ FText AErewhonGameMode::TryStartCraft(AErewhonPlayerController* Controller, ASto
 		{
 			return LOCTEXT("CauldronDry", "Le chaudron est vide : remplissez-le d'eau (un tonneau d'eau à quelques pas).");
 		}
+	}
+	if (!FitsAfterCraft(Controller->GetPlayerState<AErewhonPlayerState>(), *Recipe, *UItemDatabase::Get(this)))
+	{
+		return LOCTEXT("NoRoomToCraft", "Plus de place dans l'inventaire pour ce que vous préparez : faites d'abord de la place.");
 	}
 	if (!HasIngredients(Controller->GetPlayerState<AErewhonPlayerState>(), *Recipe))
 	{
@@ -848,6 +1122,11 @@ void AErewhonGameMode::StepCraft(AErewhonPlayerController* Controller)
 	if (!HasIngredients(PlayerState, *Recipe))
 	{
 		Stop(LOCTEXT("OutOfIngredients", "Plus assez d'ingrédients."));
+		return;
+	}
+	if (!FitsAfterCraft(PlayerState, *Recipe, *UItemDatabase::Get(this)))
+	{
+		Stop(LOCTEXT("NoRoom", "Plus de place dans l'inventaire."));
 		return;
 	}
 	for (const TPair<FName, int32>& Input : Recipe->Inputs)
@@ -946,17 +1225,21 @@ FText AErewhonGameMode::TryChooseClass(AErewhonPlayerController* Controller, uin
 	{
 		return LOCTEXT("ManagerTooFar", "La mairie est trop loin.");
 	}
-	const EPlayerClass Wanted = NewClass == static_cast<uint8>(EPlayerClass::Apothecary) ? EPlayerClass::Apothecary : EPlayerClass::None;
+	const EPlayerClass Wanted = NewClass == static_cast<uint8>(EPlayerClass::Apothecary) ? EPlayerClass::Apothecary
+		: NewClass == static_cast<uint8>(EPlayerClass::Farmer) ? EPlayerClass::Farmer : EPlayerClass::None;
 	if (PlayerState->GetPlayerClass() == Wanted)
 	{
 		return FText::GetEmpty();
 	}
-	if (Wanted == EPlayerClass::Apothecary && !PlayerState->SpendCoins(UErewhonSettings::Get().ApothecaryClassPrice))
+	const int32 Price = Wanted == EPlayerClass::Apothecary ? UErewhonSettings::Get().ApothecaryClassPrice
+		: Wanted == EPlayerClass::Farmer ? UErewhonSettings::Get().FarmerClassPrice : 0;
+	if (Price > 0 && !PlayerState->SpendCoins(Price))
 	{
 		return LOCTEXT("NotEnoughCoins", "Pas assez de pièces.");
 	}
 	PlayerState->SetPlayerClass(Wanted);
 	Controller->ClientToast(Wanted == EPlayerClass::Apothecary ? LOCTEXT("NowApothecary", "Vous voilà apothicaire !")
+		: Wanted == EPlayerClass::Farmer ? LOCTEXT("NowFarmer", "Vous voilà fermier !")
 		: LOCTEXT("NowNone", "Vous n'avez plus de classe particulière."));
 	return FText::GetEmpty();
 }
@@ -977,7 +1260,7 @@ namespace
 
 FText AErewhonGameMode::TryStartPour(AErewhonPlayerController* Controller, AStorageActor* Container, uint8 Op, FName Item, int32 Count)
 {
-	if (!AtContainer(Controller, Container) || Count <= 0 || (Op != 2 && Op != 4))
+	if (!AtContainer(Controller, Container) || Count <= 0 || (Op != 2 && Op != 5 && Op != 6))
 	{
 		return LOCTEXT("ContainerTooFar", "Vous êtes trop loin.");
 	}
@@ -995,26 +1278,45 @@ FText AErewhonGameMode::TryStartPour(AErewhonPlayerController* Controller, AStor
 	float Seconds = PitcherLiters / PourRate;
 	switch (Op)
 	{
-	case 4:
+	case 5:
+	case 6:
 	{
-		// Le pichet en main : vide, on le remplit ; plein, on le verse.
+		// Le pichet en main : on y puise (5) ou on en verse (6), un litre par seconde.
 		const FName Hand = Controller->GetPlayerState<AErewhonPlayerState>()->GetInventory()->GetHandItem();
+		const int32 InPitcher = PitcherLitersOf(Hand);
 		const FName Held = LiquidOfPitcher(Hand);
-		if (Hand == EmptyPitcher)
+		if (InPitcher < 0)
 		{
-			if (Container->GetWater() < PitcherLiters - 0.001f)
-			{
-				return LOCTEXT("NotEnoughLiquid", "Il n'y a pas assez de liquide (2 L pour un pichet).");
-			}
-			Shown = PitcherFor(Container->GetLiquid());
+			return LOCTEXT("NoPitcherInHand", "Prenez un pichet en main.");
 		}
-		else if (!Held.IsNone())
+		if (Op == 5)
 		{
+			if (InPitcher >= 2)
+			{
+				return LOCTEXT("PitcherFull", "Le pichet est plein.");
+			}
+			if (Container->GetWater() < 1.f - 0.001f)
+			{
+				return LOCTEXT("NotALiter", "Il n'y a pas un litre à puiser.");
+			}
+			if (InPitcher > 0 && Container->GetLiquid() != Held)
+			{
+				return LOCTEXT("PitcherOther", "Le pichet contient un autre liquide : videz-le d'abord.");
+			}
+			Count = FMath::Min(2 - InPitcher, FMath::FloorToInt32(Container->GetWater() + 0.001f));
+			Shown = PitcherFor(Container->GetLiquid(), InPitcher + 1);
+		}
+		else
+		{
+			if (InPitcher == 0)
+			{
+				return LOCTEXT("PitcherEmpty", "Le pichet est vide.");
+			}
 			if (Container->GetWater() > 0.01f && Container->GetLiquid() != Held)
 			{
 				return LOCTEXT("OtherLiquid", "Il contient déjà un autre liquide.");
 			}
-			if (Container->GetWater() + PitcherLiters > Container->GetCapacityLiters() + 0.001f)
+			if (Container->GetWater() + 1.f > Container->GetCapacityLiters() + 0.001f)
 			{
 				return LOCTEXT("Full", "C'est plein.");
 			}
@@ -1022,13 +1324,10 @@ FText AErewhonGameMode::TryStartPour(AErewhonPlayerController* Controller, AStor
 			{
 				return LOCTEXT("BarrelHasPlants", "Ce tonneau contient des plantes.");
 			}
+			Count = FMath::Min(InPitcher, FMath::FloorToInt32(Container->GetCapacityLiters() - Container->GetWater() + 0.001f));
 			Shown = Hand;
 		}
-		else
-		{
-			return LOCTEXT("NoPitcherInHand", "Prenez un pichet en main.");
-		}
-		Count = 1;
+		Seconds = PitcherSecondsPerLiter;
 		break;
 	}
 	case 2:
@@ -1048,6 +1347,7 @@ FText AErewhonGameMode::TryStartPour(AErewhonPlayerController* Controller, AStor
 	PourOps.Add(Controller, { Op, Container, Item });
 	FErewhonCraftJob Job;
 	Job.Output = Shown;
+	Job.Pour = Op == 5 ? 1 : Op == 6 ? 2 : 0;
 	Job.Remaining = FMath::Min(Count, 999);
 	Job.StepSeconds = Seconds;
 	Job.StepEnd = GetGameState<AErewhonGameState>()->GetWorldClock() + Seconds;
@@ -1089,36 +1389,39 @@ void AErewhonGameMode::StepPour(AErewhonPlayerController* Controller)
 	FText Why;
 	switch (Op.Op)
 	{
-	case 4:   // le pichet en main : on le remplit, ou on le vide
+	case 5:   // puiser un litre
+	case 6:   // verser un litre
 	{
 		UInventoryComponent* Inventory = PlayerState->GetInventory();
-		FInventorySlot* HandSlot = Inventory->EditSlots().FindByPredicate([](const FInventorySlot& S) { return S.Kind == ESlotKind::Equipment && S.ProvidedBy == EClothingSlot::None; });
+		FInventorySlot* HandSlot = Inventory->EditHandSlot();
+		const int32 InPitcher = HandSlot ? PitcherLitersOf(HandSlot->ItemId) : -1;
 		const FName Held = HandSlot ? LiquidOfPitcher(HandSlot->ItemId) : NAME_None;
-		if (!HandSlot || (HandSlot->ItemId != EmptyPitcher && Held.IsNone()))
+		if (InPitcher < 0)
 		{
 			Why = LOCTEXT("NoPitcherInHand", "Prenez un pichet en main.");
 		}
-		else if (HandSlot->ItemId == EmptyPitcher)
+		else if (Op.Op == 5)
 		{
-			if (Container->GetWater() < PitcherLiters - 0.001f)
+			if (InPitcher >= 2 || Container->GetWater() < 1.f - 0.001f || (InPitcher > 0 && Container->GetLiquid() != Held))
 			{
-				Why = LOCTEXT("NotEnoughLiquid", "Il n'y a pas assez de liquide (2 L pour un pichet).");
+				Why = LOCTEXT("CannotDraw", "On ne peut plus puiser.");
 			}
 			else
 			{
-				HandSlot->ItemId = PitcherFor(Container->GetLiquid());
-				Container->SetWater(Container->GetWater() - PitcherLiters);
+				const FName Liquid = Container->GetLiquid();
+				Container->SetWater(Container->GetWater() - 1.f);
+				HandSlot->ItemId = PitcherFor(Liquid, InPitcher + 1);
 				Inventory->CommitChanges();
 			}
 		}
-		else if ((Container->GetWater() > 0.01f && Container->GetLiquid() != Held) || Container->GetWater() + PitcherLiters > Capacity + 0.001f)
+		else if (InPitcher == 0 || (Container->GetWater() > 0.01f && Container->GetLiquid() != Held) || Container->GetWater() + 1.f > Capacity + 0.001f)
 		{
 			Why = LOCTEXT("CannotPour", "On ne peut pas le verser là.");
 		}
 		else
 		{
-			Container->SetLiquid(Held, Container->GetWater() + PitcherLiters);
-			HandSlot->ItemId = EmptyPitcher;
+			Container->SetLiquid(Held, Container->GetWater() + 1.f);
+			HandSlot->ItemId = PitcherFor(Held, InPitcher - 1);
 			Inventory->CommitChanges();
 		}
 		break;
@@ -1129,6 +1432,33 @@ void AErewhonGameMode::StepPour(AErewhonPlayerController* Controller)
 		if (!Brew || Container->GetWater() < VialLiters - 0.001f)
 		{
 			Why = LOCTEXT("NoMoreBrew", "Plus de breuvage.");
+		}
+		else if (FInventorySlot* HandVial = PlayerState->GetInventory()->EditHandSlot(); HandVial && HandVial->ItemId == EmptyVial && HandVial->Count > 0)
+		{
+			// La fiole qu'on tient : elle devient potion (dans les poches, ou à sa place si c'était la dernière).
+			if (--HandVial->Count <= 0)
+			{
+				HandVial->Clear();
+				if (!GiveOwned(PlayerState, Brew->Potion))
+				{
+					HandVial->ItemId = Brew->Potion;
+					HandVial->Count = 1;
+				}
+				PlayerState->GetInventory()->CommitChanges();
+			}
+			else if (!GiveOwned(PlayerState, Brew->Potion))
+			{
+				++HandVial->Count;
+				Why = LOCTEXT("NoRoom", "Plus de place dans l'inventaire.");
+			}
+			else
+			{
+				PlayerState->GetInventory()->CommitChanges();
+			}
+			if (Why.IsEmpty())
+			{
+				Container->SetWater(Container->GetWater() - VialLiters);
+			}
 		}
 		else if (!TakeOwned(PlayerState, EmptyVial, 1))
 		{
@@ -1324,7 +1654,7 @@ void AErewhonGameMode::SpawnFurnishing(const FIntPoint& Sector, const FString& O
 			const int32 Old = i * ErewhonApothecary::ShelfRows + Row;
 			if (Shelves.IsValidIndex(Old) && !Shelves[Old].IsEmpty())
 			{
-				Shelf->EditSlots()[Row] = Shelves[Old];
+				Shelf->EditSlots()[Row * ErewhonApothecary::ShelfSlotsPerRow] = Shelves[Old];
 			}
 		}
 		Shelf->Commit();
@@ -1344,6 +1674,7 @@ FText AErewhonGameMode::TrySellSector(AErewhonPlayerController* Controller, cons
 	{
 		return LOCTEXT("NotYours", "Ce secteur ne vous appartient pas.");
 	}
+	State->ClearFieldSector(Sector);
 	State->ClearSectorOwner(Sector);
 	PlayerState->AddCoins(UErewhonSettings::Get().SectorSellPrice);
 	// Ce qu'on y avait construit part avec le secteur.
@@ -1352,6 +1683,44 @@ FText AErewhonGameMode::TrySellSector(AErewhonPlayerController* Controller, cons
 		House->Destroy();
 	}
 	return FText::GetEmpty();
+}
+
+TOptional<FVector> AErewhonGameMode::FindWorkshopSpot() const
+{
+	const FTransform Cabin = ErewhonSpawn::CabinTransform(EShopKind::Workshop);
+	const FVector2D HalfSize = ErewhonSpawn::CabinHalfSize(EShopKind::Workshop);
+	// Devant la porte, sur deux rangs, en s'écartant de part et d'autre : la première place libre.
+	for (const float Out : { 480.f, 820.f })
+	{
+		for (const float Side : { 0.f, 320.f, -320.f, 640.f, -640.f })
+		{
+			const FVector Candidate = Cabin.TransformPosition(FVector(-HalfSize.X - Out, Side, 0.f));
+			bool bFree = true;
+			for (TActorIterator<AActor> It(GetWorld()); It && bFree; ++It)
+			{
+				if ((It->IsA<ACart>() || It->IsA<APawn>()) && FVector::Dist2D(It->GetActorLocation(), Candidate) < 280.f)
+				{
+					bFree = false;
+				}
+			}
+			if (bFree)
+			{
+				return Candidate;
+			}
+		}
+	}
+	return {};
+}
+
+void AErewhonGameMode::DeliverCart(AErewhonPlayerState* PlayerState, FName ItemId, const FVector& Spot)
+{
+	const AErewhonGameState* State = GetGameState<AErewhonGameState>();
+	const float Yaw = ErewhonSpawn::CabinTransform(EShopKind::Workshop).GetRotation().Rotator().Yaw + 90.f;   // en travers, le long de la façade
+	const FVector2D Foot(Spot.X, Spot.Y);
+	const FTransform Where(FRotator(0.f, Yaw, 0.f), FVector(Foot, ErewhonTerrain::Height(Foot, State ? State->GetWorldSeed() : 0)));
+	ACart* Cart = GetWorld()->SpawnActorDeferred<ACart>(ACart::StaticClass(), Where);
+	Cart->Setup(PlayerState->GetPlayerKey(), PlayerState->GetPlayerName(), ErewhonPlaceables::CartKindForItem(ItemId).Get(ECartKind::Cart));
+	Cart->FinishSpawning(Where);
 }
 
 FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName ItemId)
@@ -1370,6 +1739,10 @@ FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName I
 	{
 		return LOCTEXT("ApothecaryOnlyItem", "Ce n'est vendu qu'aux apothicaires (la classe se choisit à la mairie).");
 	}
+	if (Def->bFarmerOnly && !PlayerState->IsFarmer())
+	{
+		return LOCTEXT("FarmerOnlyItem", "Ce n'est vendu qu'aux fermiers (la classe se choisit à la mairie).");
+	}
 	UInventoryComponent* Inventory = PlayerState->GetInventory();
 	if (Def->IsBackpack())
 	{
@@ -1387,6 +1760,22 @@ FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName I
 		Controller->ClientToast(LOCTEXT("BagBought", "Le sac est sur votre dos. [F] pour le poser au sol, puis [E] pour l'ouvrir."));
 		return FText::GetEmpty();
 	}
+	// Charrettes et outils attelés : trop lourds pour les poches, l'atelier les livre devant sa porte.
+	if (ErewhonPlaceables::IsCart(ItemId))
+	{
+		const TOptional<FVector> Spot = FindWorkshopSpot();
+		if (!Spot.IsSet())
+		{
+			return LOCTEXT("YardFull", "Il n'y a plus de place devant l'atelier : emmenez d'abord ce qui y attend.");
+		}
+		if (!PlayerState->SpendCoins(Def->BuyPrice))
+		{
+			return LOCTEXT("NotEnoughCoins", "Pas assez de pièces.");
+		}
+		DeliverCart(PlayerState, ItemId, *Spot);
+		Controller->ClientToast(FText::Format(LOCTEXT("Delivered", "{0} vous attend devant l'atelier."), Def->Name));
+		return FText::GetEmpty();
+	}
 	if (Def->IsUnique() && Inventory->Owns(ItemId))
 	{
 		return FText::Format(LOCTEXT("AlreadyHave", "Vous possédez déjà : {0}."), Def->Name);
@@ -1395,11 +1784,80 @@ FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName I
 	{
 		return LOCTEXT("InventoryFull", "Inventaire plein.");
 	}
+	// Rien qu'on ne puisse plus porter : on resterait planté là, chez le marchand.
+	if (const AErewhonCharacter* Buyer = Controller->GetPawn<AErewhonCharacter>();
+		Buyer && Buyer->GetCarriedWeight() + Def->GetWeight() > Buyer->GetCarryMax())
+	{
+		return FText::Format(LOCTEXT("TooHeavyToBuy", "Trop lourd à porter ({0} kg) : faites de la place, ou venez à dos de bhurak."),
+			FText::AsNumber(FMath::RoundToInt32(Def->GetWeight())));
+	}
 	if (!PlayerState->SpendCoins(Def->BuyPrice))
 	{
 		return LOCTEXT("NotEnoughCoins", "Pas assez de pièces.");
 	}
 	Inventory->StoreItem(ItemId, 1);
+	return FText::GetEmpty();
+}
+
+FText AErewhonGameMode::Unstuck(AErewhonPlayerController* Controller)
+{
+	AErewhonCharacter* Character = Controller->GetPawn<AErewhonCharacter>();
+	if (!Character)
+	{
+		return FText::GetEmpty();
+	}
+	if (Character->GetMount())
+	{
+		TryRideBhurak(Controller, nullptr);   // pied à terre
+	}
+	if (ACart* Driven = Character->GetDrivenCart())
+	{
+		Driven->StopDriving();
+		Character->SetDrivenCart(nullptr);
+	}
+	// Une charrette ou un outil attelé en poche (achetés avant la livraison) : livrés devant l'atelier.
+	if (AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>())
+	{
+		UInventoryComponent* Inventory = PlayerState->GetInventory();
+		bool bChanged = false;
+		for (FInventorySlot& Slot : Inventory->EditSlots())
+		{
+			while (!Slot.IsEmpty() && ErewhonPlaceables::IsCart(Slot.ItemId) && Slot.Count > 0)
+			{
+				const TOptional<FVector> Spot = FindWorkshopSpot();
+				if (!Spot.IsSet())
+				{
+					break;
+				}
+				DeliverCart(PlayerState, Slot.ItemId, *Spot);
+				Controller->ClientToast(LOCTEXT("DeliveredBack", "Ce que vous portiez d'attelable vous attend devant l'atelier."));
+				if (--Slot.Count <= 0)
+				{
+					Slot.Clear();
+				}
+				bChanged = true;
+			}
+		}
+		if (bChanged)
+		{
+			Inventory->CommitChanges();
+		}
+	}
+	// Devant la mairie : un peu vers le centre de la place, face au comptoir.
+	const FVector Hall = ErewhonSpawn::MerchantLocation(EShopKind::SectorManager);
+	const FVector2D Toward = (FVector2D(ErewhonSector::Center(FIntPoint::ZeroValue)) - FVector2D(Hall)).GetSafeNormal();
+	const FVector2D Foot = FVector2D(Hall) + Toward * 350.f;
+	const AErewhonGameState* State = GetGameState<AErewhonGameState>();
+	const float Ground = ErewhonTerrain::Height(Foot, State ? State->GetWorldSeed() : 0);
+	const FRotator Facing(0.f, FMath::RadiansToDegrees(FMath::Atan2(-Toward.Y, -Toward.X)), 0.f);
+	Character->TeleportTo(FVector(Foot, Ground + Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 20.f), Facing, false, true);
+	Controller->ClientSetRotation(Facing);
+	// Trop chargé, on ne bougerait pas plus ici : le dire.
+	if (Character->GetCarriedWeight() > Character->GetCarryMax())
+	{
+		return FText::Format(LOCTEXT("UnstuckHeavy", "Vous êtes trop chargé pour avancer ({0} / {1} kg) : jetez ou vendez quelque chose (inventaire)."),
+			FText::AsNumber(FMath::RoundToInt32(Character->GetCarriedWeight())), FText::AsNumber(FMath::RoundToInt32(Character->GetCarryMax())));
+	}
 	return FText::GetEmpty();
 }
 
@@ -1713,10 +2171,8 @@ FText AErewhonGameMode::TryDiscard(AErewhonPlayerController* Controller, bool bF
 			return FText::GetEmpty();
 		}
 		FInventorySlot& Slot = Storage->EditSlots()[SlotIndex];
-		if (--Slot.Count <= 0)
-		{
-			Slot.Clear();
-		}
+		DropOnGround(Pawn, Slot.ItemId, Slot.Count);
+		Slot.Clear();
 		Storage->Commit();
 		return FText::GetEmpty();
 	}
@@ -1742,10 +2198,9 @@ FText AErewhonGameMode::TryDiscard(AErewhonPlayerController* Controller, bool bF
 	{
 		return LOCTEXT("TakeOffFirst", "Retirez d'abord ce vêtement.");
 	}
-	if (--Slot.Count <= 0)
-	{
-		Slot.Clear();
-	}
+	// Toute la pile, posée à terre devant soi.
+	DropOnGround(Controller->GetPawn(), Slot.ItemId, Slot.Count);
+	Slot.Clear();
 	if (bFromBag)
 	{
 		Bag->Commit();
@@ -1754,6 +2209,66 @@ FText AErewhonGameMode::TryDiscard(AErewhonPlayerController* Controller, bool bF
 	{
 		Inventory->CommitChanges();
 	}
+	return FText::GetEmpty();
+}
+
+void AErewhonGameMode::DropOnGround(const APawn* Pawn, FName ItemId, int32 Count)
+{
+	AErewhonGameState* State = GetGameState<AErewhonGameState>();
+	if (!Pawn || ItemId.IsNone() || Count <= 0 || !State)
+	{
+		return;
+	}
+	// Devant soi, au sol ; sur le terrain de quelqu'un, il est à lui ; ailleurs, à tous.
+	FVector Spot = Pawn->GetActorLocation() + Pawn->GetActorForwardVector() * 90.f;
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(ErewhonDrop), false, Pawn);
+	// Le sol (un plancher, une dalle) sous ses pieds ; à défaut, le relief du terrain (le secteur peut être en train de se reconstruire).
+	if (GetWorld()->LineTraceSingleByChannel(Hit, Spot + FVector(0, 0, 50.f), Spot - FVector(0, 0, 400.f), ECC_WorldStatic, Params))
+	{
+		Spot = Hit.ImpactPoint;
+	}
+	else
+	{
+		Spot.Z = ErewhonTerrain::Height(FVector2D(Spot), State->GetWorldSeed());
+	}
+	const FIntPoint Sector = ErewhonSector::FromWorld(Spot);
+	const FString* LandOwner = ErewhonSector::IsPurchasable(Sector) ? State->FindSectorOwnerKey(Sector) : nullptr;
+	const FString OwnerKey = LandOwner ? *LandOwner : FString();
+	const double ExpiresAt = State->GetWorldClock() + ADroppedItem::LifeSeconds;
+	// Le même objet au même endroit : il rejoint le tas.
+	for (TActorIterator<ADroppedItem> It(GetWorld()); It; ++It)
+	{
+		if (It->GetItemId() == ItemId && It->CanPickUp(OwnerKey) && FVector::Dist2D(It->GetActorLocation(), Spot) < 120.f)
+		{
+			It->AddCount(Count, ExpiresAt);
+			return;
+		}
+	}
+	const FTransform At(FRotator::ZeroRotator, Spot + FVector(0.f, 0.f, 16.f));
+	ADroppedItem* Dropped = GetWorld()->SpawnActorDeferred<ADroppedItem>(ADroppedItem::StaticClass(), At, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	Dropped->Setup(ItemId, Count, OwnerKey, LandOwner ? State->GetSectorOwnerName(Sector) : FString(), ExpiresAt);
+	Dropped->FinishSpawning(At);
+}
+
+FText AErewhonGameMode::TryPickUpDropped(AErewhonPlayerController* Controller, ADroppedItem* Dropped)
+{
+	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
+	const APawn* Pawn = Controller->GetPawn();
+	if (!PlayerState || !Pawn || !Dropped || FVector::Dist(Pawn->GetActorLocation(), Dropped->GetActorLocation()) > 500.f)
+	{
+		return FText::GetEmpty();
+	}
+	if (!Dropped->CanPickUp(PlayerState->GetPlayerKey()))
+	{
+		return LOCTEXT("DroppedNotYours", "C'est sur le terrain de quelqu'un d'autre : seul son propriétaire peut le ramasser.");
+	}
+	const int32 Stored = PlayerState->GetInventory()->StoreItem(Dropped->GetItemId(), Dropped->GetCount());
+	if (Stored <= 0)
+	{
+		return LOCTEXT("InventoryFull", "Inventaire plein.");
+	}
+	Dropped->Take(Stored);
 	return FText::GetEmpty();
 }
 
@@ -1781,7 +2296,11 @@ FText AErewhonGameMode::TryPickUpStorage(AErewhonPlayerController* Controller, A
 	{
 		return LOCTEXT("NotYourStorage", "Ce n'est pas à vous.");
 	}
-	if (Character->GetCarried() || Character->GetDrivenCart())
+	if (Storage->GetKind() == EStorageKind::Saddlebag)
+	{
+		return FText::GetEmpty();   // elle reste sur le harnais
+	}
+	if (Character->GetCarried() || Character->GetDrivenCart() || Character->GetMount())
 	{
 		return LOCTEXT("HandsFull", "Vous avez déjà les mains prises.");
 	}
@@ -1829,14 +2348,23 @@ FText AErewhonGameMode::TryPlace(AErewhonPlayerController* Controller, uint8 Typ
 	UInventoryComponent* Inventory = PlayerState->GetInventory();
 	const FName HandItem = Inventory->GetHandItem();
 	const bool bFromHand = !Storage;
-	if (bFromHand && ErewhonPlaceables::IsCart(HandItem))
+	if (bFromHand && ErewhonPlaceables::IsBhurak(HandItem))
+	{
+		if (Type != 0)
+		{
+			return FText::GetEmpty();
+		}
+		SpawnBhurak(FTransform(FRotator(0.f, Yaw, 0.f), Location), PlayerState->GetPlayerKey(), PlayerState->GetPlayerName(),
+			static_cast<uint8>(FMath::Max(0, ABhurak::CoatOfItem(HandItem))));
+	}
+	else if (bFromHand && ErewhonPlaceables::IsCart(HandItem))
 	{
 		if (Type != 0)
 		{
 			return FText::GetEmpty();
 		}
 		ACart* Cart = GetWorld()->SpawnActorDeferred<ACart>(ACart::StaticClass(), FTransform(FRotator(0.f, Yaw, 0.f), Location));
-		Cart->Setup(PlayerState->GetPlayerKey(), PlayerState->GetPlayerName());
+		Cart->Setup(PlayerState->GetPlayerKey(), PlayerState->GetPlayerName(), ErewhonPlaceables::CartKindForItem(HandItem).Get(ECartKind::Cart));
 		Cart->FinishSpawning(FTransform(FRotator(0.f, Yaw, 0.f), Location));
 	}
 	else
@@ -1904,16 +2432,9 @@ FText AErewhonGameMode::TryPlace(AErewhonPlayerController* Controller, uint8 Typ
 	if (bFromHand)
 	{
 		// L'objet quitte la main.
-		for (FInventorySlot& HandSlot : Inventory->EditSlots())
+		if (FInventorySlot* HandSlot = Inventory->EditHandSlot(); HandSlot && --HandSlot->Count <= 0)
 		{
-			if (HandSlot.Kind == ESlotKind::Equipment && HandSlot.ProvidedBy == EClothingSlot::None)
-			{
-				if (--HandSlot.Count <= 0)
-				{
-					HandSlot.Clear();
-				}
-				break;
-			}
+			HandSlot->Clear();
 		}
 		Inventory->CommitChanges();
 	}
@@ -1934,6 +2455,10 @@ FText AErewhonGameMode::TryToggleDrive(AErewhonPlayerController* Controller, ACa
 		Character->SetDrivenCart(nullptr);
 		return FText::GetEmpty();
 	}
+	if (Cart && Cast<ABhurak>(Cart->GetDriver()))
+	{
+		return LOCTEXT("CartTowedDrive", "Elle est attelée : [G] en visant le bhurak pour la dételer.");
+	}
 	if (!Cart || Cart->GetDriver())
 	{
 		return FText::GetEmpty();
@@ -1942,7 +2467,7 @@ FText AErewhonGameMode::TryToggleDrive(AErewhonPlayerController* Controller, ACa
 	{
 		return LOCTEXT("NotYourCart", "Cette charrette n'est pas à vous.");
 	}
-	if (Character->GetCarried())
+	if (Character->GetCarried() || Character->GetMount())
 	{
 		return LOCTEXT("PutDownFirst", "Posez d'abord ce que vous portez.");
 	}
@@ -2056,6 +2581,10 @@ FText AErewhonGameMode::TryMoveCartItem(AErewhonPlayerController* Controller, AC
 	{
 		return LOCTEXT("CartOccupied", "La charrette porte déjà des conteneurs.");
 	}
+	if (bToCart && Cart->GetCartKind() == ECartKind::Cultivator)
+	{
+		return LOCTEXT("CultivatorNoLoad", "Le cultivateur ne porte rien.");
+	}
 	UInventoryComponent* Inventory = PlayerState->GetInventory();
 	TArray<FInventorySlot>& Source = bFromCart ? Cart->EditWood() : Inventory->EditSlots();
 	TArray<FInventorySlot>& Target = bToCart ? Cart->EditWood() : Inventory->EditSlots();
@@ -2064,9 +2593,10 @@ FText AErewhonGameMode::TryMoveCartItem(AErewhonPlayerController* Controller, AC
 		return FText::GetEmpty();
 	}
 	const FName ItemId = Source[From].ItemId;
-	if (bToCart && ItemId != TEXT("firewood"))
+	if (bToCart && !Cart->AcceptsBulk(ItemId))
 	{
-		return LOCTEXT("WoodOnly", "En vrac, la charrette ne porte que du petit bois.");
+		return Cart->GetCartKind() == ECartKind::Seeder ? LOCTEXT("SeedsOnly", "La trémie ne prend que des sacs de graines.")
+			: LOCTEXT("WoodOnly", "En vrac, la charrette ne porte que du petit bois.");
 	}
 	const FItemDef* Def = Items->Find(ItemId);
 	const int32 Cap = Def ? FMath::Min(Def->MaxStack, 10) : 10;
@@ -2131,7 +2661,7 @@ FText AErewhonGameMode::TryStashInCart(AErewhonPlayerController* Controller, ACa
 	const TArray<FInventorySlot>& Slots = PlayerState->GetInventory()->GetSlots();
 	for (int32 i = 0; i < Slots.Num(); ++i)
 	{
-		if (Slots[i].Kind == ESlotKind::Inventory && Slots[i].ItemId == TEXT("firewood") && !Slots[i].IsEmpty())
+		if (Slots[i].Kind == ESlotKind::Inventory && Cart && Cart->AcceptsBulk(Slots[i].ItemId) && !Slots[i].IsEmpty())
 		{
 			const FText Error = TryMoveCartItem(Controller, Cart, false, i, true, INDEX_NONE);
 			if (!Error.IsEmpty())
@@ -2139,6 +2669,114 @@ FText AErewhonGameMode::TryStashInCart(AErewhonPlayerController* Controller, ACa
 				return Error;
 			}
 		}
+	}
+	return FText::GetEmpty();
+}
+
+FText AErewhonGameMode::TrySplitMove(AErewhonPlayerController* Controller, bool bFromOther, int32 From, bool bToOther, int32 To, int32 Count,
+	AStorageActor* Storage, ACart* Cart)
+{
+	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
+	const APawn* Pawn = Controller->GetPawn();
+	const UItemDatabase* Items = UItemDatabase::Get(this);
+	if (!PlayerState || !Pawn || !Items || Count <= 0)
+	{
+		return FText::GetEmpty();
+	}
+	// L'autre côté : un conteneur, la charrette, ou le sac (porté, ou posé tout près).
+	UBackpackComponent* Bag = PlayerState->GetBackpack();
+	TArray<FInventorySlot>* Other = nullptr;
+	if (Storage)
+	{
+		if (!CanReachStorage(PlayerState, Pawn, Storage))
+		{
+			return LOCTEXT("StorageTooFar", "C'est trop loin.");
+		}
+		Other = &Storage->EditSlots();
+	}
+	else if (Cart)
+	{
+		if (!Cart->IsOwnedBy(PlayerState->GetPlayerKey()) || FVector::Dist(Pawn->GetActorLocation(), Cart->GetActorLocation()) > 500.f)
+		{
+			return LOCTEXT("StorageTooFar", "C'est trop loin.");
+		}
+		Other = &Cart->EditWood();
+	}
+	else if (Bag->IsOwned() && Bag->IsAccessibleFrom(Pawn))
+	{
+		Other = &Bag->EditSlots();
+	}
+	if ((bFromOther || bToOther) && !Other)
+	{
+		return FText::GetEmpty();
+	}
+	UInventoryComponent* Inventory = PlayerState->GetInventory();
+	TArray<FInventorySlot>& Source = bFromOther ? *Other : Inventory->EditSlots();
+	TArray<FInventorySlot>& Target = bToOther ? *Other : Inventory->EditSlots();
+	if (!Source.IsValidIndex(From) || !Target.IsValidIndex(To) || Source[From].IsEmpty() || (&Source == &Target && From == To))
+	{
+		return FText::GetEmpty();
+	}
+	FInventorySlot& Src = Source[From];
+	FInventorySlot& Dst = Target[To];
+	const FItemDef* Def = Items->Find(Src.ItemId);
+	if (!Def || (!Dst.IsEmpty() && Dst.ItemId != Src.ItemId) || Src.Kind == ESlotKind::Clothing || Dst.Kind == ESlotKind::Clothing)
+	{
+		return LOCTEXT("SlotTaken", "Cette case est prise.");
+	}
+	// Ce que la case d'arrivée accepte, et combien.
+	int32 Cap = Def->MaxStack;
+	if (!bToOther)
+	{
+		if (Dst.Kind == ESlotKind::Equipment && !Def->IsEquipable())
+		{
+			return LOCTEXT("NotEquipable", "Seuls les outils et ce qui se tient en main vont dans la barre.");
+		}
+	}
+	else if (Storage)
+	{
+		if (!Storage->Accepts(*Def))
+		{
+			return LOCTEXT("NotAccepted", "Cela ne va pas là-dedans.");
+		}
+		Cap = Storage->SlotCap(*Def);
+	}
+	else if (Cart)
+	{
+		if (!Cart->AcceptsBulk(Src.ItemId) || Cart->HasLoads())
+		{
+			return LOCTEXT("NotAccepted", "Cela ne va pas là-dedans.");
+		}
+		Cap = FMath::Min(Def->MaxStack, 10);
+	}
+	else if (Dst.Kind == ESlotKind::Equipment && Def->Category != EItemCategory::Tool)
+	{
+		return LOCTEXT("ToolsOnly", "Seuls les outils s'accrochent sur le côté du sac.");
+	}
+	const int32 Moved = FMath::Min(FMath::Min(Count, Src.Count), Cap - (Dst.IsEmpty() ? 0 : Dst.Count));
+	if (Moved <= 0)
+	{
+		return LOCTEXT("SlotFull", "Plus de place dans cette case.");
+	}
+	Dst.ItemId = Src.ItemId;
+	Dst.Count = (Dst.IsEmpty() ? 0 : Dst.Count) + Moved;
+	Src.Count -= Moved;
+	if (Src.Count <= 0)
+	{
+		Src.Clear();
+	}
+	Inventory->CommitChanges();
+	if (Storage)
+	{
+		Storage->Commit();
+	}
+	else if (Cart)
+	{
+		Cart->CommitWood();
+	}
+	else if (Other)
+	{
+		Bag->Commit();
 	}
 	return FText::GetEmpty();
 }
@@ -2189,6 +2827,11 @@ void AErewhonGameMode::ReleaseHeld(APawn* Pawn)
 		Cart->StopDriving();
 		Character->SetDrivenCart(nullptr);
 	}
+	if (ABhurak* Mount = Character->GetMount())
+	{
+		Mount->SetRider(nullptr);
+		Character->SetMount(nullptr);
+	}
 }
 
 void AErewhonGameMode::CaptureObjects()
@@ -2200,12 +2843,35 @@ void AErewhonGameMode::CaptureObjects()
 	for (TActorIterator<ACart> It(GetWorld()); It; ++It)
 	{
 		CartIndex.Add(*It, WorldSave->Carts.Num());
-		WorldSave->Carts.Add({ It->GetOwnerKey(), It->GetOwnerName(), FTransform(FRotator(0.f, It->GetActorRotation().Yaw, 0.f), It->GetActorLocation()), It->GetWood() });
+		WorldSave->Carts.Add({ It->GetOwnerKey(), It->GetOwnerName(), FTransform(FRotator(0.f, It->GetActorRotation().Yaw, 0.f), It->GetActorLocation()), It->GetWood(),
+			static_cast<uint8>(It->GetCartKind()), It->IsEngaged() });
 	}
 	// Du bas des piles vers le haut : une cagette est toujours enregistrée après celle qui la porte.
 	TArray<AStorageActor*> Ordered;
+	WorldSave->Bhuraks.Reset();
+	for (TActorIterator<ABhurak> It(GetWorld()); It; ++It)
+	{
+		FSavedBhurak& Saved = WorldSave->Bhuraks.AddDefaulted_GetRef();
+		Saved.OwnerKey = It->GetOwnerKey();
+		Saved.OwnerName = It->GetOwnerName();
+		Saved.Transform = FTransform(FRotator(0.f, It->GetActorRotation().Yaw, 0.f), It->GetActorLocation());
+		Saved.bHarness = It->HasHarness();
+		Saved.Coat = It->GetCoat();
+		for (int32 Slot = 0; Slot < ABhurak::GearSlots; ++Slot)
+		{
+			Saved.Gear.Add(It->GetGear(Slot));
+			const AStorageActor* Bag = It->GetBag(Slot);
+			TArray<FInventorySlot> Contents = Bag ? Bag->GetSlots() : TArray<FInventorySlot>();
+			Contents.SetNum(ErewhonPlaceables::Capacity(EStorageKind::Saddlebag));
+			Saved.BagSlots.Append(Contents);
+		}
+	}
 	for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It)
 	{
+		if (It->GetKind() == EStorageKind::Saddlebag)
+		{
+			continue;
+		}
 		if (!It->GetBelow())
 		{
 			for (AStorageActor* S = *It; S; S = S->GetAbove())
@@ -2253,13 +2919,14 @@ void AErewhonGameMode::SpawnSavedObjects()
 	for (const FSavedCart& Saved : WorldSave->Carts)
 	{
 		ACart* Cart = GetWorld()->SpawnActorDeferred<ACart>(ACart::StaticClass(), Saved.Transform);
-		Cart->Setup(Saved.OwnerKey, Saved.OwnerName);
+		Cart->Setup(Saved.OwnerKey, Saved.OwnerName, static_cast<ECartKind>(Saved.Kind));
 		for (int32 i = 0; i < Saved.Wood.Num() && i < Cart->EditWood().Num(); ++i)
 		{
 			Cart->EditWood()[i] = Saved.Wood[i];
 		}
 		Cart->FinishSpawning(Saved.Transform);
 		Carts.Add(Cart);
+		Cart->SetEngaged(Saved.bEngaged);
 	}
 	TArray<AStorageActor*> Storages;
 	for (const FSavedStorage& Saved : WorldSave->Storages)
@@ -2277,9 +2944,15 @@ void AErewhonGameMode::SpawnSavedObjects()
 		{
 			Storage->SetLiquid(Saved.Liquid.IsNone() ? ErewhonApothecary::Water : Saved.Liquid, Saved.Water);
 		}
+		// Une étagère d'avant les cinq emplacements par étage : la pile de chaque étage va au premier emplacement.
+		const bool bOldShelf = Saved.Kind == static_cast<uint8>(EStorageKind::Shelf) && Saved.Slots.Num() == ErewhonApothecary::ShelfRows;
 		for (int32 i = 0; i < Saved.Slots.Num() && i < Storage->EditSlots().Num(); ++i)
 		{
-			Storage->EditSlots()[i] = Saved.Slots[i];
+			const int32 Into = bOldShelf ? i * ErewhonApothecary::ShelfSlotsPerRow : i;
+			if (Storage->EditSlots().IsValidIndex(Into))
+			{
+				Storage->EditSlots()[Into] = Saved.Slots[i];
+			}
 		}
 		Storage->FinishSpawning(Saved.Transform);
 		Storages.Add(Storage);
@@ -2290,6 +2963,31 @@ void AErewhonGameMode::SpawnSavedObjects()
 		else if (Storages.IsValidIndex(Saved.Below) && Saved.Below < Storages.Num() - 1)
 		{
 			Storage->StackOn(Storages[Saved.Below]);
+		}
+	}
+	// Les bhuraks, leur harnachement et le contenu de leurs sacoches.
+	const int32 BagSize = ErewhonPlaceables::Capacity(EStorageKind::Saddlebag);
+	for (const FSavedBhurak& Saved : WorldSave->Bhuraks)
+	{
+		ABhurak* Bhurak = SpawnBhurak(Saved.Transform, Saved.OwnerKey, Saved.OwnerName, Saved.Coat);
+		Bhurak->SetHarness(Saved.bHarness);
+		for (int32 Slot = 0; Slot < ABhurak::GearSlots && Slot < Saved.Gear.Num(); ++Slot)
+		{
+			if (Saved.Gear[Slot].IsNone())
+			{
+				continue;
+			}
+			AStorageActor* Bag = nullptr;
+			if (Saved.Gear[Slot] == ABhurak::SaddlebagItem)
+			{
+				Bag = SpawnStorage(EStorageKind::Saddlebag, Bhurak->GearTransform(Slot) * Bhurak->GetActorTransform(), Saved.OwnerKey, Saved.OwnerName);
+				for (int32 i = 0; i < BagSize && Saved.BagSlots.IsValidIndex(Slot * BagSize + i) && i < Bag->EditSlots().Num(); ++i)
+				{
+					Bag->EditSlots()[i] = Saved.BagSlots[Slot * BagSize + i];
+				}
+				Bag->Commit();
+			}
+			Bhurak->SetGear(Slot, Saved.Gear[Slot], Bag);
 		}
 	}
 }

@@ -32,6 +32,7 @@ void ASectorManager::BeginPlay()
 	{
 		HarvestHandle = State->OnPlantHarvestChanged.AddUObject(this, &ASectorManager::OnPlantHarvestChanged);
 		OwnerHandle = State->OnSectorOwnerChanged.AddUObject(this, &ASectorManager::OnSectorOwnerChanged);
+		FieldHandle = State->OnFieldChanged.AddUObject(this, &ASectorManager::OnFieldChanged);
 		VillageHandle = State->OnVillageChanged.AddWeakLambda(this, [this]()
 		{
 			// Pavés, tailleur, panneaux, lanternes : tous les secteurs se refont.
@@ -64,6 +65,7 @@ void ASectorManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		State->OnPlantHarvestChanged.Remove(HarvestHandle);
 		State->OnSectorOwnerChanged.Remove(OwnerHandle);
+		State->OnFieldChanged.Remove(FieldHandle);
 		State->OnVillageChanged.Remove(VillageHandle);
 	}
 	if (UErewhonUserSettings* User = UErewhonUserSettings::Get())
@@ -75,6 +77,14 @@ void ASectorManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ASectorManager::Tick(float DeltaSeconds)
 {
+	for (const FIntPoint& Sector : DirtyFields)
+	{
+		if (const TObjectPtr<ASector>* Found = Loaded.Find(Sector); Found && *Found)
+		{
+			(*Found)->RefreshField();
+		}
+	}
+	DirtyFields.Reset();
 	Super::Tick(DeltaSeconds);
 	Refresh();
 }
@@ -260,6 +270,11 @@ void ASectorManager::OnSectorOwnerChanged(const FIntPoint& Sector)
 			Loaded.Remove(Sector + Offset);
 		}
 	}
+}
+
+void ASectorManager::OnFieldChanged(const FIntPoint& Sector)
+{
+	DirtyFields.Add(Sector);
 }
 
 void ASectorManager::OnPlantHarvestChanged(const FIntPoint& Sector, int32 PlantIndex, bool bHarvested)

@@ -94,6 +94,13 @@ struct EREWHON_API FSectorLayout
 	/** Places de terre : autour des cabanes, au bout d'un chemin d'accès. */
 	TArray<FClearing> Clearings;
 
+	/** Les champs du fermier (rectangles monde, alignés sur les cases de ErewhonFarm). */
+	TArray<FBox2D> Fields;
+
+	/** Un secteur de champs est clos de barrières ; un portique sur chaque côté qu'un chemin traverse (bits nord, sud, est, ouest). */
+	bool bFenced = false;
+	uint8 FenceGates = 0;
+
 	/** Panneaux indicateurs aux carrefours de la route (rendu seulement). */
 	TArray<FSignpostSpot> Signposts;
 

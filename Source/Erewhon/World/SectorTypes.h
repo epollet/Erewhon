@@ -36,6 +36,8 @@ enum class EShopKind : uint8
 	SectorManager,   // vend et reprend les secteurs, les aménage
 	Tailor,          // vend et rachète les vêtements
 	Apothecary,      // pas un commerce : la maison de l'apothicaire, sur un secteur acheté (voir AApothecary)
+	Breeder,         // l'éleveur : bhuraks (dans sa grange) et leur harnachement
+	Workshop,        // l'atelier : charrette, outils tractés (dans sa cour)
 };
 
 /**
