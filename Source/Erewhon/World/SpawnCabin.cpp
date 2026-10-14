@@ -118,7 +118,7 @@ FText AMerchant::GetInteractionLabel() const
 {
 	switch (Kind)
 	{
-	case EShopKind::SectorManager: return LOCTEXT("TalkToManager", "Parler au gérant des secteurs");
+	case EShopKind::SectorManager: return LOCTEXT("TalkToManager", "Parler au maire");
 	case EShopKind::Tailor:        return LOCTEXT("TalkToTailor", "Parler à la couturière");
 	default:                       return LOCTEXT("TalkToMerchant", "Parler au marchand");
 	}
@@ -442,7 +442,7 @@ void ASpawnCabin::BuildCabin()
 	// Enseigne peinte au-dessus de la porte, sur un fond de bois sombre.
 	{
 		const FVector Sign(-HL - 4.4f, 0.f, GFloorTop + 280.f);
-		const TCHAR* Texture = Kind == EShopKind::SectorManager ? TEXT("T_sign_sector_manager")
+		const TCHAR* Texture = Kind == EShopKind::SectorManager ? TEXT("T_sign_town_hall")
 			: Kind == EShopKind::Tailor ? TEXT("T_sign_tailor")
 			: Kind == EShopKind::Apothecary ? TEXT("T_sign_apothecary") : TEXT("T_sign_general_store");
 		if (AddPicture(this, Root, Sign, 200.f, 84.f, 0.f, Texture))
@@ -1015,18 +1015,6 @@ void ASpawnCabin::BuildApothecaryInterior()
 		AddShape(this, Root, EShape::Cylinder, FVector(Back - 40.f, -70.f, GFloorTop + 172.f), FVector(14, 14, 20), FLinearColor::FromSRGBColor(FColor(150, 90, 60)), FRotator::ZeroRotator, false);
 		AddShape(this, Root, EShape::Cylinder, FVector(Back - 40.f, 75.f, GFloorTop + 170.f), FVector(12, 12, 16), FLinearColor::FromSRGBColor(FColor(90, 120, 150)), FRotator::ZeroRotator, false);
 		AddShape(this, Root, EShape::Cylinder, FVector(Back - 40.f, 20.f, GFloorTop + 172.f), FVector(5, 5, 20), FLinearColor::FromSRGBColor(FColor(240, 230, 200)), FRotator::ZeroRotator, false);
-	}
-
-	// La crémaillère : une barre de fer d'un jambage à l'autre, deux tiges qui tiennent le chaudron au-dessus du feu.
-	{
-		const FLinearColor Iron = FLinearColor::FromSRGBColor(FColor(46, 44, 42));
-		const FVector Pot = ErewhonApothecary::CauldronLocal();
-		const float BarZ = Pot.Z + 60.f;
-		AddShape(this, Root, EShape::Cylinder, FVector(Pot.X, 0.f, BarZ), FVector(3.f, 3.f, ErewhonApothecary::HasFireplaceModel() ? 110.f : 124.f), Iron, FRotator(0.f, 0.f, 90.f), false);
-		for (const float SY : { -1.f, 1.f })
-		{
-			AddShape(this, Root, EShape::Cylinder, FVector(Pot.X, SY * 23.f, (BarZ + Pot.Z + 34.f) * 0.5f), FVector(1.6f, 1.6f, BarZ - Pot.Z - 34.f), Iron, FRotator::ZeroRotator, false);
-		}
 	}
 
 	// La souche de cheminée qui traverse le toit, au-dessus du pignon du fond.

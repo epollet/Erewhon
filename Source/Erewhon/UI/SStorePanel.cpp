@@ -92,7 +92,7 @@ void SStorePanel::Construct(const FArguments& InArgs)
 		Window(FText::FromString(ErewhonSpawn::ShopName(Kind)), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
 			GPanelWidth, bManager
-				? LOCTEXT("ManagerSubtitle", "« Un coin de prairie à vous ? Regardons la carte ensemble. »")
+				? LOCTEXT("ManagerSubtitle", "« Bienvenue à la mairie ! Un secteur, une amélioration, une vocation ? »")
 				: Kind == EShopKind::Tailor
 				? LOCTEXT("TailorSubtitle", "« Entrez donc ! Un peu d'étoffe, quelques poches de plus ? »")
 				: LOCTEXT("Subtitle", "« Bonjour ! Qu'est-ce qui vous ferait plaisir ? »"))
@@ -117,7 +117,8 @@ void SStorePanel::Rebuild()
 	{
 		return;
 	}
-	TSharedRef<SWidget> Content = Tab == ETab::Sectors ? BuildSectors() : Tab == ETab::Village ? BuildVillage() : Tab == ETab::Buy ? BuildBuy() : BuildSell();
+	TSharedRef<SWidget> Content = Tab == ETab::Sectors ? BuildSectors() : Tab == ETab::Village ? BuildVillage() : Tab == ETab::Class ? BuildClass()
+		: Tab == ETab::Buy ? BuildBuy() : BuildSell();
 	Body->SetContent(
 		SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 12)
@@ -135,13 +136,14 @@ TSharedRef<SWidget> SStorePanel::BuildTabs()
 	const TPair<ETab, FText> Entries[] = {
 		{ ETab::Sectors, LOCTEXT("TabSectors", "Secteurs") },
 		{ ETab::Village, LOCTEXT("TabVillage", "Village") },
+		{ ETab::Class, LOCTEXT("TabClass", "Classe") },
 		{ ETab::Buy, LOCTEXT("TabBuy", "Acheter") },
 		{ ETab::Sell, LOCTEXT("TabSell", "Vendre") },
 	};
 	for (const TPair<ETab, FText>& Entry : Entries)
 	{
 		// Chaque commerce son métier : la carte chez le gérant, le reste au General Store.
-		if ((Entry.Key == ETab::Sectors || Entry.Key == ETab::Village) != (Kind == EShopKind::SectorManager))
+		if ((Entry.Key == ETab::Sectors || Entry.Key == ETab::Village || Entry.Key == ETab::Class) != (Kind == EShopKind::SectorManager))
 		{
 			continue;
 		}
@@ -152,6 +154,51 @@ TSharedRef<SWidget> SStorePanel::BuildTabs()
 		];
 	}
 	return Tabs;
+}
+
+// ── Classe ───────────────────────────────────────────────────────────────────
+
+TSharedRef<SWidget> SStorePanel::BuildClass()
+{
+	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
+	const UErewhonSettings& Settings = UErewhonSettings::Get();
+	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
+	const auto ClassCard = [&](EPlayerClass Class, const FText& Name, const FText& Description, int32 Price)
+	{
+		const bool bCurrent = State->GetPlayerClass() == Class;
+		const uint8 Value = static_cast<uint8>(Class);
+		TSharedRef<SWidget> Action = bCurrent
+			? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("CurrentClass", "✓ Votre classe")).Font(Font(11, true)).ColorAndOpacity(Leaf))
+			: Button(Price > 0 ? FText::Format(LOCTEXT("ChooseFor", "Devenir · {0}"), CoinsText(Price)) : LOCTEXT("ChooseFree", "Choisir · gratuit"),
+				[WeakController, Value]() { if (WeakController.IsValid()) { WeakController->ServerChooseClass(Value); } },
+				EButton::Primary, State->GetCoins() >= Price, 170.f, 11);
+		return CardBox(
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Text(Name).Font(Font(14, true)).ColorAndOpacity(Ink)]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)[SNew(STextBlock).Text(Description).Font(Font(11)).ColorAndOpacity(MutedInk).AutoWrapText(true)]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(12, 0, 0, 0)[Action],
+			12.f);
+	};
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 10)
+		[
+			SNew(STextBlock).Text(LOCTEXT("ClassIntro", "On ne se choisit qu'une classe à la fois. Les produits (plantes, écrasés, breuvages, potions…) se prennent, s'utilisent et se vendent par tous ; les outils, eux, sont réservés à qui sait s'en servir."))
+			.Font(Font(11)).ColorAndOpacity(Ink).AutoWrapText(true)
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
+		[
+			ClassCard(EPlayerClass::None, LOCTEXT("ClassNone", "Sans classe particulière"), LOCTEXT("ClassNoneDesc", "Libre comme l'air : on cueille, on vend, on se promène."), 0)
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			ClassCard(EPlayerClass::Apothecary, LOCTEXT("ClassApothecary", "Apothicaire"),
+				LOCTEXT("ClassApothecaryDesc", "Bâtit l'apothicairerie et sa remise, se sert du mortier, du chaudron et de son support, du séchoir et de l'atelier."),
+				Settings.ApothecaryClassPrice)
+		];
 }
 
 // ── Secteurs ─────────────────────────────────────────────────────────────────
@@ -479,6 +526,7 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 		}
 		const bool bOwned = Def->IsBackpack() ? State->GetBackpack()->IsOwned() : Def->IsUnique() && State->GetInventory()->Owns(Def->Id);
 		const bool bAfford = State->GetCoins() >= Def->BuyPrice;
+		const bool bForbidden = Def->bApothecaryOnly && !State->IsApothecary();
 		const FName Id = Def->Id;
 		TSharedRef<SWidget> ItemCard = CardBox(
 			SNew(SVerticalBox)
@@ -490,9 +538,9 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 0, 0, 8)[CoinBadge(Def->BuyPrice, 10)]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				Button(bOwned ? LOCTEXT("Owned", "Déjà à vous") : LOCTEXT("BuyItem", "Acheter"),
+				Button(bOwned ? LOCTEXT("Owned", "Déjà à vous") : bForbidden ? LOCTEXT("ApothecaryOnlyBuy", "Apothicaires") : LOCTEXT("BuyItem", "Acheter"),
 					[WeakController, Id]() { if (WeakController.IsValid()) { WeakController->ServerBuyItem(Id); } },
-					EButton::Primary, !bOwned && bAfford, 0.f, 11)
+					EButton::Primary, !bOwned && bAfford && !bForbidden, 0.f, 11)
 			],
 			10.f);
 		ItemCard->SetToolTip(ItemTooltip(*Def));

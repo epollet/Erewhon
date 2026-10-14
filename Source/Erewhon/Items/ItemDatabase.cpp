@@ -69,6 +69,8 @@ namespace
 		Obj->TryGetNumberField(TEXT("max_stack"), Def.MaxStack);
 		Def.MaxStack = FMath::Max(1, Def.MaxStack);
 		Obj->TryGetBoolField(TEXT("harvest_tool"), Def.bHarvestTool);
+		Obj->TryGetBoolField(TEXT("holdable"), Def.bHoldable);
+		Obj->TryGetBoolField(TEXT("apothecary_only"), Def.bApothecaryOnly);
 		Def.Color = ParseColor(Obj, TEXT("color"), FLinearColor::White);
 
 		if (Obj->TryGetStringField(TEXT("clothing_slot"), Text))

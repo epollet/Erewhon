@@ -40,6 +40,7 @@ PAINTINGS: dict[str, tuple[str, str]] = {
     "map_wall": ("a hand-painted parchment map of a countryside divided into a grid of square plots, meadows, a crossroads of dirt roads and a small cottage at the center, compass rose, no readable text, the parchment fills the entire frame", "4:3"),
     "sign_apothecary": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the word \"Apothecary\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
     "flame": ("a single stylized hand-painted campfire flame shape seen from the front: one tall soft teardrop of fire with a few licking tongues, bright yellow-white core fading to orange then deep red at the tips, centered, filling the frame height, on a pure flat black background, nothing else", "1:1"),
+    "sign_town_hall": ("a plain classic rectangular wooden shop sign: a few horizontal dark weathered planks, the word \"Mairie\" painted in large clean cream serif capital letters, centered, no decorations, no flowers, no symbols, no border ornaments, the sign fills the entire frame edge to edge, flat front view", "21:9"),
     "moon": ("a full moon seen through a telescope: a perfectly round pale cream and soft grey disc with gentle painted craters and maria, softly glowing edge, centered, filling about 90% of the frame, on a pure flat black background, nothing else", "1:1"),
 }
 
@@ -93,6 +94,13 @@ ICONS: dict[str, str] = {
     "workbench": "a small rustic apothecary workbench with jars, twine and scissors",
     "mushroom_cep": "a pair of plump wild porcini mushrooms with brown caps",
     "mushroom_chanterelle": "a small handful of golden chanterelle mushrooms",
+    "pitcher": "an empty rustic glazed terracotta water pitcher with a handle",
+    "pitcher_water": "a rustic glazed terracotta water pitcher with a handle, filled to the brim with clear fresh water",
+    "pitcher_brew": "a rustic glazed terracotta pitcher with a handle, filled with a glowing colorful herbal brew giving off a little steam",
+    "vial": "a single small empty clear glass vial with a cork stopper",
+    "cauldron_stand": "a black wrought iron tripod stand with an adjustable ratchet hook for hanging a cauldron over a fire",
+    "herbal_book": "a thick old leather-bound herbal recipe book with a pressed flower and a brass clasp on the cover",
+    "firewood_rack": "a rustic wooden firewood rack stacked with split logs",
     "firewood": "a small bundle of dry firewood sticks and kindling tied with a twine string",
     "crushed_grass": "a small wooden bowl of crushed green grass paste",
     "crushed_flower_white": "a small wooden bowl of crushed white daisy petals with yellow specks",
@@ -120,6 +128,76 @@ ICON_PROMPT = (
 # ── Modèles 3D (Gemini → Meshy) ─────────────────────────────────────────────
 # Une image de concept est générée d'abord, puis convertie en modèle par Meshy.
 MODELS: dict[str, dict] = {
+    "cauldron_stand": {
+        "subject": "a black wrought iron cauldron stand for an open hearth: three splayed legs, one tall upright post at the back with a toothed ratchet bar, and a horizontal arm at the top ending in a hanging chain with a hook, empty, no cauldron, no fire",
+        "polycount": 4000,
+        "ai_model": "meshy-6-lite",
+    },
+    "firewood_rack": {
+        "subject": "a rustic wooden firewood rack: a simple open frame of planks with two shelves, half filled with neatly stacked short split firewood logs",
+        "polycount": 5000,
+        "ai_model": "meshy-6-lite",
+    },
+    "pitcher": {
+        "subject": "a rustic glazed terracotta water pitcher with a round belly, a spout and a handle, empty, standing upright, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_grass": {
+        "subject": "a small bundle of freshly cut long green grass stems tied in the middle with a twine string, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_flower_white": {
+        "subject": "a small bunch of freshly picked white daisies with green stems tied with a twine string, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_flower_blue": {
+        "subject": "a small bunch of freshly picked blue cornflowers with green stems tied with a twine string, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_flower_purple": {
+        "subject": "a small bunch of freshly picked violet bellflowers with green stems tied with a twine string, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_herb": {
+        "subject": "a small bunch of freshly picked thyme sprigs tied with a twine string, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_fern": {
+        "subject": "two freshly cut green fern fronds tied together at the stems with a twine string, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_broadleaf": {
+        "subject": "a few freshly picked broad green plantain leaves on short stems tied with a twine string, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_weed_dock": {
+        "subject": "a bunch of freshly cut dock leaves with reddish seed stalks tied with a twine string, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_weed_nettle": {
+        "subject": "a small bunch of freshly cut nettle stems with serrated leaves tied with a twine string, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_mushroom_cep": {
+        "subject": "two freshly picked porcini mushrooms lying side by side, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
+    "bundle_mushroom_chanterelle": {
+        "subject": "a small heap of freshly picked golden chanterelle mushrooms, lying on nothing, isolated",
+        "polycount": 2500,
+        "ai_model": "meshy-6-lite",
+    },
     "fountain": {
         "subject": "a rustic village stone water fountain seen from the front three-quarter: a tall sturdy fieldstone pillar with a bronze spout high up near its top, pouring water straight down onto an empty flat stone slab at ground level directly in front of the pillar; a small stone basin on the left side only; nothing at all standing on the slab, no bucket, no barrel, no pot",
         "polycount": 8000,

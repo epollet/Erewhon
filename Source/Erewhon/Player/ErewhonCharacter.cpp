@@ -1,4 +1,5 @@
 #include "Player/ErewhonCharacter.h"
+#include "EngineUtils.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/AudioComponent.h"
@@ -532,7 +533,7 @@ void AErewhonCharacter::ApplyAppearance()
 		if (UStaticMesh* HandMesh = Cast<UStaticMesh>(Hand->Mesh.TryLoad()))
 		{
 			// Modèle généré : ramené à ~45 cm, la base (le manche) au creux de la main.
-			const FTransform Fit = FitToHeight(HandMesh, 45.f);
+			const FTransform Fit = FitToHeight(HandMesh, Hand->bHoldable ? 24.f : 45.f);
 			const FVector Base = Held == HeldFirstPerson.Get() ? GHeldFirstPersonOffset : (AnimatedBody ? HeldThirdPersonBase : GHeldThirdPersonOffset);
 			Held->SetStaticMesh(HandMesh);
 			Held->SetRelativeLocation(Base + Held->GetRelativeRotation().RotateVector(Fit.GetLocation()));
@@ -699,16 +700,66 @@ void AErewhonCharacter::BagAction()
 	}
 	if (AStorageActor* Storage = Cast<AStorageActor>(Target.Interactable.Get()))
 	{
+		// Un pichet en main : on le remplit au récipient visé, ou on l'y vide.
+		const FName Hand = State->GetInventory()->GetHandItem();
+		if ((Hand == ErewhonApothecary::EmptyPitcher || !ErewhonApothecary::LiquidOfPitcher(Hand).IsNone())
+			&& (Storage->GetKind() == EStorageKind::Barrel || Storage->GetKind() == EStorageKind::Cauldron) && Storage->IsOwnedBy(State->GetPlayerKey()))
+		{
+			if (Storage->GetKind() == EStorageKind::Cauldron && !State->IsApothecary())
+			{
+				PC->ShowToast(LOCTEXT("ApothecaryOnly", "Réservé aux apothicaires : choisissez cette classe à la mairie."));
+				return;
+			}
+			PC->ServerStartPour(Storage, 4, NAME_None, 1);
+			return;
+		}
+		// Le rack à petit bois : chacun peut s'y servir.
+		if (Storage->GetKind() == EStorageKind::FirewoodRack)
+		{
+			PC->OpenStorage(Storage);
+			return;
+		}
 		if (Storage->IsOwnedBy(State->GetPlayerKey()))
 		{
-			// Le mortier et le chaudron servent à préparer ; la table ne s'ouvre pas.
-			switch (Storage->GetKind())
+			// Les outils de l'apothicaire : à l'apothicaire seulement.
+			const EStorageKind StorageKind = Storage->GetKind();
+			const bool bTool = StorageKind == EStorageKind::Mortar || StorageKind == EStorageKind::Cauldron || StorageKind == EStorageKind::Workbench
+				|| StorageKind == EStorageKind::DryingRack || StorageKind == EStorageKind::CauldronStand;
+			if (bTool && !State->IsApothecary())
 			{
-			case EStorageKind::Mortar:
+				PC->ShowToast(LOCTEXT("ApothecaryOnly", "Réservé aux apothicaires : choisissez cette classe à la mairie."));
+				return;
+			}
+			// Le mortier et le chaudron servent à préparer ; la table ne s'ouvre pas.
+			switch (StorageKind)
+			{
 			case EStorageKind::Cauldron:
+				PC->OpenCauldron(Storage);
+				break;
+			case EStorageKind::CauldronStand:
+			{
+				// Le support : on règle le chaudron qui y pend.
+				AStorageActor* Hung = nullptr;
+				for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It)
+				{
+					if (It->GetKind() == EStorageKind::Cauldron && FVector::Dist(It->GetActorLocation(), ErewhonApothecary::CauldronSpotOn(Storage).GetLocation()) <= 20.f)
+					{
+						Hung = *It;
+					}
+				}
+				if (Hung)
+				{
+					PC->OpenCauldron(Hung);
+				}
+				else
+				{
+					PC->ShowToast(LOCTEXT("StandEmpty", "Posez un chaudron sur le support : prenez-le et visez la cheminée."));
+				}
+				break;
+			}
+			case EStorageKind::Mortar:
 			case EStorageKind::Workbench:
-				PC->OpenApothecary(Storage, static_cast<uint8>(Storage->GetKind() == EStorageKind::Cauldron ? ErewhonApothecary::ECraft::Cauldron
-					: Storage->GetKind() == EStorageKind::Workbench ? ErewhonApothecary::ECraft::Workbench : ErewhonApothecary::ECraft::Mortar));
+				PC->OpenApothecary(Storage, static_cast<uint8>(StorageKind == EStorageKind::Workbench ? ErewhonApothecary::ECraft::Workbench : ErewhonApothecary::ECraft::Mortar));
 				break;
 			case EStorageKind::Potpourri:
 				break;   // il parfume, c'est tout
@@ -728,7 +779,15 @@ void AErewhonCharacter::BagAction()
 	}
 	if (ACart* Cart = Cast<ACart>(Target.Interactable.Get()))
 	{
-		PC->ServerToggleDrive(Cart);
+		// Devant les brancards : on la conduit ; ailleurs, on ouvre son chargement de petit bois.
+		if (Cart->IsAtHandles(GetActorLocation()) || !Cart->IsOwnedBy(State->GetPlayerKey()))
+		{
+			PC->ServerToggleDrive(Cart);
+		}
+		else
+		{
+			PC->OpenCart(Cart);
+		}
 		return;
 	}
 	if (ABackpack* Aimed = Cast<ABackpack>(Target.Interactable.Get()))
@@ -1202,6 +1261,10 @@ void AErewhonCharacter::UpdatePlacement()
 		else if (!bCart && Kind == EStorageKind::Potpourri)
 		{
 			Size = FVector(28.f, 28.f, 14.f);
+		}
+		else if (!bCart && Kind == EStorageKind::CauldronStand)
+		{
+			Size = FVector(70.f, 70.f, 150.f);
 		}
 		Fit = FTransform(FRotator::ZeroRotator, FVector(0, 0, Size.Z * 0.5f), Size / 100.f);
 	}

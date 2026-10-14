@@ -179,6 +179,11 @@ void SInventoryPanel::Construct(const FArguments& InArgs)
 	Controller = InArgs._Controller;
 	OpenedBag = InArgs._Bag;
 	OpenedStorage = InArgs._Storage;
+	OpenedCart = InArgs._Cart;
+	if (ACart* Cart = OpenedCart.Get())
+	{
+		Cart->OnWoodChanged.AddSP(this, &SInventoryPanel::Rebuild);
+	}
 	if (AStorageActor* Storage = OpenedStorage.Get())
 	{
 		Storage->OnStorageChanged.AddSP(this, &SInventoryPanel::Rebuild);
@@ -203,7 +208,8 @@ void SInventoryPanel::Construct(const FArguments& InArgs)
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	ChildSlot
 	[
-		Window(OpenedStorage.IsValid() ? FText::Format(LOCTEXT("TitleStorage", "Inventaire et {0}"), ErewhonPlaceables::KindName(OpenedStorage->GetKind()).ToLower())
+		Window(OpenedCart.IsValid() ? LOCTEXT("TitleCart", "Inventaire et charrette")
+			: OpenedStorage.IsValid() ? FText::Format(LOCTEXT("TitleStorage", "Inventaire et {0}"), ErewhonPlaceables::KindName(OpenedStorage->GetKind()).ToLower())
 			: ShowsBag() ? LOCTEXT("TitleBag", "Inventaire et sac à dos") : LOCTEXT("Title", "Inventaire"), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
 			Width)
@@ -226,6 +232,10 @@ UBackpackComponent* SInventoryPanel::GetBackpack() const
 const TArray<FInventorySlot>& SInventoryPanel::OtherSlots() const
 {
 	static const TArray<FInventorySlot> None;
+	if (const ACart* Cart = OpenedCart.Get())
+	{
+		return Cart->GetWood();
+	}
 	if (const AStorageActor* Storage = OpenedStorage.Get())
 	{
 		return Storage->GetSlots();
@@ -240,7 +250,11 @@ void SInventoryPanel::MoveItem(bool bFromOther, int32 From, bool bToOther, int32
 	{
 		return;
 	}
-	if (AStorageActor* Storage = OpenedStorage.Get())
+	if (ACart* Cart = OpenedCart.Get())
+	{
+		Controller->ServerMoveCartItem(Cart, bFromOther, From, bToOther, To);
+	}
+	else if (AStorageActor* Storage = OpenedStorage.Get())
 	{
 		Controller->ServerMoveStorageItem(Storage, bFromOther, From, bToOther, To);
 	}
@@ -252,9 +266,9 @@ void SInventoryPanel::MoveItem(bool bFromOther, int32 From, bool bToOther, int32
 
 bool SInventoryPanel::ShowsBag() const
 {
-	if (OpenedStorage.IsValid())
+	if (OpenedStorage.IsValid() || OpenedCart.IsValid())
 	{
-		return true;   // la colonne de droite montre le conteneur ouvert
+		return true;   // la colonne de droite montre le conteneur ouvert, ou la charrette
 	}
 	const UBackpackComponent* Backpack = GetBackpack();
 	// Sur le dos, le sac reste fermé : il faut le poser pour y fouiller.
@@ -271,7 +285,11 @@ FReply SInventoryPanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& 
 	}
 	if (Key == EKeys::G && ShowsBag() && Controller.IsValid())
 	{
-		if (AStorageActor* Storage = OpenedStorage.Get())
+		if (ACart* Cart = OpenedCart.Get())
+		{
+			Controller->ServerStashInCart(Cart);
+		}
+		else if (AStorageActor* Storage = OpenedStorage.Get())
 		{
 			Controller->ServerStashInStorage(Storage);
 		}
@@ -299,6 +317,10 @@ FReply SInventoryPanel::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& 
 
 void SInventoryPanel::Discard(bool bBag, int32 SlotIndex)
 {
+	if (bBag && OpenedCart.IsValid())
+	{
+		return;   // on reprend son petit bois, on ne le jette pas depuis la charrette
+	}
 	const TArray<FInventorySlot>& Slots = bBag ? OtherSlots() : GetInventory()->GetSlots();
 	const UItemDatabase* Items = UItemDatabase::Get(Controller.Get());
 	const FItemDef* Def = Slots.IsValidIndex(SlotIndex) && !Slots[SlotIndex].IsEmpty() && Items ? Items->Find(Slots[SlotIndex].ItemId) : nullptr;
@@ -373,6 +395,10 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(bool bBag, int32 SlotIndex, const
 			{
 				MoveItem(true, SlotIndex, false, INDEX_NONE);   // reprendre dans ses poches
 			}
+			else if (GetInventory()->GetSlots().IsValidIndex(SlotIndex) && GetInventory()->GetSlots()[SlotIndex].ItemId == TEXT("herbal_book"))
+			{
+				PC->OpenBook();   // le livre se lit
+			}
 			else if (OpenedStorage.IsValid() && OpenedStorage->GetKind() == EStorageKind::Shelf)
 			{
 				MoveItem(false, SlotIndex, true, INDEX_NONE);   // devant les étagères, un clic y range l'objet (on ne boit pas par mégarde)
@@ -399,6 +425,31 @@ TSharedRef<SWidget> SInventoryPanel::BuildSlot(bool bBag, int32 SlotIndex, const
 
 TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 {
+	if (const ACart* Cart = OpenedCart.Get())
+	{
+		TSharedRef<SUniformGridPanel> Grid = SNew(SUniformGridPanel).SlotPadding(3.f);
+		for (int32 i = 0; i < Cart->GetWood().Num(); ++i)
+		{
+			Grid->AddSlot(i, 0)[BuildSlot(true, i, BagAccent, FText::GetEmpty())];
+		}
+		return SNew(SBox).WidthOverride(ColumnWidth(GBagColumns))
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+				[
+					SNew(STextBlock).Text(LOCTEXT("CartHeader", "Charrette")).Font(Font(11, true)).ColorAndOpacity(BagAccent)
+				]
+				+ SVerticalBox::Slot().AutoHeight()[Separator()]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)[Grid]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+				[
+					SNew(STextBlock).Text(Cart->HasLoads()
+						? LOCTEXT("CartBusy", "Elle porte des conteneurs : pas de place pour du petit bois en vrac.")
+						: LOCTEXT("CartHint", "Du petit bois en vrac, trente brassées. [G] y charger tout le vôtre."))
+					.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
+				]
+			];
+	}
 	if (const AStorageActor* Shelf = OpenedStorage.Get(); Shelf && Shelf->GetKind() == EStorageKind::Shelf)
 	{
 		// L'étagère ouverte, dessinée comme elle est : ses étages de haut en bas, une pile par étage.
@@ -508,7 +559,9 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 				[
-					SNew(STextBlock).Text(Opened->GetKind() == EStorageKind::DryingRack
+					SNew(STextBlock).Text(Opened->GetKind() == EStorageKind::FirewoodRack
+						? LOCTEXT("WoodRackHint", "Du petit bois, dix brassées par place. Chacun peut s'y servir. [G] y ranger le vôtre.")
+						: Opened->GetKind() == EStorageKind::DryingRack
 						? LOCTEXT("RackHint", "Des plantes, dix par crochet : elles sèchent en quatre minutes. [G] y ranger toutes vos plantes.")
 						: LOCTEXT("StorageHint", "Des plantes seulement. [G] y ranger toutes vos plantes."))
 					.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)

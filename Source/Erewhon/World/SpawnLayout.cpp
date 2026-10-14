@@ -34,7 +34,7 @@ namespace ErewhonSpawn
 	{
 		switch (Kind)
 		{
-		case EShopKind::SectorManager: return TEXT("Sector Manager");
+		case EShopKind::SectorManager: return TEXT("Mairie");
 		case EShopKind::Tailor:        return TEXT("Tailor");
 		default:                       return TEXT("General Store");
 		}

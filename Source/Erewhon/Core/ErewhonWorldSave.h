@@ -40,6 +40,10 @@ struct FSavedPlayer
 
 	UPROPERTY()
 	TArray<FInventorySlot> BackpackSlots;
+
+	/** La classe choisie à la mairie (EPlayerClass). */
+	UPROPERTY()
+	uint8 PlayerClass = 0;
 };
 
 USTRUCT()
@@ -98,6 +102,8 @@ struct FSavedCart
 	UPROPERTY() FString OwnerKey;
 	UPROPERTY() FString OwnerName;
 	UPROPERTY() FTransform Transform;
+	/** Le petit bois en vrac. */
+	UPROPERTY() TArray<FInventorySlot> Wood;
 };
 
 /** Une cagette ou un tonneau, posé au sol, sur une pile ou dans une charrette. */
@@ -119,8 +125,11 @@ struct FSavedStorage
 	/** Séchoir : le début du séchage de chaque place ; pot-pourri : l'heure où il s'éteint (horloge du monde). */
 	UPROPERTY() TArray<double> SlotTimes;
 	UPROPERTY() double ExpiresAt = 0.0;
-	/** Tonneau d'eau, chaudron : les litres d'eau. */
+	/** Tonneau, chaudron : le liquide et ses litres ; chaudron : sa température ; support : sa hauteur. */
 	UPROPERTY() float Water = 0.f;
+	UPROPERTY() FName Liquid;
+	UPROPERTY() float Temperature = 18.f;
+	UPROPERTY() float Level = 0.5f;
 };
 
 /** Sauvegarde serveur du monde (Saved/SaveGames/<WorldSaveSlot>.sav). */

@@ -262,4 +262,49 @@ On ajoutera 2 nouveaux type de secteur :
 ====================================================================
 
 Continue ce que tu faisais aavnt, check ou en est la fontaine.
-Aussi, en foret, les arbres doivent pouvoir être plus grand et plus gros (jusque x1.75)
+Aussi, en foret, les arbres doivent pouvoir être plus grand et plus gros (jusque x1.75), et il faut s'arranger pour que leur feuillage couvre la vue du ciel en quelque sorte.
+De plus, j'aimerais revoir l'évolution du relief entre secteurs. A partir de maintenant, les secteurs peuvent faire progresser le relief en positif ou negatif d'un bord à un autre. Par contre, les secteurs adjacent doivent impérativement avoir leur bordure au même niveau pour faire la transition. 
+Chaque type de secteur à une range plus ou moins importante de relief potentiel : 
+- Prairie : relativement plat
+- Lisiére : relativement plat
+- Foret : relief modéré
+
+
+=========================================================================
+
+Pour l'apoticairerie, j'aimerais favoriser la découverte des craft. Je pense donc :
+- Le chaudron a sa jauge d'eau, à remplir plus ou moins avec un tonneau
+- Plutot que de remplir directement avec le tonneau peu pratique, on peu rajouter un pichet contenant jusque 2L.
+- En ajoutant certaines plantes dans une bonne proportion, on obtiendra à la chauffe un certains breuvage
+- Pour faire chauffer, on met en route le feu, une jauge de température s'éléve. Quand le feu est arrété, la jauge redescend doucement.
+- Pour permettre de régler la température du breuvage, on ajoute le support de chaudron réglable en hauteur qui une fois équipé sur le feu, permet de poser le chaudron (donc maintenant, support sur feu et chaudron sur support)
+- Grace au support, on peut régler la hauteur du chaudron par rapport au feu. Plus le support est réglé bas, plus le chaudron prendra de la chaleur, plus il est haut, moins il prendra de chaleur (de 110° à 50° mettons).
+- Les breuvages demanderons une température plus ou moins faible, toujours une range plus ou moins grand, par exemple entre 60 et 70°, d'autre entre 83 et 87°, ...
+- On pourra ensuite transvaser le breuvage dans des pichets et tonneaux. Transvaser du liquide prend du temps, mettons 2L/s d'un récipient à un autre.
+- On pourra acheter des fioles. Ces fioles vides s'achéte chez le general store et peuvent être remplies avec les breuvages pour en faire des potions. Une potion consommée donne une fiole vide.
+- Crée des modéles pour les plantes récoltées, à utiliser lors de la mise en séchage. Aussi, sera t-il possible à partir du même modéle de la rendre "séchée" (plus claire, plus fine peut-être ?). Ainsi on pourra se servir de ces modéle pour les plantes dans les cagettes, ou autre
+- On renomme le sector manager -> Mairie.
+- A la mairie, on gére aussi la définition de classe. On peut se définir (un seul choix) :
+    - D'aucune classe particulière : gratuit
+    - Apoticaire : coute 500c
+- La classe d'apoticaire permet l'accès au chaudron, au mortier, à l'amélioration d'apoticairerie pour unsecteur que l'on détient, à l'extention aussi, à l'accès au chaudron et au mortier, au séchoir et à l'atelier d'apoticaire et à leur accès. Bref en gros un apoticaire seul peu se servir des outils d'apoticaire.
+- Par contre les produits (potions, plantes, breuvages, écrasés et autre) peuvent être pris, utilisés ou vendus par des joueurs non apoticaires
+- Ah et je propose d'ajouter un livre au general store, achetable et consultable page par page. Chaque page explique et montre un craft de breuvage faisable au chaudron. ça permet de ne pas tout faire au hasard. Le livre coutera 500c
+
+==================================================================================
+
+On ajoutera la classe fermier :
+- Peut acheter une faux : comme la cerpe mais récolte tout ce qui est à sa portée d'un coup en 2s (animation sur 2s donc)
+- Peut acheter 4 améliorations de secteur en champ : Nord ouest, nord est, sud ouest et sud est
+- Chaque amélioration dévérouille un champ et les chemins adjacent (à l'intérieur du secteur, on imagine un croix qui sépare le secteur en 4, et comme ça les liaisons aux route sont déjà compatibles)
+- Chaque amélioration coute 2000c
+- Une amélioration du fusion des 4 champs est dévérouillée par l'aquisition des 4 améliorations précédentes et permet de transformer la totalité du secteur en champs. Plus de chemin en croix pour séparer les champs. Coute 1500c.
+- Note sur les champs : Les champs sont de la terre grossiére pour le moment, ils auront besoins de différentes étapes de préparation : 
+    - Cultiver : retourne la terre : besoins d'une béche au generals store pour 200c
+    - Planter : avec un sac on peut disséminer des graines, je te laisse ajouter 3 types de sac de graine au general store (réel ou fictif).
+    - Pousse : aprés un jour on voit des petites pousses, au deuxiéme jour des plus grandes pousses et au 3éme c'est récoltable.
+    - Récolte : à la main, la cerpe ou la faux.
+
+On ajoutera également la possibilité d'acheter un Bhurak (une sorte de gros bovin poilu, si le joueur fait 1.7m le bhurak fait 1.8m). On eput acheter au general store un harnais que l'on peut équiper au bhurak. On peut aussi acheter des sacoches de bhurak et une selle de bhurak. Le harnais contient deux slot d'équipemet latéral et un central. On peut équiper une sacoche sur chacun des 3 emplacement, mais la selle uniquement au centre. Une sacoche contient autant u'un sac à dos. Si la selle est équipée, on peut monter le bhurak et se déplacer avec, bonus de 50% de vitesse. Quand on est sur le bhurak a coté d'une charette, on peut l'équiper pour que la charette soit tirée par le bhurak. On peut aussi faire la même chose en prenant la charette et en s'approchant du bhurak.
+
+Le bhurak coute 3000c, le harnais 500c, les sacoche 300c et la selle 500c.

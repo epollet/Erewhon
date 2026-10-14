@@ -289,7 +289,7 @@ TSharedRef<SWidget> SApothecaryPanel::BuildFire() const
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10, 0, 0, 0)
 		[
 			Button(LOCTEXT("FillCauldron", "Remplir au tonneau d'eau"),
-				[WeakController, WeakStation]() { if (WeakController.IsValid()) { WeakController->ServerFillCauldron(WeakStation.Get()); } },
+				[WeakController, WeakStation]() { if (WeakController.IsValid()) { WeakController->ServerStartPour(WeakStation.Get(), 3, NAME_None, 40); } },
 				EButton::Secondary, Water < ErewhonPlaceables::CauldronLiters - 0.01f, 0.f, 11)
 		],
 		8.f);

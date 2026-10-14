@@ -33,6 +33,8 @@
 #include "World/Apothecary.h"
 #include "World/ErewhonSound.h"
 #include "UI/SApothecaryPanel.h"
+#include "UI/SCauldronPanel.h"
+#include "UI/SBookPanel.h"
 #include "Net/UnrealNetwork.h"
 #include "EngineUtils.h"
 
@@ -309,15 +311,23 @@ void AErewhonPlayerController::NextAutoShot()
 			else if (ShotMenu == TEXT("cheats")) { OpenCheats(); }
 			else if (ShotMenu == TEXT("village")) { StoreKind = EShopKind::SectorManager; ShowMenu(SNew(SStorePanel).Controller(this).Kind(EShopKind::SectorManager).bVillageTab(true), true); }
 			else if (ShotMenu == TEXT("inventory")) { ToggleInventory(); }
-			else if (ShotMenu == TEXT("shelves") || ShotMenu == TEXT("mortar") || ShotMenu == TEXT("cauldron"))
+			else if (ShotMenu == TEXT("shelves") || ShotMenu == TEXT("mortar") || ShotMenu == TEXT("cauldron") || ShotMenu == TEXT("book"))
 			{
 				// Le premier meuble de ce genre.
+				if (ShotMenu == TEXT("book"))
+				{
+					OpenBook();
+				}
 				const EStorageKind Wanted = ShotMenu == TEXT("shelves") ? EStorageKind::Shelf : ShotMenu == TEXT("mortar") ? EStorageKind::Mortar : EStorageKind::Cauldron;
 				for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It)
 				{
 					if (It->GetKind() == Wanted)
 					{
-						Wanted == EStorageKind::Shelf ? OpenStorage(*It) : OpenApothecary(*It, static_cast<uint8>(Wanted == EStorageKind::Cauldron ? ErewhonApothecary::ECraft::Cauldron : ErewhonApothecary::ECraft::Mortar));
+						if (ShotMenu == TEXT("book"))
+						{
+							break;
+						}
+						Wanted == EStorageKind::Shelf ? OpenStorage(*It) : Wanted == EStorageKind::Cauldron ? OpenCauldron(*It) : OpenApothecary(*It, static_cast<uint8>(ErewhonApothecary::ECraft::Mortar));
 						break;
 					}
 				}
@@ -425,6 +435,28 @@ void AErewhonPlayerController::OpenInventory(ABackpack* Bag)
 	ShowMenu(SNew(SInventoryPanel).Controller(this).Bag(Bag), false);
 }
 
+void AErewhonPlayerController::OpenCart(ACart* Cart)
+{
+	OpenedCart = Cart;
+	ShowMenu(SNew(SInventoryPanel).Controller(this).Cart(Cart), false);
+}
+
+void AErewhonPlayerController::ServerMoveCartItem_Implementation(ACart* Cart, bool bFromCart, int32 From, bool bToCart, int32 To)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryMoveCartItem(this, Cart, bFromCart, From, bToCart, To));
+	}
+}
+
+void AErewhonPlayerController::ServerStashInCart_Implementation(ACart* Cart)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryStashInCart(this, Cart));
+	}
+}
+
 void AErewhonPlayerController::OpenStorage(AStorageActor* Storage)
 {
 	OpenedBag.Reset();
@@ -512,12 +544,49 @@ void AErewhonPlayerController::ServerStartCraft_Implementation(AStorageActor* St
 	}
 }
 
-void AErewhonPlayerController::ServerFillCauldron_Implementation(AStorageActor* Cauldron)
+void AErewhonPlayerController::ServerStartPour_Implementation(AStorageActor* Container, uint8 Op, FName Item, int32 Count)
 {
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
 	{
-		ReportResult(Mode->TryFillCauldron(this, Cauldron));
+		ReportResult(Mode->TryStartPour(this, Container, Op, Item, Count));
 	}
+}
+
+void AErewhonPlayerController::ServerAddIngredient_Implementation(AStorageActor* Cauldron, FName ItemId, int32 Count)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryAddIngredient(this, Cauldron, ItemId, Count));
+	}
+}
+
+void AErewhonPlayerController::ServerAdjustStand_Implementation(AStorageActor* Stand, float Level)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryAdjustStand(this, Stand, Level));
+	}
+}
+
+void AErewhonPlayerController::ServerChooseClass_Implementation(uint8 NewClass)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryChooseClass(this, NewClass));
+	}
+}
+
+void AErewhonPlayerController::OpenCauldron(AStorageActor* Cauldron)
+{
+	OpenedStation = Cauldron;
+	const TSharedRef<SWidget> Panel = SNew(SCauldronPanel).Controller(this).Cauldron(Cauldron);
+	ApothecaryWidget = Panel;
+	ShowMenu(Panel, false);
+}
+
+void AErewhonPlayerController::OpenBook()
+{
+	ShowMenu(SNew(SBookPanel).Controller(this), false);
 }
 
 void AErewhonPlayerController::ServerEmptyWater_Implementation(AStorageActor* Barrel)
@@ -556,12 +625,13 @@ void AErewhonPlayerController::PlayerTick(float DeltaTime)
 
 	// On ne repart pas avec la boutique ouverte, ni avec un sac posé derrière soi.
 	const APawn* MyPawn = GetPawn();
-	const AActor* Opened = OpenedBag.IsValid() ? static_cast<const AActor*>(OpenedBag.Get()) : OpenedStorage.Get();
+	const AActor* Opened = OpenedBag.IsValid() ? static_cast<const AActor*>(OpenedBag.Get()) : OpenedStorage.IsValid() ? static_cast<const AActor*>(OpenedStorage.Get()) : OpenedCart.Get();
 	if (Opened && OpenMenu.IsValid() && !bStoreOpen && MyPawn
 		&& FVector::Dist(MyPawn->GetActorLocation(), Opened->GetActorLocation()) > 450.f)
 	{
 		OpenedBag.Reset();
 		OpenedStorage.Reset();
+		OpenedCart.Reset();
 		CloseMenu();
 	}
 	if (bStoreOpen && OpenMenu.IsValid() && MyPawn

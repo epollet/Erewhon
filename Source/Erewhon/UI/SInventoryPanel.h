@@ -22,12 +22,14 @@ class UInventoryComponent;
 class SInventoryPanel : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SInventoryPanel) : _Controller(nullptr), _Bag(nullptr), _Storage(nullptr) {}
+	SLATE_BEGIN_ARGS(SInventoryPanel) : _Controller(nullptr), _Bag(nullptr), _Storage(nullptr), _Cart(nullptr) {}
 		SLATE_ARGUMENT(AErewhonPlayerController*, Controller)
 		/** Sac posé au sol qu'on vient d'ouvrir (nul : l'inventaire seul). */
 		SLATE_ARGUMENT(ABackpack*, Bag)
 		/** Ou une cagette, un tonneau, une étagère (ses quatre étages, de haut en bas) qu'on vient d'ouvrir. */
 		SLATE_ARGUMENT(class AStorageActor*, Storage)
+		/** Ou une charrette : son petit bois en vrac. */
+		SLATE_ARGUMENT(class ACart*, Cart)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -52,6 +54,7 @@ private:
 	TWeakObjectPtr<AErewhonPlayerController> Controller;
 	TWeakObjectPtr<ABackpack> OpenedBag;
 	TWeakObjectPtr<class AStorageActor> OpenedStorage;
+	TWeakObjectPtr<class ACart> OpenedCart;
 	TSharedPtr<SBox> Body;
 
 	/** Les cases affichées, pour savoir laquelle est survolée (touche A). */

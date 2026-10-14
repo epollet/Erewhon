@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "Inventory/InventoryComponent.h"
 #include "Player/Interactable.h"
+#include "World/Apothecary.h"
 #include "Storage.generated.h"
 
 class ACart;
@@ -19,10 +20,12 @@ enum class EStorageKind : uint8
 	Shelf,    // étagère à potions : 4 étages, une pile de 10 par étage
 	Table,    // table de travail : on y pose un mortier
 	Mortar,   // mortier : plantes → écrasés
-	Cauldron, // chaudron : pendu à la crémaillère d'une cheminée allumée, écrasés → potions
+	Cauldron, // chaudron : pendu au support d'une cheminée ; on y chauffe de l'eau et des ingrédients → breuvages
 	DryingRack, // séchoir : les plantes y sèchent
 	Workbench,  // petit atelier d'apothicaire : pots-pourris, teintures, bouquets
 	Potpourri,  // pot-pourri posé : parfume les alentours et apaise ceux qui passent, un temps
+	CauldronStand, // support de chaudron réglable en hauteur, posé dans la cheminée
+	FirewoodRack,  // rack à petit bois : 40 brassées, chacun peut s'y servir
 };
 
 /** Ce qu'on peut poser dans le monde depuis ses mains (objet de l'inventaire). */
@@ -69,6 +72,12 @@ namespace ErewhonPlaceables
 	/** Un chaudron posé près d'une cheminée s'accroche à sa crémaillère : le repère du crochet. */
 	EREWHON_API TOptional<FTransform> HookFor(const UObject* WorldContext, EStorageKind Kind, const FVector& Location);
 
+	/**
+	 * Un bouquet de plantes récoltées (SM_bundle_<plante>), long de Length (cm), au repère At (le long de Y) ;
+	 * séché (« dried_… ») : pâli et plus fin. Nul s'il n'y a pas de modèle pour cette plante.
+	 */
+	EREWHON_API class UStaticMeshComponent* AddBundle(AActor* Owner, USceneComponent* Parent, FName ItemId, const FTransform& At, float Length);
+
 	/** Nombre de cagettes au plus dans une pile. */
 	constexpr int32 MaxStack = 3;
 }
@@ -98,9 +107,17 @@ public:
 	const TArray<double>& GetSlotTimes() const { return SlotTimes; }
 	/** Pot-pourri : l'horloge du monde à laquelle il s'éteint. */
 	double GetExpiresAt() const { return ExpiresAt; }
-	/** Tonneau d'eau, chaudron : les litres d'eau qu'il contient. */
+	/** Tonneau, chaudron : le liquide qu'il contient (« water », « brew_speed »…) et combien de litres. */
 	float GetWater() const { return Water; }
-	bool IsWaterBarrel() const { return Kind == EStorageKind::Barrel && Water > 0.01f; }
+	FName GetLiquid() const { return Water > 0.01f ? Liquid : NAME_None; }
+	float GetCapacityLiters() const;
+	bool IsWaterBarrel() const { return Kind == EStorageKind::Barrel && Water > 0.01f && Liquid == TEXT("water"); }
+	bool HoldsLiquid() const { return (Kind == EStorageKind::Barrel || Kind == EStorageKind::Cauldron) && Water > 0.01f; }
+	/** Chaudron : sa température (°C) et l'avancée du breuvage en cours (s). */
+	float GetTemperature() const { return Temperature; }
+	float GetBrewProgress() const { return BrewProgress; }
+	/** Support de chaudron : sa hauteur (0 : au ras du feu, 1 : tout en haut). */
+	float GetLevel() const { return Level; }
 	bool IsOwnedBy(const FString& Key) const { return !Key.IsEmpty() && Key == OwnerKey; }
 	const FString& GetOwnerKey() const { return OwnerKey; }
 	const FString& GetOwnerName() const { return OwnerName; }
@@ -127,6 +144,10 @@ public:
 	void SetSlotTimes(const TArray<double>& Times) { SlotTimes = Times; }
 	void SetExpiresAt(double Time) { ExpiresAt = Time; }
 	void SetWater(float Liters);
+	/** Le liquide et sa quantité (tout liquide versé dans un récipient vide en devient le contenu). */
+	void SetLiquid(FName InLiquid, float Liters);
+	void SetLevel(float InLevel);
+	void SetBrewState(float InTemperature, float InProgress) { Temperature = InTemperature; BrewProgress = InProgress; }
 	TArray<FInventorySlot>& EditSlots() { return Slots; }
 	void Commit();
 	int32 StoreItem(FName ItemId, int32 Count);
@@ -154,6 +175,31 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_Water)
 	float Water = 0.f;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Water)
+	FName Liquid = TEXT("water");
+
+	UPROPERTY(Replicated)
+	float Temperature = ErewhonApothecary::RoomTemp;
+
+	UPROPERTY(Replicated)
+	float BrewProgress = 0.f;
+
+	UFUNCTION()
+	void OnRep_Level();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Level)
+	float Level = 0.5f;
+
+	/** Chaudron (serveur) : chauffe ou refroidit, et le breuvage prend s'il est juste. */
+	void UpdateBrewing(float DeltaSeconds);
+	float NetTimer = 0.f;
+	/** Support : la chaîne, du haut jusqu'au chaudron, qui suit la hauteur. */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> Chain;
+	/** Chaudron : la surface du liquide, à sa couleur. */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> Surface;
 
 	/** Ce que montre le meuble : les flacons de l'étagère, les bouquets du séchoir. */
 	void RefreshDisplay();
@@ -251,6 +297,16 @@ public:
 	static constexpr float WheelHalfTrack = 75.f;
 	static constexpr float AxleZ = WheelDiameter * 0.5f;
 	AStorageActor* GetLoad(int32 Slot) const { return Loads.IsValidIndex(Slot) ? Loads[Slot].Get() : nullptr; }
+	bool HasLoads() const { return Loads.ContainsByPredicate([](const TObjectPtr<AStorageActor>& L) { return L != nullptr; }); }
+
+	/** Le petit bois chargé en vrac (trois piles de dix), quand aucun conteneur n'occupe la charrette. */
+	static constexpr int32 WoodSlots = 3;
+	const TArray<FInventorySlot>& GetWood() const { return Wood; }
+	TArray<FInventorySlot>& EditWood() { return Wood; }
+	bool HasWood() const { return Wood.ContainsByPredicate([](const FInventorySlot& S) { return !S.IsEmpty(); }); }
+	/** Serveur : le petit bois a changé (affichage, inventaires ouverts). */
+	void CommitWood();
+	FOnInventoryChanged OnWoodChanged;
 
 	/** Repère (local) d'un emplacement de la plate-forme. */
 	static FTransform SlotTransform(int32 Slot);
@@ -306,4 +362,14 @@ private:
 
 	UPROPERTY(Replicated)
 	TArray<TObjectPtr<AStorageActor>> Loads;
+
+	UFUNCTION()
+	void OnRep_Wood() { CommitWood(); }
+
+	UPROPERTY(ReplicatedUsing = OnRep_Wood)
+	TArray<FInventorySlot> Wood;
+
+	/** Les bûches visibles sur la plate-forme. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UStaticMeshComponent>> WoodParts;
 };

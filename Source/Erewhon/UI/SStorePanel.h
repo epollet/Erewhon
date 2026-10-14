@@ -29,7 +29,7 @@ public:
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 
 private:
-	enum class ETab : uint8 { Sectors, Village, Buy, Sell };
+	enum class ETab : uint8 { Sectors, Village, Class, Buy, Sell };
 
 	void Rebuild();
 	void OnSectorOwnerChanged(const FIntPoint& Sector) { Rebuild(); }
@@ -39,6 +39,7 @@ private:
 	TSharedRef<SWidget> BuildBuy();
 	TSharedRef<SWidget> BuildSell();
 	TSharedRef<SWidget> BuildVillage();
+	TSharedRef<SWidget> BuildClass();
 	void OnVillageChanged() { Rebuild(); }
 
 	TWeakObjectPtr<AErewhonPlayerController> Controller;

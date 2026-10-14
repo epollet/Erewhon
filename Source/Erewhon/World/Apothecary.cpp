@@ -65,12 +65,12 @@ namespace ErewhonApothecary
 			? FVector(Back - 62.f, 0.f, ErewhonSpawn::CabinFloorTop + 23.f)
 			: FVector(Back - 42.f, 0.f, ErewhonSpawn::CabinFloorTop + 8.f);
 	}
-	FVector CauldronLocal() { return HearthLocal() + FVector(0.f, 0.f, 46.f); }   // le pied du chaudron, pendu au-dessus des flammes
+	FVector StandLocal() { return HearthLocal() * FVector(1.f, 1.f, 0.f) + FVector(0.f, 0.f, ErewhonSpawn::CabinFloorTop); }
 
 	bool IsShelvable(const FItemDef& Def)
 	{
 		const FString Id = Def.Id.ToString();
-		return Def.IsPotion() || Id == TEXT("potion_base") || Id == TEXT("potpourri") || Id.StartsWith(TEXT("crushed_")) || Id.StartsWith(TEXT("dye_"));
+		return Def.IsPotion() || Id == TEXT("vial") || Id == TEXT("potion_base") || Id == TEXT("potpourri") || Id.StartsWith(TEXT("crushed_")) || Id.StartsWith(TEXT("dye_"));
 	}
 
 	float ShelfRowZ(int32 Row)
@@ -233,7 +233,7 @@ namespace ErewhonApothecary
 		return HasHouse(State, Sector) && (State->GetBuildings(Sector) & ESectorBuilding::Storeroom) != 0;
 	}
 
-	TOptional<FTransform> HookTransform(const UObject* WorldContext, const FIntPoint& Sector)
+	TOptional<FTransform> StandSpot(const UObject* WorldContext, const FIntPoint& Sector)
 	{
 		const AErewhonGameState* State = AErewhonGameState::Get(WorldContext);
 		if (!HasHouse(State, Sector))
@@ -241,7 +241,31 @@ namespace ErewhonApothecary
 			return {};
 		}
 		const FTransform House = HouseTransform(Sector, State->GetWorldSeed());
-		return FTransform(House.Rotator(), House.TransformPosition(CauldronLocal()));
+		return FTransform(House.Rotator(), House.TransformPosition(StandLocal()));
+	}
+
+	AStorageActor* FindStand(const UObject* WorldContext, const FIntPoint& Sector)
+	{
+		const TOptional<FTransform> Spot = StandSpot(WorldContext, Sector);
+		UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+		if (!Spot.IsSet() || !World)
+		{
+			return nullptr;
+		}
+		for (TActorIterator<AStorageActor> It(World); It; ++It)
+		{
+			if (It->GetKind() == EStorageKind::CauldronStand && !It->GetCarrier() && FVector::Dist(It->GetActorLocation(), Spot->GetLocation()) < 30.f)
+			{
+				return *It;
+			}
+		}
+		return nullptr;
+	}
+
+	FTransform CauldronSpotOn(const AStorageActor* Stand)
+	{
+		// Bas : le fond du chaudron touche presque les flammes ; haut : il pend 45 cm plus haut.
+		return FTransform(Stand->GetActorRotation(), Stand->GetActorLocation() + FVector(0.f, 0.f, 30.f + 45.f * Stand->GetLevel()));
 	}
 
 	AApothecary* FindHouse(const UObject* WorldContext, const FIntPoint& Sector)
@@ -261,17 +285,21 @@ namespace ErewhonApothecary
 		return nullptr;
 	}
 
-	AApothecary* HouseOfHungCauldron(const AStorageActor* Cauldron)
+	AApothecary* HouseOfHungCauldron(const AStorageActor* Cauldron, AStorageActor** OutStand)
 	{
 		if (!Cauldron || Cauldron->GetKind() != EStorageKind::Cauldron || Cauldron->GetCarrier())
 		{
 			return nullptr;
 		}
 		const FIntPoint Sector = ErewhonSector::FromWorld(Cauldron->GetActorLocation());
-		const TOptional<FTransform> Hook = HookTransform(Cauldron, Sector);
-		if (!Hook.IsSet() || FVector::Dist(Hook->GetLocation(), Cauldron->GetActorLocation()) > 20.f)
+		AStorageActor* Stand = FindStand(Cauldron, Sector);
+		if (!Stand || FVector::Dist(CauldronSpotOn(Stand).GetLocation(), Cauldron->GetActorLocation()) > 20.f)
 		{
 			return nullptr;
+		}
+		if (OutStand)
+		{
+			*OutStand = Stand;
 		}
 		return FindHouse(Cauldron, Sector);
 	}
@@ -293,6 +321,107 @@ namespace ErewhonApothecary
 		const bool bStore = HasStoreroom(State, Sector) && FMath::Abs(Local.X) < StoreroomHalfLength
 			&& Local.Y >= ErewhonSpawn::CabinHalfWidth && Local.Y < ErewhonSpawn::CabinHalfWidth + StoreroomDepth;
 		return bMain || bStore;
+	}
+
+	const TArray<FBrew>& Brews()
+	{
+		static const TArray<FBrew> List = []()
+		{
+			const auto C = [](const TCHAR* Plant) { return FName(*(FString(TEXT("crushed_")) + Plant)); };
+			const auto D = [](const TCHAR* Plant) { return FName(*(FString(TEXT("dried_")) + Plant)); };
+			TArray<FBrew> Out;
+			Out.Add({ TEXT("brew_speed"), TEXT("potion_speed"), NSLOCTEXT("ErewhonBrew", "Speed", "Breuvage de vitesse"),
+				{ { C(TEXT("flower_blue")), 5.f }, { C(TEXT("grass")), 2.f } }, 60.f, 70.f, 20.f });
+			Out.Add({ TEXT("brew_night"), TEXT("potion_night"), NSLOCTEXT("ErewhonBrew", "Night", "Breuvage de nyctalopie"),
+				{ { C(TEXT("flower_purple")), 5.f }, { D(TEXT("herb")), 2.f } }, 83.f, 87.f, 25.f });
+			Out.Add({ TEXT("brew_strength"), TEXT("potion_strength"), NSLOCTEXT("ErewhonBrew", "Strength", "Breuvage de force"),
+				{ { C(TEXT("weed_nettle")), 6.f }, { C(TEXT("broadleaf")), 2.f } }, 92.f, 100.f, 20.f });
+			Out.Add({ TEXT("brew_jump"), TEXT("potion_jump"), NSLOCTEXT("ErewhonBrew", "Jump", "Breuvage de saut"),
+				{ { C(TEXT("fern")), 5.f }, { C(TEXT("flower_white")), 2.f } }, 70.f, 78.f, 20.f });
+			Out.Add({ TEXT("brew_shrink"), TEXT("potion_shrink"), NSLOCTEXT("ErewhonBrew", "Shrink", "Breuvage de rapetissement"),
+				{ { C(TEXT("herb")), 4.f }, { D(TEXT("flower_white")), 3.f } }, 52.f, 58.f, 30.f });
+			Out.Add({ TEXT("brew_grow"), TEXT("potion_grow"), NSLOCTEXT("ErewhonBrew", "Grow", "Breuvage de grandissement"),
+				{ { C(TEXT("weed_dock")), 5.f }, { TEXT("mushroom_cep"), 1.f } }, 100.f, 106.f, 25.f });
+			return Out;
+		}();
+		return List;
+	}
+
+	const FBrew* FindBrew(FName Liquid)
+	{
+		return Brews().FindByPredicate([Liquid](const FBrew& B) { return B.Liquid == Liquid; });
+	}
+
+	const FBrew* MatchBrew(const TArray<FInventorySlot>& Ingredients, float Liters)
+	{
+		if (Liters < 0.5f)
+		{
+			return nullptr;
+		}
+		TMap<FName, int32> Totals;
+		for (const FInventorySlot& Slot : Ingredients)
+		{
+			if (!Slot.IsEmpty())
+			{
+				Totals.FindOrAdd(Slot.ItemId) += Slot.Count;
+			}
+		}
+		for (const FBrew& Brew : Brews())
+		{
+			bool bMatch = Totals.Num() == Brew.PerLiter.Num();
+			for (const TPair<FName, float>& Need : Brew.PerLiter)
+			{
+				const int32* Have = Totals.Find(Need.Key);
+				const float Wanted = Need.Value * Liters;
+				bMatch &= Have && *Have >= Wanted * 0.8f - 0.5f && *Have <= Wanted * 1.2f + 0.5f;
+			}
+			if (bMatch)
+			{
+				return &Brew;
+			}
+		}
+		return nullptr;
+	}
+
+	bool IsIngredient(const FItemDef& Def)
+	{
+		const FString Id = Def.Id.ToString();
+		return Def.Category == EItemCategory::Plant || Id.StartsWith(TEXT("crushed_")) || Id.StartsWith(TEXT("dried_"));
+	}
+
+	FText LiquidName(FName Liquid)
+	{
+		if (Liquid == Water)
+		{
+			return NSLOCTEXT("ErewhonBrew", "Water", "Eau");
+		}
+		const FBrew* Brew = FindBrew(Liquid);
+		return Brew ? Brew->Name : NSLOCTEXT("ErewhonBrew", "Nothing", "Vide");
+	}
+
+	FLinearColor LiquidColor(FName Liquid)
+	{
+		if (const FBrew* Brew = FindBrew(Liquid))
+		{
+			static const TMap<FName, FLinearColor> Colors = {
+				{ TEXT("brew_speed"), FLinearColor(0.25f, 0.5f, 1.f) }, { TEXT("brew_night"), FLinearColor(0.45f, 0.2f, 0.75f) },
+				{ TEXT("brew_strength"), FLinearColor(0.15f, 0.55f, 0.2f) }, { TEXT("brew_jump"), FLinearColor(0.55f, 0.85f, 0.2f) },
+				{ TEXT("brew_shrink"), FLinearColor(0.95f, 0.6f, 0.8f) }, { TEXT("brew_grow"), FLinearColor(0.95f, 0.55f, 0.15f) } };
+			const FLinearColor* Found = Colors.Find(Brew->Liquid);
+			return Found ? *Found : FLinearColor::White;
+		}
+		return FLinearColor(0.55f, 0.75f, 0.9f);
+	}
+
+	FName PitcherFor(FName Liquid)
+	{
+		return Liquid.IsNone() ? EmptyPitcher : FName(*(TEXT("pitcher_") + Liquid.ToString()));
+	}
+
+	FName LiquidOfPitcher(FName Item)
+	{
+		const FString Id = Item.ToString();
+		return Id.StartsWith(TEXT("pitcher_")) ? FName(*Id.RightChop(8)) : NAME_None;
 	}
 
 	TArray<FRecipe> Recipes(const UItemDatabase& Items, ECraft Craft)
@@ -321,13 +450,7 @@ namespace ErewhonApothecary
 			}
 			break;
 		case ECraft::Cauldron:
-			// Deux écrasés d'herbe font une base ; une base et deux écrasés d'une plante, une potion.
-			Add(TEXT("potion_base"), { { Crushed(TEXT("grass")), 2 } });
-			for (const TPair<const TCHAR*, const TCHAR*>& Potion : GPotions)
-			{
-				Add(Potion.Key, { { TEXT("potion_base"), 1 }, { Crushed(Potion.Value), 2 } });
-			}
-			break;
+			break;   // le chaudron brasse des breuvages (ErewhonApothecary::Brews)
 		case ECraft::Workbench:
 			// Le pot-pourri, de fleurs et d'herbes séchées.
 			Add(TEXT("potpourri"), { { TEXT("dried_flower_white"), 2 }, { TEXT("dried_flower_purple"), 2 }, { TEXT("dried_herb"), 1 } });

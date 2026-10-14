@@ -320,6 +320,7 @@ FText UInventoryComponent::UseSlot(int32 SlotIndex)
 		{
 			Slots[SlotIndex].Clear();
 		}
+		StoreItem(TEXT("vial"), 1);   // il reste la fiole vide (si l'on a de la place)
 		Commit();
 		return FText::GetEmpty();
 	}

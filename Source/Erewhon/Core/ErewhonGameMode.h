@@ -44,11 +44,17 @@ public:
 	FText TryStartCraft(AErewhonPlayerController* Controller, class AStorageActor* Station, FName Output, int32 Count);
 	FText TryBuyStoreroom(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 
-	// L'eau
-	/** Le chaudron puise dans les tonneaux d'eau tout proches, jusqu'à 10 L. */
-	FText TryFillCauldron(AErewhonPlayerController* Controller, class AStorageActor* Cauldron);
-	/** Vide un tonneau d'eau : il redevient un tonneau ordinaire. */
-	FText TryEmptyWater(AErewhonPlayerController* Controller, class AStorageActor* Barrel);
+	// Les liquides (2 L/s d'un récipient à l'autre)
+	/**
+	 * Op : 2 remplir des fioles au récipient (Count : combien) ; 4 le pichet qu'on tient en main, qu'on remplit
+	 * s'il est vide, qu'on vide dans le récipient s'il est plein.
+	 */
+	FText TryStartPour(AErewhonPlayerController* Controller, class AStorageActor* Container, uint8 Op, FName Item, int32 Count);
+	/** Vide un tonneau ou le chaudron (le liquide, et les ingrédients du chaudron) : perdu. */
+	FText TryEmptyWater(AErewhonPlayerController* Controller, class AStorageActor* Container);
+	FText TryAddIngredient(AErewhonPlayerController* Controller, class AStorageActor* Cauldron, FName ItemId, int32 Count);
+	FText TryAdjustStand(AErewhonPlayerController* Controller, class AStorageActor* Stand, float Level);
+	FText TryChooseClass(AErewhonPlayerController* Controller, uint8 NewClass);
 
 	// Sac à dos
 	FText TryDropBackpack(AErewhonPlayerController* Controller);
@@ -65,6 +71,9 @@ public:
 	FText TryToggleDrive(AErewhonPlayerController* Controller, class ACart* Cart);
 	FText TryMoveStorageItem(AErewhonPlayerController* Controller, class AStorageActor* Storage, bool bFromStorage, int32 From, bool bToStorage, int32 To);
 	FText TryStashInStorage(AErewhonPlayerController* Controller, class AStorageActor* Storage);
+	/** Le petit bois en vrac de la charrette. */
+	FText TryMoveCartItem(AErewhonPlayerController* Controller, class ACart* Cart, bool bFromCart, int32 From, bool bToCart, int32 To);
+	FText TryStashInCart(AErewhonPlayerController* Controller, class ACart* Cart);
 
 	// Triche (hôte, ou build de développement)
 	FText TryCheatSetCoins(AErewhonPlayerController* Controller, int32 Coins);
@@ -100,6 +109,13 @@ private:
 	void StepCraft(AErewhonPlayerController* Controller);
 	/** Le joueur est-il chez lui, assez près de sa maison (pour le feu) ? */
 	FText CheckAtHouse(AErewhonPlayerController* Controller, const class AApothecary* House) const;
+	/** Un transvasement en cours, par joueur. */
+	struct FPourOp { uint8 Op = 0; TWeakObjectPtr<class AStorageActor> Container; FName Item; };
+	TMap<TWeakObjectPtr<AErewhonPlayerController>, FPourOp> PourOps;
+	void StepPour(AErewhonPlayerController* Controller);
+	/** Seul un apothicaire se sert des outils de l'apothicairerie. */
+	FText CheckApothecary(AErewhonPlayerController* Controller) const;
+
 	/** Le joueur est-il à côté de son mortier ou de son chaudron ? */
 	FText CheckAtStation(AErewhonPlayerController* Controller, const class AStorageActor* Station) const;
 

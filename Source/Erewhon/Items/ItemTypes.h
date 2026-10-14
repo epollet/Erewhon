@@ -164,6 +164,14 @@ struct FItemDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	EPotionEffect PotionEffect = EPotionEffect::None;
 
+	/** Se tient en main (un pichet) sans être un outil. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	bool bHoldable = false;
+
+	/** Ne se vend qu'aux apothicaires (leurs outils). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	bool bApothecaryOnly = false;
+
 	// ── Plantes ──
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	FPlantSpawnDef Plant;
@@ -185,7 +193,7 @@ struct FItemDef
 	FSoftObjectPath Material;
 
 	bool IsValid() const { return !Id.IsNone(); }
-	bool IsEquipable() const { return Category == EItemCategory::Tool || Category == EItemCategory::Placeable; }
+	bool IsEquipable() const { return Category == EItemCategory::Tool || Category == EItemCategory::Placeable || bHoldable; }
 	bool IsPlaceable() const { return Category == EItemCategory::Placeable; }
 	bool IsClothing() const { return Category == EItemCategory::Clothing; }
 	bool IsPotion() const { return Category == EItemCategory::Potion && PotionEffect != EPotionEffect::None; }

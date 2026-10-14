@@ -74,9 +74,15 @@ public:
 	void OpenInventory(class ABackpack* Bag);
 	/** Inventaire, avec à côté le contenu d'une cagette ou d'un tonneau. */
 	void OpenStorage(class AStorageActor* Storage);
+	/** Inventaire, avec à côté le petit bois en vrac de la charrette. */
+	void OpenCart(class ACart* Cart);
 	void OpenStore(EShopKind Kind);
 	/** Son mortier ou son chaudron (meubles posés). */
 	void OpenApothecary(class AStorageActor* Station, uint8 Craft);
+	/** Le chaudron : eau, feu, hauteur, température, ingrédients, breuvage. */
+	void OpenCauldron(class AStorageActor* Cauldron);
+	/** Le livre des breuvages, page par page. */
+	void OpenBook();
 
 	/** Panneau de triche (Ctrl+Alt+ù puis Ctrl+Maj+*). */
 	void OpenCheats();
@@ -160,6 +166,12 @@ public:
 	void ServerStashInStorage(class AStorageActor* Storage);
 
 	UFUNCTION(Server, Reliable)
+	void ServerMoveCartItem(class ACart* Cart, bool bFromCart, int32 From, bool bToCart, int32 To);
+
+	UFUNCTION(Server, Reliable)
+	void ServerStashInCart(class ACart* Cart);
+
+	UFUNCTION(Server, Reliable)
 	void ServerBuyVillageUpgrade(uint8 Upgrade);
 
 	UFUNCTION(Server, Reliable)
@@ -185,8 +197,18 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerStopCraft();
 
+	/** Transvaser (voir AErewhonGameMode::TryStartPour). */
 	UFUNCTION(Server, Reliable)
-	void ServerFillCauldron(class AStorageActor* Cauldron);
+	void ServerStartPour(class AStorageActor* Container, uint8 Op, FName Item, int32 Count);
+
+	UFUNCTION(Server, Reliable)
+	void ServerAddIngredient(class AStorageActor* Cauldron, FName ItemId, int32 Count);
+
+	UFUNCTION(Server, Reliable)
+	void ServerAdjustStand(class AStorageActor* Stand, float Level);
+
+	UFUNCTION(Server, Reliable)
+	void ServerChooseClass(uint8 NewClass);
 
 	UFUNCTION(Server, Reliable)
 	void ServerEmptyWater(class AStorageActor* Barrel);
@@ -231,6 +253,7 @@ private:
 	EShopKind StoreKind = EShopKind::GeneralStore;
 	TWeakObjectPtr<class ABackpack> OpenedBag;
 	TWeakObjectPtr<class AStorageActor> OpenedStorage;
+	TWeakObjectPtr<class ACart> OpenedCart;
 	TWeakObjectPtr<AActor> OpenedStation;
 	TWeakPtr<SWidget> ApothecaryWidget;
 

@@ -89,6 +89,14 @@ namespace ErewhonPlaceables
 		{
 			return EStorageKind::Potpourri;
 		}
+		if (ItemId == TEXT("cauldron_stand"))
+		{
+			return EStorageKind::CauldronStand;
+		}
+		if (ItemId == TEXT("firewood_rack"))
+		{
+			return EStorageKind::FirewoodRack;
+		}
 		return {};
 	}
 
@@ -104,6 +112,8 @@ namespace ErewhonPlaceables
 		case EStorageKind::DryingRack: return TEXT("drying_rack");
 		case EStorageKind::Workbench:  return TEXT("workbench");
 		case EStorageKind::Potpourri:  return TEXT("potpourri");
+		case EStorageKind::CauldronStand: return TEXT("cauldron_stand");
+		case EStorageKind::FirewoodRack:  return TEXT("firewood_rack");
 		default:                     return TEXT("crate");
 		}
 	}
@@ -122,6 +132,8 @@ namespace ErewhonPlaceables
 		case EStorageKind::Barrel: return 30;
 		case EStorageKind::Shelf:  return ErewhonApothecary::ShelfRows;
 		case EStorageKind::DryingRack: return 6;
+		case EStorageKind::Cauldron: return 6;   // ses ingrédients
+		case EStorageKind::FirewoodRack: return 4;
 		default:                   return 0;
 		}
 	}
@@ -149,6 +161,8 @@ namespace ErewhonPlaceables
 		case EStorageKind::DryingRack: return 170.f;
 		case EStorageKind::Workbench:  return 120.f;
 		case EStorageKind::Potpourri:  return 14.f;
+		case EStorageKind::CauldronStand: return 150.f;
+		case EStorageKind::FirewoodRack:  return 110.f;
 		default:                     return 36.f;
 		}
 	}
@@ -165,6 +179,8 @@ namespace ErewhonPlaceables
 		case EStorageKind::DryingRack: return LOCTEXT("DryingRack", "Séchoir");
 		case EStorageKind::Workbench:  return LOCTEXT("Workbench", "Atelier");
 		case EStorageKind::Potpourri:  return LOCTEXT("Potpourri", "Pot-pourri");
+		case EStorageKind::CauldronStand: return LOCTEXT("CauldronStand", "Support de chaudron");
+		case EStorageKind::FirewoodRack:  return LOCTEXT("FirewoodRack", "Rack à petit bois");
 		default:                     return LOCTEXT("Crate", "Cagette");
 		}
 	}
@@ -205,16 +221,58 @@ namespace ErewhonPlaceables
 
 	TOptional<FTransform> HookFor(const UObject* WorldContext, EStorageKind Kind, const FVector& Location)
 	{
-		if (Kind != EStorageKind::Cauldron)
+		// Le support se pose dans la cheminée ; le chaudron pend au support, à sa hauteur.
+		const FIntPoint Sector = ErewhonSector::FromWorld(Location);
+		const TOptional<FTransform> Spot = ErewhonApothecary::StandSpot(WorldContext, Sector);
+		if (!Spot.IsSet() || FVector::Dist2D(Spot->GetLocation(), Location) > 170.f)
 		{
 			return {};
 		}
-		const TOptional<FTransform> Hook = ErewhonApothecary::HookTransform(WorldContext, ErewhonSector::FromWorld(Location));
-		if (!Hook.IsSet() || FVector::Dist2D(Hook->GetLocation(), Location) > 170.f)
+		if (Kind == EStorageKind::CauldronStand)
 		{
-			return {};
+			return ErewhonApothecary::FindStand(WorldContext, Sector) ? TOptional<FTransform>() : Spot;
 		}
-		return Hook;
+		if (Kind == EStorageKind::Cauldron)
+		{
+			if (const AStorageActor* Stand = ErewhonApothecary::FindStand(WorldContext, Sector))
+			{
+				return ErewhonApothecary::CauldronSpotOn(Stand);
+			}
+		}
+		return {};
+	}
+
+	UStaticMeshComponent* AddBundle(AActor* Owner, USceneComponent* Parent, FName ItemId, const FTransform& At, float Length)
+	{
+		FString Plant = ItemId.ToString();
+		const bool bDried = Plant.RemoveFromStart(TEXT("dried_"));
+		UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_bundle_") + Plant);
+		if (!Mesh)
+		{
+			return nullptr;
+		}
+		UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(Owner);
+		Part->SetStaticMesh(Mesh);
+		Part->SetupAttachment(Parent);
+		// Séché : plus fin (en travers), et de la couleur de la paille.
+		const FTransform Thin(FRotator::ZeroRotator, FVector::ZeroVector, bDried ? FVector(0.75f, 1.f, 0.75f) : FVector::OneVector);
+		Part->SetRelativeTransform(FitToLength(Mesh, Length) * Thin * At);
+		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Part->SetCastShadow(false);
+		if (bDried)
+		{
+			UTexture* Texture = nullptr;
+			UMaterialInterface* Dried = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_DriedMesh"));
+			if (Dried && Mesh->GetMaterial(0) && Mesh->GetMaterial(0)->GetTextureParameterValue(FHashedMaterialParameterInfo(TEXT("BaseColor")), Texture))
+			{
+				UMaterialInstanceDynamic* Tint = UMaterialInstanceDynamic::Create(Dried, Part);
+				Tint->SetTextureParameterValue(TEXT("BaseColor"), Texture);
+				Part->SetMaterial(0, Tint);
+			}
+		}
+		Part->RegisterComponent();
+		Owner->AddInstanceComponent(Part);
+		return Part;
 	}
 
 	UStaticMesh* StorageMesh(EStorageKind Kind, FTransform& OutFit)
@@ -226,7 +284,8 @@ namespace ErewhonPlaceables
 		}
 		const TCHAR* ModelName = Kind == EStorageKind::Mortar ? TEXT("SM_mortar") : Kind == EStorageKind::Cauldron ? TEXT("SM_cauldron")
 			: Kind == EStorageKind::DryingRack ? TEXT("SM_drying_rack") : Kind == EStorageKind::Workbench ? TEXT("SM_workbench")
-			: Kind == EStorageKind::Potpourri ? TEXT("SM_potpourri") : nullptr;
+			: Kind == EStorageKind::Potpourri ? TEXT("SM_potpourri") : Kind == EStorageKind::FirewoodRack ? TEXT("SM_firewood_rack")
+			: Kind == EStorageKind::CauldronStand ? TEXT("SM_cauldron_stand") : nullptr;
 		if (ModelName)
 		{
 			UStaticMesh* Model = LoadGenerated<UStaticMesh>(TEXT("Meshes"), ModelName);
@@ -235,7 +294,11 @@ namespace ErewhonPlaceables
 				// Le séchoir et l'atelier : largeur imposée, façade sur X une fois tournés (voir BeginPlay).
 				OutFit = Kind == EStorageKind::DryingRack ? FitToBox(Model, 150.f, 60.f, Height(Kind))
 					: Kind == EStorageKind::Workbench ? FitToBox(Model, 160.f, 70.f, Height(Kind))
-					: Kind == EStorageKind::Potpourri ? FitToLength(Model, 28.f, Height(Kind)) : FitToHeight(Model, Height(Kind));
+					: Kind == EStorageKind::Potpourri ? FitToLength(Model, 28.f, Height(Kind))
+					: Kind == EStorageKind::FirewoodRack ? FitToBox(Model, 110.f, 45.f, Height(Kind))
+					// La potence : son mât au fond (+X), le bout de sa potence au-dessus du centre, là où pend le chaudron.
+					: Kind == EStorageKind::CauldronStand ? FitToHeight(Model, Height(Kind)) * FTransform(FRotator(0.f, 90.f, 0.f), FVector(32.f, 0.f, 0.f))
+					: FitToHeight(Model, Height(Kind));
 			}
 			return Model;
 		}
@@ -291,6 +354,10 @@ void AStorageActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	DOREPLIFETIME(AStorageActor, SlotTimes);
 	DOREPLIFETIME(AStorageActor, ExpiresAt);
 	DOREPLIFETIME(AStorageActor, Water);
+	DOREPLIFETIME(AStorageActor, Liquid);
+	DOREPLIFETIME(AStorageActor, Temperature);
+	DOREPLIFETIME(AStorageActor, BrewProgress);
+	DOREPLIFETIME(AStorageActor, Level);
 }
 
 void AStorageActor::Setup(EStorageKind InKind, const FString& InOwnerKey, const FString& InOwnerName)
@@ -314,6 +381,42 @@ void AStorageActor::BeginPlay()
 		Body->SetRelativeTransform(Fit);
 		Body->RegisterComponent();
 		AddInstanceComponent(Body);
+		if (Kind == EStorageKind::CauldronStand)
+		{
+			// Le modèle de la potence : on vise (et on reprend) par son mât, on vise le chaudron au travers.
+			Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			const float H = ErewhonPlaceables::Height(EStorageKind::CauldronStand);
+			Chain = AddShape(this, Root, EShape::Cylinder, FVector::ZeroVector, FVector(2.f, 2.f, 100.f), FLinearColor::FromSRGBColor(FColor(44, 42, 40)), FRotator::ZeroRotator, false);
+			OnRep_Level();
+			UStaticMeshComponent* Hull = AddShape(this, Root, EShape::Cube, FVector(50.f, 0.f, H * 0.6f), FVector(16.f, 16.f, H * 0.8f), FLinearColor::Black, FRotator::ZeroRotator, true);
+			Hull->SetHiddenInGame(true);
+			Body = Hull;
+		}
+	}
+	else if (Kind == EStorageKind::CauldronStand)
+	{
+		// Une potence de fer forgé : trois pieds, un mât, une potence et sa chaîne, qui monte ou descend.
+		const FLinearColor Iron = FLinearColor::FromSRGBColor(FColor(44, 42, 40));
+		const float H = ErewhonPlaceables::Height(EStorageKind::CauldronStand);
+		for (int32 i = 0; i < 3; ++i)
+		{
+			const float Angle = 120.f * i + 90.f;
+			const FVector Out = FRotator(0.f, Angle, 0.f).Vector() * 38.f;
+			AddShape(this, Root, EShape::Cylinder, FVector(Out.X * 0.5f, Out.Y * 0.5f, 18.f), FVector(4.f, 4.f, 44.f), Iron,
+				FRotator(0.f, Angle, 0.f) + FRotator(-50.f, 0.f, 0.f), false);
+		}
+		AddShape(this, Root, EShape::Cylinder, FVector(34.f, 0.f, H * 0.5f), FVector(5.f, 5.f, H), Iron, FRotator::ZeroRotator, false);
+		AddShape(this, Root, EShape::Cylinder, FVector(17.f, 0.f, H - 6.f), FVector(4.f, 4.f, 40.f), Iron, FRotator(90.f, 0.f, 0.f), false);
+		for (int32 Tooth = 0; Tooth < 8; ++Tooth)
+		{
+			AddShape(this, Root, EShape::Cube, FVector(30.f, 0.f, 40.f + Tooth * 9.f), FVector(4.f, 3.f, 2.f), Iron, FRotator::ZeroRotator, false);   // la crémaillère
+		}
+		Chain = AddShape(this, Root, EShape::Cylinder, FVector::ZeroVector, FVector(2.f, 2.f, 100.f), Iron, FRotator::ZeroRotator, false);
+		OnRep_Level();
+		// On le vise (et on le reprend) par son mât.
+		UStaticMeshComponent* Hull = AddShape(this, Root, EShape::Cube, FVector(34.f, 0.f, H * 0.6f), FVector(16.f, 16.f, H * 0.8f), Iron, FRotator::ZeroRotator, true);
+		Hull->SetHiddenInGame(true);
+		Body = Hull;
 	}
 	else if (Kind == EStorageKind::Shelf || Kind == EStorageKind::Table)
 	{
@@ -420,7 +523,7 @@ void AStorageActor::BeginPlay()
 	}
 	ApplyCollision();
 	RefreshDisplay();
-	SetActorTickEnabled(Kind == EStorageKind::DryingRack || Kind == EStorageKind::Potpourri);
+	SetActorTickEnabled(Kind == EStorageKind::DryingRack || Kind == EStorageKind::Potpourri || Kind == EStorageKind::Cauldron);
 
 	// Le pot-pourri : quelques lueurs de pétales, roses et lilas, qui flottent autour de lui.
 	if (Kind == EStorageKind::Potpourri && GetNetMode() != NM_DedicatedServer)
@@ -451,12 +554,88 @@ void AStorageActor::BeginPlay()
 	}
 }
 
+float AStorageActor::GetCapacityLiters() const
+{
+	return Kind == EStorageKind::Cauldron ? ErewhonPlaceables::CauldronLiters : Kind == EStorageKind::Barrel ? ErewhonPlaceables::WaterBarrelLiters : 0.f;
+}
+
 void AStorageActor::SetWater(float Liters)
 {
-	const float Max = Kind == EStorageKind::Cauldron ? ErewhonPlaceables::CauldronLiters : ErewhonPlaceables::WaterBarrelLiters;
-	Water = FMath::Clamp(Liters, 0.f, Max);
+	Water = FMath::Clamp(Liters, 0.f, GetCapacityLiters());
+	if (Water <= 0.01f)
+	{
+		Water = 0.f;
+		Liquid = ErewhonApothecary::Water;   // vide : prêt pour n'importe quel liquide
+	}
 	ForceNetUpdate();
+	RefreshDisplay();
 	OnStorageChanged.Broadcast();
+}
+
+void AStorageActor::SetLiquid(FName InLiquid, float Liters)
+{
+	Liquid = InLiquid.IsNone() ? ErewhonApothecary::Water : InLiquid;
+	SetWater(Liters);
+}
+
+void AStorageActor::SetLevel(float InLevel)
+{
+	Level = FMath::Clamp(InLevel, 0.f, 1.f);
+	ForceNetUpdate();
+	OnRep_Level();
+}
+
+void AStorageActor::OnRep_Level()
+{
+	// La chaîne du support : du haut de la potence jusqu'à l'anse du chaudron.
+	if (Chain)
+	{
+		const float Top = ErewhonPlaceables::Height(EStorageKind::CauldronStand) - 12.f;
+		const float Bottom = 30.f + 45.f * Level + ErewhonPlaceables::Height(EStorageKind::Cauldron) - 4.f;
+		const float Length = FMath::Max(4.f, Top - Bottom);
+		Chain->SetRelativeLocation(FVector(0.f, 0.f, Bottom + Length * 0.5f));
+		Chain->SetRelativeScale3D(FVector(0.02f, 0.02f, Length / 100.f));
+	}
+	OnStorageChanged.Broadcast();
+}
+
+void AStorageActor::UpdateBrewing(float DeltaSeconds)
+{
+	using namespace ErewhonApothecary;
+	AStorageActor* Stand = nullptr;
+	const AApothecary* House = HouseOfHungCauldron(this, &Stand);
+	// Sur son support, au-dessus d'un feu allumé : la température tend vers ce que donne la hauteur ; sinon, vers celle de la pièce.
+	const float Target = House && House->IsFireLit() && Stand ? FMath::Lerp(HottestTemp, CoolestTemp, Stand->GetLevel()) : RoomTemp;
+	const float Rate = Target > Temperature ? 1.6f : 0.45f;   // °C par seconde : on chauffe vite, on refroidit doucement
+	Temperature = FMath::FInterpConstantTo(Temperature, Target, DeltaSeconds, Rate);
+
+	// Le breuvage : de l'eau, les bons ingrédients dans la bonne proportion, le temps qu'il faut à la bonne température.
+	const FBrew* Brew = Liquid == ErewhonApothecary::Water ? MatchBrew(Slots, Water) : nullptr;
+	if (Brew && Temperature >= Brew->MinTemp && Temperature <= Brew->MaxTemp)
+	{
+		BrewProgress += DeltaSeconds;
+		if (BrewProgress >= Brew->Seconds)
+		{
+			Liquid = Brew->Liquid;
+			for (FInventorySlot& Slot : Slots)
+			{
+				Slot.Clear();
+			}
+			BrewProgress = 0.f;
+			Commit();
+			ForceNetUpdate();
+		}
+	}
+	else
+	{
+		BrewProgress = FMath::Max(0.f, BrewProgress - DeltaSeconds * 0.5f);   // hors de la fourchette, ça retombe
+	}
+	NetTimer += DeltaSeconds;
+	if (NetTimer > 0.5f)
+	{
+		NetTimer = 0.f;
+		ForceNetUpdate();
+	}
 }
 
 void AStorageActor::Commit()
@@ -471,9 +650,60 @@ void AStorageActor::Commit()
 
 void AStorageActor::RefreshDisplay()
 {
+	if (Kind == EStorageKind::Cauldron && GetNetMode() != NM_DedicatedServer)
+	{
+		// La surface du liquide, à sa couleur, plus haute quand le chaudron est plein.
+		if (!Surface)
+		{
+			Surface = AddShape(this, Root, EShape::Cylinder, FVector::ZeroVector, FVector(30.f, 30.f, 1.f), FLinearColor::White, FRotator::ZeroRotator, false);
+			Surface->SetCastShadow(false);
+		}
+		const float Fill = Water / FMath::Max(1.f, GetCapacityLiters());
+		Surface->SetVisibility(Water > 0.01f);
+		Surface->SetRelativeLocation(FVector(0.f, 0.f, ErewhonPlaceables::Height(EStorageKind::Cauldron) * (0.45f + 0.4f * Fill)));
+		Surface->SetRelativeScale3D(FVector(0.26f + 0.08f * Fill, 0.26f + 0.08f * Fill, 0.01f));
+		Surface->SetMaterial(0, MakeColorMaterial(Surface, ErewhonApothecary::LiquidColor(Liquid)));
+	}
 	if (Kind == EStorageKind::Shelf && DisplayFrame)
 	{
 		ErewhonApothecary::BuildShelfDisplay(this, DisplayFrame, Slots, DisplayParts);
+	}
+	else if ((Kind == EStorageKind::Crate || Kind == EStorageKind::Barrel) && GetNetMode() != NM_DedicatedServer)
+	{
+		// Ce qu'on a récolté se voit : quelques bouquets couchés dans la cagette, sur le dessus du tonneau.
+		if (!DisplayFrame)
+		{
+			DisplayFrame = NewObject<USceneComponent>(this);
+			DisplayFrame->SetupAttachment(Root);
+			DisplayFrame->RegisterComponent();
+			AddInstanceComponent(DisplayFrame);
+		}
+		for (UPrimitiveComponent* Part : DisplayParts)
+		{
+			if (Part)
+			{
+				Part->DestroyComponent();
+			}
+		}
+		DisplayParts.Reset();
+		const bool bCrate = Kind == EStorageKind::Crate;
+		int32 Shown = 0;
+		for (const FInventorySlot& Slot : Slots)
+		{
+			if (Slot.IsEmpty() || Shown >= (bCrate ? 6 : 3))
+			{
+				continue;
+			}
+			// Deux rangs dans la cagette (couchés en long), quelques-uns en étoile sur le tonneau.
+			const FTransform At = bCrate
+				? FTransform(FRotator(0.f, 90.f + (Shown % 2 ? 6.f : -6.f), 0.f), FVector(-14.f + 14.f * (Shown % 3), (Shown < 3 ? -8.f : 8.f), 8.f + 6.f * (Shown / 3)))
+				: FTransform(FRotator(0.f, Shown * 60.f, 0.f), FVector(0.f, 0.f, ErewhonPlaceables::Height(EStorageKind::Barrel) + 2.f));
+			if (UStaticMeshComponent* Bundle = ErewhonPlaceables::AddBundle(this, DisplayFrame, Slot.ItemId, At, bCrate ? 46.f : 40.f))
+			{
+				DisplayParts.Add(Bundle);
+				++Shown;
+			}
+		}
 	}
 	else if (Kind == EStorageKind::DryingRack && DisplayFrame && GetNetMode() != NM_DedicatedServer)
 	{
@@ -501,7 +731,16 @@ void AStorageActor::RefreshDisplay()
 			{
 				const FVector Hook(0.f, SideY + (b - (Bunches - 1) * 0.5f) * 15.f, BarZ);
 				DisplayParts.Add(AddShape(this, DisplayFrame, EShape::Cylinder, Hook - FVector(0, 0, 4.f), FVector(1.f, 1.f, 8.f), Palette::WoodDark, FRotator::ZeroRotator, false));
-				DisplayParts.Add(AddShape(this, DisplayFrame, EShape::Cone, Hook - FVector(0, 0, 8.f), FVector(13.f, 13.f, 26.f), Def->Color, FRotator(180.f, 0.f, 0.f), false));
+				// Le bouquet, tête en bas : son modèle (pâli s'il a séché), à défaut un cône à sa couleur.
+				const FTransform Hang(FRotator(0.f, 90.f + b * 25.f, 90.f), Hook - FVector(0, 0, 20.f));
+				if (UStaticMeshComponent* Bundle = ErewhonPlaceables::AddBundle(this, DisplayFrame, Def->Id, Hang, 32.f))
+				{
+					DisplayParts.Add(Bundle);
+				}
+				else
+				{
+					DisplayParts.Add(AddShape(this, DisplayFrame, EShape::Cone, Hook - FVector(0, 0, 8.f), FVector(13.f, 13.f, 26.f), Def->Color, FRotator(180.f, 0.f, 0.f), false));
+				}
 			}
 		}
 	}
@@ -509,7 +748,7 @@ void AStorageActor::RefreshDisplay()
 
 int32 AStorageActor::SlotCap(const FItemDef& Def) const
 {
-	return Kind == EStorageKind::Shelf || Kind == EStorageKind::DryingRack ? FMath::Min(Def.MaxStack, ErewhonApothecary::PotionsPerSlot) : Def.MaxStack;
+	return Kind == EStorageKind::Shelf || Kind == EStorageKind::DryingRack || Kind == EStorageKind::FirewoodRack ? FMath::Min(Def.MaxStack, ErewhonApothecary::PotionsPerSlot) : Def.MaxStack;
 }
 
 void AStorageActor::ApplyCollision()
@@ -529,6 +768,10 @@ void AStorageActor::Tick(float DeltaSeconds)
 	if (Kind == EStorageKind::DryingRack && HasAuthority())
 	{
 		UpdateDrying();
+	}
+	else if (Kind == EStorageKind::Cauldron && HasAuthority())
+	{
+		UpdateBrewing(DeltaSeconds);
 	}
 	else if (Kind == EStorageKind::Potpourri)
 	{
@@ -671,9 +914,11 @@ bool AStorageActor::Accepts(const FItemDef& Def) const
 	case EStorageKind::Crate:
 		// Des plantes, et ce qu'on en tire de petit : teintures, pots-pourris.
 		return Def.Category == EItemCategory::Plant || Def.Id.ToString().StartsWith(TEXT("dye_")) || Def.Id == TEXT("potpourri");
-	case EStorageKind::Barrel: return Def.Category == EItemCategory::Plant && Water <= 0.01f;   // un tonneau d'eau ne tient que l'eau
+	case EStorageKind::Barrel: return Def.Category == EItemCategory::Plant && Water <= 0.01f;   // un tonneau de liquide ne tient que ça
 	case EStorageKind::Shelf:  return ErewhonApothecary::IsShelvable(Def);
 	case EStorageKind::DryingRack: return Def.Category == EItemCategory::Plant;
+	case EStorageKind::FirewoodRack: return Def.Id == TEXT("firewood");
+	case EStorageKind::Cauldron: return ErewhonApothecary::IsIngredient(Def) && (Water <= 0.01f || Liquid == ErewhonApothecary::Water);
 	default:                   return false;
 	}
 }
@@ -770,7 +1015,7 @@ bool AStorageActor::StackOn(AStorageActor* Base)
 
 bool AStorageActor::LoadInto(ACart* InCart, int32 Slot)
 {
-	if (!InCart || Slot < 0 || Slot >= ACart::SlotCount || InCart->GetLoad(Slot))
+	if (!InCart || Slot < 0 || Slot >= ACart::SlotCount || InCart->GetLoad(Slot) || InCart->HasWood())
 	{
 		return false;
 	}
@@ -816,12 +1061,16 @@ FText AStorageActor::GetInteractionLabel() const
 			return LOCTEXT("MineMortar", "Prendre : Mortier    [F] Piler des plantes");
 		case EStorageKind::Cauldron:
 			return ErewhonApothecary::HouseOfHungCauldron(this)
-				? LOCTEXT("MineCauldronHung", "Prendre : Chaudron    [F] Préparer une potion")
-				: LOCTEXT("MineCauldron", "Prendre : Chaudron (à accrocher à la crémaillère)    [F] Préparer");
+				? FText::Format(LOCTEXT("MineCauldronHung", "Prendre : Chaudron ({0} °C)    [F] S'en servir"), FText::AsNumber(FMath::RoundToInt32(Temperature)))
+				: LOCTEXT("MineCauldron", "Prendre : Chaudron (à poser sur un support, dans la cheminée)    [F] S'en servir");
+		case EStorageKind::CauldronStand:
+			return FText::Format(LOCTEXT("MineStand", "Prendre : Support de chaudron (cran {0} / 10)    [F] Régler"), FText::AsNumber(FMath::RoundToInt32(Level * 10.f)));
 		case EStorageKind::Shelf:
 			return LOCTEXT("MineShelf", "Prendre : Étagère    [F] Ranger potions et écrasés");
 		case EStorageKind::DryingRack:
 			return LOCTEXT("MineRack", "Prendre : Séchoir    [F] Y mettre des plantes à sécher");
+		case EStorageKind::FirewoodRack:
+			return FText::Format(LOCTEXT("MineWoodRack", "Prendre : Rack à petit bois ({0})    [F] Ouvrir"), FText::AsNumber(CountStored(TEXT("firewood"))));
 		case EStorageKind::Workbench:
 			return LOCTEXT("MineBench", "Prendre : Atelier    [F] Pots-pourris, teintures, bouquets");
 		case EStorageKind::Potpourri:
@@ -833,12 +1082,17 @@ FText AStorageActor::GetInteractionLabel() const
 		case EStorageKind::Barrel:
 			if (Water > 0.01f)
 			{
-				return FText::Format(LOCTEXT("MineWater", "Prendre : Tonneau d'eau ({0} L)    [F] Ouvrir"), FText::AsNumber(FMath::FloorToInt32(Water)));
+				return FText::Format(LOCTEXT("MineWater", "Prendre : Tonneau — {1} ({0} L)    [F] Ouvrir"), FText::AsNumber(FMath::FloorToInt32(Water)),
+					ErewhonApothecary::LiquidName(Liquid).ToLower());
 			}
 			return FText::Format(LOCTEXT("Mine", "Prendre : {0}    [F] Ouvrir"), ErewhonPlaceables::KindName(Kind));
 		default:
 			return FText::Format(LOCTEXT("Mine", "Prendre : {0}    [F] Ouvrir"), ErewhonPlaceables::KindName(Kind));
 		}
+	}
+	if (Kind == EStorageKind::FirewoodRack)
+	{
+		return FText::Format(LOCTEXT("TheirsWoodRack", "Rack à petit bois de {0} ({1})    [F] S'y servir"), FText::FromString(OwnerName), FText::AsNumber(CountStored(TEXT("firewood"))));
 	}
 	return FText::Format(LOCTEXT("Theirs", "{0} de {1}"), ErewhonPlaceables::KindName(Kind), FText::FromString(OwnerName));
 }
@@ -861,6 +1115,7 @@ ACart::ACart()
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	RootComponent = Root;
 	Loads.SetNum(SlotCount);
+	Wood.SetNum(WoodSlots);
 }
 
 void ACart::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -870,6 +1125,7 @@ void ACart::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimePro
 	DOREPLIFETIME(ACart, OwnerName);
 	DOREPLIFETIME(ACart, Driver);
 	DOREPLIFETIME(ACart, Loads);
+	DOREPLIFETIME(ACart, Wood);
 }
 
 void ACart::Setup(const FString& InOwnerKey, const FString& InOwnerName)
@@ -928,17 +1184,17 @@ void ACart::BeginPlay()
 		return;
 	}
 	// Repli : une plate-forme de planches, deux roues, deux brancards.
-	const auto Wood = [this](const FVector& Center, const FVector& Size, const FRotator& Rotation = FRotator::ZeroRotator, EShape Shape = EShape::Cube)
+	const auto Plank = [this](const FVector& Center, const FVector& Size, const FRotator& Rotation = FRotator::ZeroRotator, EShape Shape = EShape::Cube)
 	{
 		UStaticMeshComponent* Part = AddShape(this, Root, Shape, Center, Size, Palette::WoodLight, Rotation, true);
 		Part->SetMaterial(0, MakePaintedMaterial(Part, TEXT("wood_planks"), 90.f, Palette::WoodLight));
 	};
-	Wood(FVector(30, 0, 58), FVector(140, 92, 8));
+	Plank(FVector(30, 0, 58), FVector(140, 92, 8));
 	for (const float Y : { -46.f, 46.f })
 	{
-		Wood(FVector(30, Y, 72), FVector(140, 4, 24));
-		Wood(FVector(30, Y * 1.18f, 40), FVector(80, 80, 6), FRotator(0.f, 0.f, 90.f), EShape::Cylinder);
-		Wood(FVector(-90, Y * 0.75f, 64), FVector(130, 6, 6));
+		Plank(FVector(30, Y, 72), FVector(140, 4, 24));
+		Plank(FVector(30, Y * 1.18f, 40), FVector(80, 80, 6), FRotator(0.f, 0.f, 90.f), EShape::Cylinder);
+		Plank(FVector(-90, Y * 0.75f, 64), FVector(130, 6, 6));
 	}
 }
 
@@ -946,7 +1202,7 @@ FText ACart::GetInteractionLabel() const
 {
 	if (IsOwnedBy(LocalPlayerKey(this)))
 	{
-		return LOCTEXT("CartMine", "Charrette    [F] La conduire (devant les brancards)");
+		return LOCTEXT("CartMine", "Charrette    [F] La conduire (devant les brancards), ou y charger du petit bois (sur le côté)");
 	}
 	return FText::Format(LOCTEXT("CartTheirs", "Charrette de {0}"), FText::FromString(OwnerName));
 }
@@ -959,8 +1215,42 @@ void ACart::Interact(AErewhonPlayerController* Controller)
 	}
 }
 
+void ACart::CommitWood()
+{
+	// Quelques bûches couchées sur la plate-forme, plus il y en a, plus il y en a.
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		for (UStaticMeshComponent* Part : WoodParts)
+		{
+			if (Part)
+			{
+				Part->DestroyComponent();
+			}
+		}
+		WoodParts.Reset();
+		int32 Count = 0;
+		for (const FInventorySlot& Slot : Wood)
+		{
+			Count += Slot.IsEmpty() ? 0 : Slot.Count;
+		}
+		UStaticMesh* Logs = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_firewood"));
+		const int32 Piles = FMath::Min(6, (Count + 4) / 5);
+		for (int32 i = 0; i < Piles && Logs; ++i)
+		{
+			const FVector At(-20.f + 40.f * (i % 3), (i / 3 % 2 ? 22.f : -22.f), 62.f + 10.f * (i / 6));
+			WoodParts.Add(AddGeneratedMesh(this, Root, Logs, At, 22.f, 90.f + (i % 2) * 15.f, false));
+		}
+	}
+	ForceNetUpdate();
+	OnWoodChanged.Broadcast();
+}
+
 int32 ACart::FreeSlotNear(const FVector& World) const
 {
+	if (HasWood())
+	{
+		return INDEX_NONE;   // le petit bois occupe toute la plate-forme
+	}
 	const FVector Local = GetActorTransform().InverseTransformPosition(World);
 	int32 Best = INDEX_NONE;
 	float BestDistance = TNumericLimits<float>::Max();

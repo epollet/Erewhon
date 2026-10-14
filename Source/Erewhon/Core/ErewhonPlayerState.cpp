@@ -17,6 +17,7 @@ void AErewhonPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AErewhonPlayerState, PlayerKey);
 	DOREPLIFETIME(AErewhonPlayerState, Coins);
+	DOREPLIFETIME(AErewhonPlayerState, PlayerClass);
 }
 
 void AErewhonPlayerState::SetCoins(int32 InCoins)

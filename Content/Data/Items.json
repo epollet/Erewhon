@@ -169,6 +169,11 @@
     },
 
     {
+      "id": "firewood_rack", "name": "Rack à petit bois", "category": "placeable",
+      "description": "Pour ranger son petit bois : quarante brassées. Chacun peut s'y servir.\nEn main, cliquez pour le poser (sur vos secteurs).",
+      "buy_price": 90, "max_stack": 1, "color": [140, 100, 60]
+    },
+    {
       "id": "cerpe", "name": "Cerpe", "category": "tool",
       "description": "Faucille pour récolter plus efficacement : vise les plantes dans un cône devant soi.",
       "buy_price": 50, "max_stack": 1, "color": [180, 140, 60], "harvest_tool": true
@@ -207,12 +212,12 @@
       "buy_price": 150, "max_stack": 1, "color": [160, 115, 70]
     },
     {
-      "id": "mortar", "name": "Mortier", "category": "placeable",
+      "id": "mortar", "name": "Mortier", "category": "placeable", "apothecary_only": true,
       "description": "Pour piler les plantes en écrasés. [F] pour s'en servir ; il se pose aussi sur une table.\nEn main, cliquez pour le poser (sur vos secteurs) ; [E] pour le reprendre.",
       "buy_price": 120, "max_stack": 1, "color": [150, 150, 145]
     },
     {
-      "id": "cauldron", "name": "Chaudron", "category": "placeable",
+      "id": "cauldron", "name": "Chaudron", "category": "placeable", "apothecary_only": true,
       "description": "Pour les bases et les potions. Posé près d'une cheminée, il pend à la crémaillère ; il faut un feu allumé.\nEn main, cliquez pour le poser (sur vos secteurs) ; [E] pour le reprendre.",
       "buy_price": 300, "max_stack": 1, "color": [60, 60, 64]
     },
@@ -298,14 +303,70 @@
       "sell_price": 40, "max_stack": 5, "color": [230,  150,  190]
     },
     {
-      "id": "drying_rack", "name": "Séchoir", "category": "placeable",
+      "id": "drying_rack", "name": "Séchoir", "category": "placeable", "apothecary_only": true,
       "description": "Six crochets où pendre ses plantes : elles sèchent en quatre minutes. [F] pour y mettre des plantes.\nEn main, cliquez pour le poser (sur vos secteurs).",
       "buy_price": 160, "max_stack": 1, "color": [160,  120,  80]
     },
     {
-      "id": "workbench", "name": "Atelier d'apothicaire", "category": "placeable",
+      "id": "workbench", "name": "Atelier d'apothicaire", "category": "placeable", "apothecary_only": true,
       "description": "Pots-pourris de fleurs séchées, teintures d'écrasés, bouquets en pot. [F] pour y travailler.\nEn main, cliquez pour le poser (sur vos secteurs).",
       "buy_price": 350, "max_stack": 1, "color": [150,  110,  75]
+    },
+
+    {
+      "id": "pitcher", "name": "Pichet", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "description": "Un pichet de terre vernissée : il tient 2 L. En main, [F] en visant un tonneau ou le chaudron : on le remplit, ou on le vide.",
+      "buy_price": 30, "max_stack": 1, "color": [190, 120, 80]
+    },
+    {
+      "id": "pitcher_water", "name": "Pichet d'eau", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "description": "Deux litres d'eau fraîche.",
+      "max_stack": 1, "color": [120,  170,  220], "icon": "/Game/Generated/Icons/T_Icon_pitcher_water.T_Icon_pitcher_water"
+    },
+    {
+      "id": "pitcher_brew_speed", "name": "Pichet de breuvage de vitesse", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "description": "Deux litres de breuvage, à mettre en fioles au chaudron… ou à reverser.",
+      "max_stack": 1, "color": [60,  140,  255], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_night", "name": "Pichet de breuvage de nyctalopie", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "description": "Deux litres de breuvage, à reverser au chaudron pour en remplir des fioles.",
+      "max_stack": 1, "color": [130,  60,  200], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_strength", "name": "Pichet de breuvage de force", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "description": "Deux litres de breuvage, à reverser au chaudron pour en remplir des fioles.",
+      "max_stack": 1, "color": [40,  140,  60], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_jump", "name": "Pichet de breuvage de saut", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "description": "Deux litres de breuvage, à reverser au chaudron pour en remplir des fioles.",
+      "max_stack": 1, "color": [150,  220,  60], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_shrink", "name": "Pichet de breuvage de rapetissement", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "description": "Deux litres de breuvage, à reverser au chaudron pour en remplir des fioles.",
+      "max_stack": 1, "color": [240,  160,  200], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "pitcher_brew_grow", "name": "Pichet de breuvage de grandissement", "category": "resource", "holdable": true, "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher",
+      "description": "Deux litres de breuvage, à reverser au chaudron pour en remplir des fioles.",
+      "max_stack": 1, "color": [240,  150,  50], "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
+    },
+    {
+      "id": "vial", "name": "Fiole vide", "category": "resource",
+      "description": "Une petite fiole de verre : remplie de breuvage (0,15 L) au chaudron, c'est une potion. Une potion bue rend sa fiole.",
+      "buy_price": 4, "max_stack": 20, "color": [200, 225, 235]
+    },
+    {
+      "id": "cauldron_stand", "name": "Support de chaudron", "category": "placeable", "apothecary_only": true,
+      "description": "Une potence de fer forgé à crémaillère, à poser dans la cheminée : le chaudron y pend, plus ou moins haut au-dessus du feu.\nEn main, cliquez pour le poser.",
+      "buy_price": 120, "max_stack": 1, "color": [60, 58, 56]
+    },
+    {
+      "id": "herbal_book", "name": "Herbier des breuvages", "category": "resource",
+      "description": "Le livre des breuvages du chaudron, page par page : ingrédients par litre, chaleur, temps.\nCliquez-le dans l'inventaire pour le lire.",
+      "buy_price": 500, "max_stack": 1, "color": [120, 80, 50]
     },
 
     {

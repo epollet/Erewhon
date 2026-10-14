@@ -9,6 +9,14 @@ class UInventoryComponent;
 
 DECLARE_MULTICAST_DELEGATE(FOnCoinsChanged);
 
+/** La classe qu'on se choisit à la mairie (un seul choix). */
+UENUM()
+enum class EPlayerClass : uint8
+{
+	None,         // aucune classe particulière
+	Apothecary,   // seul un apothicaire se sert des outils de l'apothicairerie
+};
+
 /** Identité persistante, pièces et inventaire d'un joueur. */
 UCLASS()
 class EREWHON_API AErewhonPlayerState : public APlayerState
@@ -28,12 +36,15 @@ public:
 	bool IsRegistered() const { return !PlayerKey.IsEmpty(); }
 
 	int32 GetCoins() const { return Coins; }
+	EPlayerClass GetPlayerClass() const { return PlayerClass; }
+	bool IsApothecary() const { return PlayerClass == EPlayerClass::Apothecary; }
 
 	// Serveur
 	void SetPlayerKey(const FString& InKey) { PlayerKey = InKey; }
 	void SetCoins(int32 InCoins);
 	bool SpendCoins(int32 Amount);
 	void AddCoins(int32 Amount);
+	void SetPlayerClass(EPlayerClass InClass) { PlayerClass = InClass; OnCoinsChanged.Broadcast(); }
 
 	FOnCoinsChanged OnCoinsChanged;
 
@@ -52,4 +63,7 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_Coins)
 	int32 Coins = 0;
+
+	UPROPERTY(ReplicatedUsing = OnRep_Coins)
+	EPlayerClass PlayerClass = EPlayerClass::None;
 };

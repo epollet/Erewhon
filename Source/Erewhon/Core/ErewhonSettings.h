@@ -156,6 +156,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
 	int32 StoreroomPrice = 1000;
 
+	/** Prix de la classe d'apothicaire, à la mairie. */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
+	int32 ApothecaryClassPrice = 500;
+
 	// ── Récolte ──────────────────────────────────────────────────────────────
 
 	/** Délai de repousse d'une plante récoltée (s). */

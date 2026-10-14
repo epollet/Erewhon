@@ -650,6 +650,35 @@ def create_glow():
     log("matériau M_Glow")
 
 
+def create_dried_mesh():
+    """Plantes séchées : le même modèle que la plante fraîche, sa couleur pâlie, tirée vers la paille."""
+    material = recreate("M_DriedMesh", "Materials", unreal.Material, unreal.MaterialFactoryNew())
+    material.set_editor_property("two_sided", True)
+    material.set_editor_property("used_with_instanced_static_meshes", True)
+    texture = node(material, unreal.MaterialExpressionTextureSampleParameter2D, -900, 0)
+    texture.set_editor_property("parameter_name", "BaseColor")
+    pale = node(material, unreal.MaterialExpressionDesaturation, -650, 0)
+    connect(texture, "RGB", pale, "")
+    amount = node(material, unreal.MaterialExpressionConstant, -850, 200)
+    amount.set_editor_property("r", 0.55)
+    connect(amount, "", pale, "Fraction")
+    straw = node(material, unreal.MaterialExpressionConstant3Vector, -650, 250)
+    straw.set_editor_property("constant", unreal.LinearColor(0.78, 0.66, 0.42, 1.0))
+    mix = node(material, unreal.MaterialExpressionLinearInterpolate, -400, 100)
+    connect(pale, "", mix, "A")
+    connect(straw, "", mix, "B")
+    alpha = node(material, unreal.MaterialExpressionConstant, -600, 400)
+    alpha.set_editor_property("r", 0.35)
+    connect(alpha, "", mix, "Alpha")
+    mel.connect_material_property(mix, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    roughness = node(material, unreal.MaterialExpressionConstant, -400, 400)
+    roughness.set_editor_property("r", 0.9)
+    mel.connect_material_property(roughness, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    mel.recompile_material(material)
+    assets.save_loaded_asset(material)
+    log("matériau M_DriedMesh")
+
+
 def create_highlight():
     """Halo de ciblage : lueur chaude translucide, plus vive sur les contours, qui pulse doucement."""
     material = recreate("M_Highlight", "Materials", unreal.Material, unreal.MaterialFactoryNew())
@@ -831,6 +860,7 @@ create_emissive()
 create_sky_disc()
 create_flame()
 create_glow()
+create_dried_mesh()
 if assets.does_asset_exist(GEN + "/Materials/M_PathBlend"):
     assets.delete_asset(GEN + "/Materials/M_PathBlend")   # remplacé par M_GroundBlend
 rebind_generated_materials(create_generated_mesh_master(), {"bird": create_bird_flap()})
