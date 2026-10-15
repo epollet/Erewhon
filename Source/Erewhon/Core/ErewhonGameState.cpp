@@ -1,5 +1,9 @@
 #include "Core/ErewhonGameState.h"
 
+#include "World/Fauna.h"
+#include "Sky/WeatherEffects.h"
+#include "World/Villagers.h"
+#include "World/Forestry.h"
 #include "Core/ErewhonSettings.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
@@ -130,17 +134,26 @@ void AErewhonGameState::SpawnLocalWorldActors()
 
 	// Le serveur dédié a besoin du sol (collisions) mais pas du ciel.
 	World->SpawnActor<ASectorManager>(Params);
-	// Les commerces de la place ; le tailleur ne vient qu'une fois sa boutique construite.
+	// Les commerces de la place ; le tailleur, l'atelier et l'éleveur ne viennent qu'une fois construits (ApplyVillage).
 	SpawnCabin(EShopKind::GeneralStore);
 	SpawnCabin(EShopKind::SectorManager);
-	SpawnCabin(EShopKind::Breeder);
-	SpawnCabin(EShopKind::Workshop);
+	// Les maisons des habitants, au bord des routes.
+	for (int32 House = 0; House < ErewhonVillagers::HouseCount; ++House)
+	{
+		const FTransform At = ErewhonVillagers::HouseTransform(House);
+		ASpawnCabin* Cabin = GetWorld()->SpawnActorDeferred<ASpawnCabin>(ASpawnCabin::StaticClass(), At, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		Cabin->Kind = EShopKind::House;
+		Cabin->HouseIndex = House;
+		Cabin->FinishSpawning(At);
+	}
 	ApplyVillage();
 	World->SpawnActor<AFountain>(Params);   // la fontaine de la place : elle arrête aussi le joueur sur le serveur
 	if (GetNetMode() != NM_DedicatedServer)
 	{
 		World->SpawnActor<ACelestialSystem>(Params);
+		World->SpawnActor<AWeatherEffects>(Params);   // pluie, éclairs, vent qui emporte feuilles et brins
 		World->SpawnActor<AWildlife>(Params);
+		World->SpawnActor<AFaunaManager>(Params);   // renards, et la faune au sol
 		World->SpawnActor<AMusicPlayer>(Params);
 	}
 }
@@ -159,10 +172,13 @@ void AErewhonGameState::ApplyVillage()
 	{
 		return;   // tout se construira avec les acteurs locaux
 	}
-	if (HasVillageUpgrade(EVillageUpgrade::Tailor) && !bTailorSpawned)
+	for (const EShopKind Kind : { EShopKind::Tailor, EShopKind::Workshop, EShopKind::Breeder })
 	{
-		bTailorSpawned = true;
-		SpawnCabin(EShopKind::Tailor);
+		if (IsShopBuilt(Kind) && !SpawnedShops.Contains(Kind))
+		{
+			SpawnedShops.Add(Kind);
+			SpawnCabin(Kind);
+		}
 	}
 	if (VillageDecor)
 	{
@@ -194,7 +210,24 @@ void AErewhonGameState::OnRep_Village()
 EShopKind AErewhonGameState::ShopFor(const FItemDef& Item) const
 {
 	const EShopKind Shop = Item.ShopFor();
-	return Shop == EShopKind::Tailor && !HasVillageUpgrade(EVillageUpgrade::Tailor) ? EShopKind::GeneralStore : Shop;
+	// Les vêtements, et la charrette, au General Store tant que leur boutique n'est pas bâtie ;
+	// bhuraks et outils tractés attendent l'éleveur et l'atelier.
+	if (!IsShopBuilt(Shop) && (Shop == EShopKind::Tailor || Item.Id == TEXT("cart")))
+	{
+		return EShopKind::GeneralStore;
+	}
+	return Shop;
+}
+
+bool AErewhonGameState::IsShopBuilt(EShopKind Kind) const
+{
+	switch (Kind)
+	{
+	case EShopKind::Tailor:   return HasVillageUpgrade(EVillageUpgrade::Tailor);
+	case EShopKind::Workshop: return HasVillageUpgrade(EVillageUpgrade::Workshop);
+	case EShopKind::Breeder:  return HasVillageUpgrade(EVillageUpgrade::Breeder);
+	default:                  return true;
+	}
 }
 
 uint8 AErewhonGameState::GetPavedLinks(const FIntPoint& Sector) const
@@ -274,11 +307,10 @@ void AErewhonGameState::AddHarvest(const FIntPoint& Sector, int32 PlantIndex, do
 void AErewhonGameState::PruneHarvests()
 {
 	const double Now = GetWorldClock();
-	const double Regrow = UErewhonSettings::Get().RegrowSeconds;
 	bool bChanged = false;
 	for (int32 i = Harvests.Items.Num() - 1; i >= 0; --i)
 	{
-		if (Now - Harvests.Items[i].HarvestTime >= Regrow)
+		if (Now - Harvests.Items[i].HarvestTime >= ErewhonForestry::RegrowSeconds(Harvests.Items[i].PlantIndex))
 		{
 			const FHarvestEntry Removed = Harvests.Items[i];
 			Harvests.Items.RemoveAtSwap(i);

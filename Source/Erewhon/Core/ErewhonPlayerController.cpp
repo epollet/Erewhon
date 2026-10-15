@@ -1,4 +1,5 @@
 #include "Core/ErewhonPlayerController.h"
+#include "World/FelledTree.h"
 #include "UI/SBhurakPanel.h"
 #include "World/DroppedItem.h"
 #include "World/Bhurak.h"
@@ -733,6 +734,30 @@ void AErewhonPlayerController::ServerEmptyWater_Implementation(AStorageActor* Ba
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
 	{
 		ReportResult(Mode->TryEmptyWater(this, Barrel));
+	}
+}
+
+void AErewhonPlayerController::ServerChopTree_Implementation(FIntPoint Sector, int32 TreeIndex)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryChopTree(this, Sector, TreeIndex));
+	}
+}
+
+void AErewhonPlayerController::ServerChopLog_Implementation(AFelledTree* Felled)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryChopLog(this, Felled));
+	}
+}
+
+void AErewhonPlayerController::ServerTakeLogs_Implementation(AStorageActor* Pile)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryTakeLogs(this, Pile));
 	}
 }
 

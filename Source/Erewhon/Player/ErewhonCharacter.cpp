@@ -1,4 +1,6 @@
 #include "Player/ErewhonCharacter.h"
+#include "World/Forestry.h"
+#include "World/FelledTree.h"
 #include "Components/PointLightComponent.h"
 #include "EngineUtils.h"
 
@@ -45,6 +47,22 @@ using namespace ErewhonVisuals;
 namespace
 {
 	constexpr float GSwingDuration = 0.35f;
+
+	/** La rotation qui amène la direction A du modèle sur Aw, et B (sa part perpendiculaire à A) sur Bw. */
+	FQuat AlignPair(const FVector& A, const FVector& B, const FVector& Aw, const FVector& Bw)
+	{
+		return FQuat(FRotationMatrix::MakeFromXY(Aw, Bw)) * FQuat(FRotationMatrix::MakeFromXY(A, B)).Inverse();
+	}
+
+	/**
+	 * La faux tenue, vue de soi : le manche (du bas à droite du modèle vers le haut à gauche) part des mains
+	 * vers l'avant et vers le bas ; la lame (qui pend du haut du manche) se couche près du sol, vers la gauche.
+	 */
+	const FVector GScytheSnath(-0.59f, 0.f, 0.81f);
+	const FVector GScytheBlade(-0.2f, 0.f, -0.98f);
+	const FVector GScytheSnathView(0.97f, 0.f, -0.24f);
+	const FVector GScytheBladeView(-0.6f, -0.75f, -0.28f);
+	const FVector GScytheHand(40.f, 18.f, -24.f);
 	constexpr double GPendingHarvestSeconds = 2.0;   // le geste (une seconde à la main), plus la latence
 	const FVector GHeldFirstPersonOffset(38.f, 24.f, -22.f);
 	const FRotator GHeldFirstPersonRotation(-20.f, 0.f, 10.f);
@@ -556,10 +574,20 @@ void AErewhonCharacter::ApplyAppearance()
 			// Modèle généré : ramené à ~45 cm, la base (le manche) au creux de la main.
 			const float HandHeight = Hand->bHoldable ? 24.f : Hand->Id == ErewhonFarm::Scythe ? 80.f : Hand->Id == ErewhonFarm::Spade ? 70.f : 45.f;
 			const FTransform Fit = FitToHeight(HandMesh, HandHeight);
-			const FVector Base = Held == HeldFirstPerson.Get() ? GHeldFirstPersonOffset : (AnimatedBody ? HeldThirdPersonBase : GHeldThirdPersonOffset);
+			const bool bFirstScythe = Held == HeldFirstPerson.Get() && Hand->Id == ErewhonFarm::Scythe;
+			const FVector Base = bFirstScythe ? GScytheHand : Held == HeldFirstPerson.Get() ? GHeldFirstPersonOffset : (AnimatedBody ? HeldThirdPersonBase : GHeldThirdPersonOffset);
 			// La faux se tient lame en bas ; la bêche, lame vers l'avant.
 			const FQuat Turn = Hand->Id == ErewhonFarm::Scythe ? FQuat(FRotator(Held == HeldFirstPerson.Get() ? -125.f : 0.f, 0.f, 0.f)) : Hand->Id == ErewhonFarm::Spade ? FQuat(FRotator(0.f, 135.f, 0.f)) : FQuat::Identity;
-			if (Held == HeldFirstPerson.Get())
+			// Vu de soi, la faux : posée d'après la forme de son modèle, tenue par le bout du manche.
+			FVector Offset = Fit.GetLocation();
+			if (bFirstScythe)
+			{
+				const FBox Bounds = HandMesh->GetBoundingBox();
+				Offset -= FVector((Bounds.Max.X - Bounds.GetCenter().X) * 0.92f * Fit.GetScale3D().X, 0.f, 0.f);
+				HeldFirstRotation = AlignPair(GScytheSnath, GScytheBlade, GScytheSnathView, GScytheBladeView).Rotator();
+				Held->SetRelativeRotation(HeldFirstRotation);
+			}
+			else if (Held == HeldFirstPerson.Get())
 			{
 				HeldFirstRotation = (FQuat(GHeldFirstPersonRotation) * Turn).Rotator();
 				Held->SetRelativeRotation(HeldFirstRotation);
@@ -569,10 +597,12 @@ void AErewhonCharacter::ApplyAppearance()
 				Held->SetRelativeRotation(Turn.Rotator());
 			}
 			Held->SetStaticMesh(HandMesh);
-			Held->SetRelativeLocation(Base + Held->GetRelativeRotation().RotateVector(Fit.GetLocation()));
+			Held->SetRelativeLocation(Base + Held->GetRelativeRotation().RotateVector(Offset));
 			if (Held == HeldFirstPerson.Get())
 			{
 				HeldFirstLocation = Held->GetRelativeLocation();
+				HeldFirstHand = Base;
+				HeldFirstPivotOffset = Offset;
 			}
 			Held->SetRelativeScale3D(Fit.GetScale3D());
 			Held->EmptyOverrideMaterials();
@@ -735,7 +765,9 @@ void AErewhonCharacter::UpdateGroundSpeed()
 	{
 		Factor *= 1.6f;
 	}
-	const float Base = bIsRunning ? Settings.RunSpeedMetersPerSecond : Settings.WalkSpeedMetersPerSecond;
+	// Attelé (charrette ou outil derrière le bhurak) : on ne galope pas.
+	const bool bTowing = Mount && Mount->GetTowedCart();
+	const float Base = bIsRunning && !bTowing ? Settings.RunSpeedMetersPerSecond : Settings.WalkSpeedMetersPerSecond;
 	GetCharacterMovement()->MaxWalkSpeed = Base * Factor * 100.f;
 	GetCharacterMovement()->MaxWalkSpeedCrouched = Settings.WalkSpeedMetersPerSecond * 0.5f * Factor * 100.f;
 }
@@ -944,6 +976,9 @@ void AErewhonCharacter::BagAction()
 				break;
 			case EStorageKind::Potpourri:
 				break;   // il parfume, c'est tout
+			case EStorageKind::LogPile:
+				PC->ServerTakeLogs(Storage);   // un tas ne s'ouvre pas : on en reprend
+				break;
 			case EStorageKind::Table:
 				PC->ShowToast(LOCTEXT("TableHint", "Posez-y un mortier : prenez-le en main et visez la table."));
 				break;
@@ -1121,6 +1156,17 @@ void AErewhonCharacter::Primary()
 		}
 		return;
 	}
+	// La hache : un coup dans le tronc visé, au rythme du geste.
+	if (HandId == ErewhonForestry::Axe)
+	{
+		if (Target.TreeIndex != INDEX_NONE && SwingTime <= 0.f)
+		{
+			SwingTime = GSwingDuration;
+			PlayToolSound(TEXT("axe_chop"), 0.8f);
+			PC->ServerChopTree(Target.TreeSector, Target.TreeIndex);
+		}
+		return;
+	}
 	// La bêche sur son champ : un coup d'une seconde, pas deux à la fois.
 	if (HandId == ErewhonFarm::Spade && Target.FieldCell != INDEX_NONE)
 	{
@@ -1208,16 +1254,30 @@ void AErewhonCharacter::Tick(float DeltaSeconds)
 	UpdateHighlight();
 	UpdatePlacement();
 
-	// La faux : on arme vers la droite, on balaie largement vers la gauche, on revient.
+#if !UE_BUILD_SHIPPING
+	// -ErewhonTestScythe=0.6 : tests, le geste de la faux figé à cet instant (0 à 1).
+	if (float Frozen = -1.f; FParse::Value(FCommandLine::Get(), TEXT("ErewhonTestScythe="), Frozen))
+	{
+		ScytheTime = FMath::Max(0.01f, (1.f - Frozen) * ErewhonFarm::ScytheSeconds) + DeltaSeconds;
+	}
+#endif
+	// La faux : on arme vers la droite, on fauche largement de droite à gauche, lame au ras du sol, on revient.
+	// Le geste pivote autour des mains, dans le repère de la vue.
 	if (ScytheTime > 0.f)
 	{
 		ScytheTime = FMath::Max(0.f, ScytheTime - DeltaSeconds);
 		const float P = 1.f - ScytheTime / ErewhonFarm::ScytheSeconds;
-		const float Yaw = P < 0.35f ? FMath::InterpEaseInOut(0.f, 70.f, P / 0.35f, 2.f)
-			: P < 0.8f ? FMath::InterpEaseInOut(70.f, -95.f, (P - 0.35f) / 0.45f, 2.f)
-			: FMath::InterpEaseInOut(-95.f, 0.f, (P - 0.8f) / 0.2f, 2.f);
-		const float Dip = FMath::Sin(P * UE_PI);
-		HeldFirstPerson->SetRelativeRotation(HeldFirstRotation + FRotator(-50.f * Dip, Yaw, -35.f * Dip));
+		const float Yaw = P < 0.35f ? FMath::InterpEaseInOut(0.f, 55.f, P / 0.35f, 2.f)
+			: P < 0.8f ? FMath::InterpEaseInOut(55.f, -75.f, (P - 0.35f) / 0.45f, 2.f)
+			: FMath::InterpEaseInOut(-75.f, 0.f, (P - 0.8f) / 0.2f, 2.f);
+		// En armant, la lame se soulève un peu ; en fauchant, elle rase le sol.
+		const float Lift = P < 0.35f ? FMath::Sin(P / 0.35f * UE_HALF_PI) * 12.f : P < 0.8f ? 12.f * (1.f - (P - 0.35f) / 0.45f) : 0.f;
+		const FQuat Sweep = FQuat(FRotator(0.f, Yaw, 0.f)) * FQuat(FRotator(Lift, 0.f, 0.f)) * FQuat(HeldFirstRotation);
+		HeldFirstPerson->SetRelativeLocationAndRotation(HeldFirstHand + Sweep.RotateVector(HeldFirstPivotOffset), Sweep);
+		if (ScytheTime <= 0.f)
+		{
+			HeldFirstPerson->SetRelativeLocationAndRotation(HeldFirstLocation, HeldFirstRotation);
+		}
 	}
 	// La bêche : le bas du fer part vers l'avant et s'enfonce, on fait levier (le haut du manche revient), puis on se redresse.
 	else if (DigTime > 0.f)
@@ -1429,7 +1489,7 @@ bool AErewhonCharacter::IsPlacing() const
 	const AErewhonPlayerState* State = GetPlayerState<AErewhonPlayerState>();
 	const UItemDatabase* Items = UItemDatabase::Get(this);
 	const FItemDef* Hand = State && Items ? Items->Find(State->GetInventory()->GetHandItem()) : nullptr;
-	return Hand && Hand->IsPlaceable();
+	return Hand && (Hand->IsPlaceable() || Hand->Id == ErewhonForestry::Log);   // des bûches en main : on les pose en tas
 }
 
 void AErewhonCharacter::UpdatePlacement()
@@ -1485,6 +1545,13 @@ void AErewhonCharacter::UpdatePlacement()
 		Placement.Type = 1;
 		Placement.Target = HitStorage;
 		At = FTransform(HitStorage->GetActorRotation(), HitStorage->GetActorLocation() + FVector(0, 0, ErewhonPlaceables::Height(EStorageKind::Table)));
+	}
+	else if (!bCart && Kind == EStorageKind::LogPile && HitStorage && HitStorage->IsOwnedBy(Key) && HitStorage->GetKind() == EStorageKind::LogPile)
+	{
+		// Sur son tas de bûches.
+		Placement.Type = 1;
+		Placement.Target = HitStorage;
+		At = HitStorage->GetActorTransform();
 	}
 	else if (!bCart && Kind == EStorageKind::Crate && HitStorage && HitStorage->IsOwnedBy(Key) && HitStorage->GetKind() == EStorageKind::Crate
 		&& HitStorage->TopOfStack()->StackSize() < ErewhonPlaceables::MaxStack && !HitStorage->TopOfStack()->GetCarrier())
@@ -1572,6 +1639,10 @@ void AErewhonCharacter::UpdatePlacement()
 		else if (!bCart && Kind == EStorageKind::CauldronStand)
 		{
 			Size = FVector(70.f, 70.f, 150.f);
+		}
+		else if (!bCart && Kind == EStorageKind::LogPile)
+		{
+			Size = FVector(120.f, 210.f, 40.f);
 		}
 		Fit = FTransform(FRotator::ZeroRotator, FVector(0, 0, Size.Z * 0.5f), Size / 100.f);
 	}
@@ -1762,6 +1833,11 @@ void AErewhonCharacter::UpdateTarget()
 			Target.Hint = Towed->IsEngaged() ? LOCTEXT("RideHintCultDown", "Cultivateur baissé    [Clic] Le lever    [F] Descendre    [G] Dételer")
 				: LOCTEXT("RideHintCultUp", "Cultivateur levé    [Clic] Le baisser    [F] Descendre    [G] Dételer");
 		}
+		else if (Towed && Towed->GetCartKind() == ECartKind::Harvester)
+		{
+			Target.Hint = Towed->IsEngaged() ? LOCTEXT("RideHintHarvestOn", "Moissonneuse : rabatteur baissé    [Clic] Le lever    [F] Descendre    [G] Dételer")
+				: LOCTEXT("RideHintHarvestOff", "Moissonneuse : rabatteur levé    [Clic] Le baisser    [F] Descendre    [G] Dételer");
+		}
 		else if (Towed && Towed->GetCartKind() == ECartKind::Seeder)
 		{
 			Target.Hint = Towed->IsEngaged() ? LOCTEXT("RideHintSeedOn", "Semoir enclenché    [Clic] Désenclencher    [F] Descendre    [G] Dételer")
@@ -1780,6 +1856,30 @@ void AErewhonCharacter::UpdateTarget()
 	{
 		Target.Hint = LOCTEXT("ScytheHint", "[Clic] Faucher : tout ce qui pousse à portée, autour de vous");
 		return;
+	}
+	// La hache en main : le tronc d'un arbre, sous le regard.
+	if (HandId == ErewhonForestry::Axe && Hit.bBlockingHit && Hit.Distance <= Settings.HarvestReach() + 100.f)
+	{
+		if (const ASector* TreeSector = Cast<ASector>(Hit.GetActor()))
+		{
+			const int32 Tree = TreeSector->TreeAtTrunk(Hit.GetComponent(), Hit.Item);
+			const FIntPoint Coord = TreeSector->GetCoord();
+			if (Tree != INDEX_NONE && !State->IsHarvested(Coord, ErewhonForestry::HarvestIndexOfTree(Tree)))
+			{
+				const FString* TreeOwner = State->FindSectorOwnerKey(Coord);
+				if (TreeOwner && *TreeOwner == MyState->GetPlayerKey())
+				{
+					Target.TreeSector = Coord;
+					Target.TreeIndex = Tree;
+					Target.Hint = LOCTEXT("AxeHint", "[Clic] Un coup de hache : quelques-uns, et l'arbre tombe");
+				}
+				else
+				{
+					Target.Hint = LOCTEXT("AxeNotYours", "On n'abat que les arbres de ses secteurs");
+				}
+				return;
+			}
+		}
 	}
 	// Une case de son champ, sous le regard.
 	if (Hit.bBlockingHit && Hit.ImpactNormal.Z > 0.5f && Hit.Distance <= Settings.HarvestReach())

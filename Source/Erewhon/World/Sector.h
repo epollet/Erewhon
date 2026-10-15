@@ -25,9 +25,21 @@ public:
 	ASector();
 
 	/** bWithPlants = false pour un serveur dédié ou un secteur lointain : sol seul. */
-	void Initialize(const TSharedRef<const FSectorLayout>& InLayout, bool bWithPlants);
+	void Initialize(const TSharedRef<const FSectorLayout>& InLayout, bool bWithPlants, bool bInFar = false);
+
+	/** Secteur lointain : sol simplifié seulement ; ses arbres sont dessinés en lot par ASectorManager. */
+	bool IsFar() const { return bFar; }
+
+	/** Les masses de feuillage de la canopée d'un secteur de forêt (monde, avant mise à l'échelle du modèle). */
+	static void CanopyTransforms(const FSectorLayout& InLayout, TArray<FTransform>& Out);
 
 	void SetPlantHarvested(int32 PlantIndex, bool bHarvested);
+
+	/** Un arbre abattu (sa souche reste) ou repoussé. */
+	void SetTreeCut(int32 TreeIndex, bool bCut);
+	/** L'arbre dont on vise le tronc (composant et instance touchés), ou INDEX_NONE. */
+	int32 TreeAtTrunk(const UPrimitiveComponent* Component, int32 Instance) const;
+	const struct FSectorLayout* GetLayout() const { return Layout.Get(); }
 
 	bool HasPlants() const { return bPlantsBuilt; }
 	FIntPoint GetCoord() const;
@@ -59,6 +71,19 @@ private:
 	void BuildDecor();
 	void BuildBushes();
 	void BuildTrees(bool bVisual);
+	/** La place d'un arbre dans ses instances : son modèle (Batches) et son index, la souche. */
+	FTransform TreeTransform(int32 TreeIndex, bool bCut) const;
+	FTransform TrunkTransform(int32 TreeIndex, bool bCut) const;
+	FTransform StumpTransform(int32 TreeIndex, bool bCut) const;
+	UPROPERTY(Transient) TObjectPtr<UHierarchicalInstancedStaticMeshComponent> Trunks;
+	UPROPERTY(Transient) TObjectPtr<UHierarchicalInstancedStaticMeshComponent> Stumps;
+	UPROPERTY(Transient) TArray<TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> TreeParts;
+	TArray<FTransform> TreeFits;
+	/** Pour chaque arbre, son instance dans la partie de son modèle. */
+	TArray<int32> TreeInstance;
+	/** Les souches : créées au premier arbre abattu du secteur seulement. */
+	void EnsureStumps();
+	bool bTreesVisual = false;
 	void BuildSignposts();
 	/** Les barrières d'un secteur de champs, et ses portiques. */
 	void BuildFences(bool bVisual);
@@ -95,4 +120,5 @@ private:
 	TArray<int32> KindOfPlant;      // index dans Kinds
 	TArray<int32> InstanceOfPlant;  // premier index d'instance de la touffe, identique dans chaque partie
 	bool bPlantsBuilt = false;
+	bool bFar = false;
 };

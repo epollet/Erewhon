@@ -74,6 +74,7 @@ public:
 	ASpawnCabin();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 
 	/** À régler avant BeginPlay (SpawnActorDeferred). */
 	UPROPERTY(EditAnywhere)
@@ -82,6 +83,10 @@ public:
 	/** Apothicairerie : avec sa remise, à droite (+Y), où l'on passe par une porte à la place de la fenêtre. */
 	UPROPERTY(EditAnywhere)
 	bool bStoreroom = false;
+
+	/** Maison d'habitant : laquelle (son style, son mobilier). */
+	UPROPERTY(EditAnywhere)
+	int32 HouseIndex = 0;
 
 private:
 	/** Ce que porte une étagère. */
@@ -96,6 +101,7 @@ private:
 	void BuildApothecaryInterior();
 	void BuildBreederInterior();
 	void BuildWorkshopInterior();
+	void BuildHouseInterior();
 	/** La grange de l'éleveur (trois box, un bhurak de chaque robe), la cour de l'atelier (ce qu'il vend, exposé). */
 	void BuildBarn();
 	void BuildYard();
@@ -110,6 +116,14 @@ private:
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UPointLightComponent> Lamp;
+
+	/**
+	 * Les lampes de la maison (plafond, remise, grange) : leurs ombres ne se calculent que si le joueur est
+	 * tout près. Une lampe qui projette des ombres redessine toute la végétation alentour, à chaque image.
+	 */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UPointLightComponent>> ShadowLamps;
+	bool bLampShadows = false;
 
 	/** Rotation du comptoir généré pour que sa façade regarde la porte. */
 	UPROPERTY(EditAnywhere)

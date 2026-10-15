@@ -693,7 +693,8 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
 				[
-					SNew(STextBlock).Text(Cart->GetCartKind() == ECartKind::Seeder ? LOCTEXT("SeederHeader", "Trémie du semoir") : LOCTEXT("CartHeader", "Charrette"))
+					SNew(STextBlock).Text(Cart->GetCartKind() == ECartKind::Seeder ? LOCTEXT("SeederHeader", "Trémie du semoir")
+						: Cart->GetCartKind() == ECartKind::Harvester ? LOCTEXT("HarvesterHeader", "Coffre de la moissonneuse") : LOCTEXT("CartHeader", "Charrette"))
 					.Font(Font(11, true)).ColorAndOpacity(BagAccent)
 				]
 				+ SVerticalBox::Slot().AutoHeight()[Separator()]
@@ -702,9 +703,11 @@ TSharedRef<SWidget> SInventoryPanel::BuildBagColumn() const
 				[
 					SNew(STextBlock).Text(Cart->GetCartKind() == ECartKind::Seeder
 						? LOCTEXT("SeederHint", "Des sacs de graines : chaque sac sème neuf cases. [G] y verser tous les vôtres.")
+						: Cart->GetCartKind() == ECartKind::Harvester
+						? LOCTEXT("HarvesterHint", "Ce que la moissonneuse a coupé : trois places de dix. Videz-le dans vos poches, ou dans des cagettes.")
 						: Cart->HasLoads()
 						? LOCTEXT("CartBusy", "Elle porte des conteneurs : pas de place pour du petit bois en vrac.")
-						: LOCTEXT("CartHint", "Du petit bois en vrac, trente brassées. [G] y charger tout le vôtre."))
+						: LOCTEXT("CartHint", "En vrac : du petit bois (trente brassées) ou des bûches (six). [G] y charger tout le vôtre."))
 					.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
 				]
 			];

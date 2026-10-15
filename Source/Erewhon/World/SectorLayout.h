@@ -154,12 +154,17 @@ class EREWHON_API USectorLayoutSubsystem : public UWorldSubsystem
 
 public:
 	TSharedRef<const FSectorLayout> GetLayout(const FIntPoint& Sector, int32 WorldSeed);
+	/**
+	 * Le plan allégé d'un secteur lointain : chemins, clairières, champs et arbres (les mêmes que le plan complet),
+	 * sans plantes ni buissons — cinq à dix fois plus rapide à calculer. Gardé dans son propre cache.
+	 */
+	TSharedRef<const FSectorLayout> GetFarLayout(const FIntPoint& Sector, int32 WorldSeed);
 
 	/** Oublie le layout d'un secteur et de ses voisins (ex. un achat trace un chemin d'accès). */
 	void InvalidateAround(const FIntPoint& Sector);
 
 	/** Oublie tous les layouts (ex. le village a été pavé). */
-	void InvalidateAll() { Cache.Reset(); CacheOrder.Reset(); }
+	void InvalidateAll() { Cache.Reset(); CacheOrder.Reset(); FarCache.Reset(); FarCacheOrder.Reset(); }
 
 	/**
 	 * Plante visée depuis Eye dans la direction Look.
@@ -171,7 +176,9 @@ public:
 		TFunctionRef<bool(const FIntPoint& Sector, int32 PlantIndex)> Filter);
 
 private:
-	TSharedRef<FSectorLayout> Build(const FIntPoint& Sector, int32 WorldSeed) const;
+	TSharedRef<FSectorLayout> Build(const FIntPoint& Sector, int32 WorldSeed, bool bPlants = true) const;
+	TMap<FIntPoint, TSharedRef<FSectorLayout>> FarCache;
+	TArray<FIntPoint> FarCacheOrder;
 	void BuildBushes(FSectorLayout& Layout, int32 WorldSeed) const;
 	void BuildTrees(FSectorLayout& Layout, int32 WorldSeed) const;
 	void BuildAccessPaths(FSectorLayout& Layout) const;

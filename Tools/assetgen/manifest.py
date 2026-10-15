@@ -30,6 +30,7 @@ TEXTURES: dict[str, str] = {
     "dark_timber": "horizontal dark weathered tarred wooden wall planks, deep brown almost black with soft warm highlights, a few old nail heads",
     "straw_floor": "a floor covered with loose scattered dry golden straw seen from above",
     "floor_boards": "a wooden floor of long parallel planks running vertically, warm golden oak with darker thin joints and small knots",
+    "bark": "rough tree bark seen up close: deep vertical furrows of warm grey-brown bark with a few soft green moss patches",
 }
 
 TEXTURE_PROMPT = (
@@ -144,6 +145,10 @@ ICONS: dict[str, str] = {
     "potion_jump": "a small tall glass potion flask with a cork, filled with a glowing fresh lime green liquid with rising bubbles",
     "potion_shrink": "a tiny glass potion vial with a cork, filled with a glowing pale pink liquid",
     "potion_grow": "a big round glass potion flask with a cork, filled with a glowing warm amber orange liquid",
+    "axe": "a rustic woodcutter's felling axe with a long wooden handle and a heavy iron head",
+    "log": "a single thick round log of a cut tree trunk with rough brown bark and a light sawn end showing tree rings",
+    "branch": "a long leafy tree branch with many small twigs and lush green leaves",
+    "harvester": "an old wooden horse-drawn grain reaper harvester with a wide wooden reel and two iron wheels",
 }
 
 ICON_PROMPT = (
@@ -158,6 +163,15 @@ TPOSE_PROMPT = (
     "Character sheet render of {subject}. {style}. Stylized game character, full body, strict front view, standing in a T-pose: "
     "both arms stretched straight out horizontally to the sides at shoulder height, palms facing down, fingers together, "
     "legs straight and slightly apart, feet flat, face looking forward with a calm neutral smile, nothing held in the hands, "
+    "nothing touching the body, plain pure white background, no ground shadow, no text."
+)
+
+# Les quadrupèdes à animer : l'équivalent de la T-pose, ce qu'attend le script de squelette (quadruped_rig.py).
+QUADRUPED_PROMPT = (
+    "Character turnaround render of {subject}. {style}. Stylized game creature, full body, strict side profile view "
+    "seen exactly from its left side, standing perfectly still in a neutral pose: all four legs straight and vertical, "
+    "clearly separated from each other with space between front and hind legs, feet flat on the ground, the head facing "
+    "straight forward in line with the body (not turned toward the viewer), mouth closed, the tail extended straight back, "
     "nothing touching the body, plain pure white background, no ground shadow, no text."
 )
 
@@ -617,6 +631,77 @@ MODELS: dict[str, dict] = {
         "subject": "two rustic wooden crates stacked, the top one filled with apples",
         "polycount": 3000,
     },
+    "axe": {
+        "subject": "a rustic woodcutter's felling axe: a long slightly curved wooden handle and a heavy dark iron axe head with a bright sharpened edge, isolated",
+        "polycount": 3000,
+        "ai_model": "meshy-6-lite",
+    },
+    "log": {
+        "subject": "a single thick round log cut from a tree trunk, about one meter long, rough brown bark all around, two clean flat sawn light wood ends showing tree rings, lying horizontally on its side, isolated",
+        "polycount": 3000,
+        "ai_model": "meshy-6-lite",
+    },
+    "leafy_branch": {
+        "subject": "a single long leafy tree branch lying flat: a slightly bent brown woody stick with many small twigs covered in lush fresh green leaves, isolated",
+        "polycount": 4000,
+        "ai_model": "meshy-6-lite",
+    },
+    "market_stall": {
+        "subject": "an empty wooden village market stall: a sturdy long wooden counter table with nothing on it, four tall corner posts holding a slanted striped red and cream fabric awning roof, no goods at all, completely empty, three-quarter front view",
+        "polycount": 6000,
+        "ai_model": "meshy-6-lite",
+    },
+    "harvester": {
+        "subject": "an old wooden horse-drawn grain reaper harvester: a low wooden frame on two iron wheels, a wide horizontal reel of wooden slats at the front above a long row of cutting teeth near the ground, a small open wooden collecting box at the back, two long straight wooden shafts extending forward to hitch an animal, side view three-quarter",
+        "polycount": 8000,
+        "ai_model": "meshy-6-lite",
+    },
+    "villager_baker_tp": {
+        "subject": "a plump cheerful village baker woman, white headscarf, flour-dusted white apron over a soft blue dress, sturdy brown shoes",
+        "concept_prompt": TPOSE_PROMPT,
+        "polycount": 15000,
+        "ai_model": "meshy-6-lite",
+    },
+    "villager_gardener_tp": {
+        "subject": "an elderly gentle village gardener man with a short white beard, a wide straw hat, patched green overalls over a cream shirt, brown boots",
+        "concept_prompt": TPOSE_PROMPT,
+        "polycount": 15000,
+        "ai_model": "meshy-6-lite",
+    },
+    "villager_weaver_tp": {
+        "subject": "a young village weaver woman with a long auburn braid, a mustard yellow knitted cardigan over a white blouse, a long brown skirt, small brown boots",
+        "concept_prompt": TPOSE_PROMPT,
+        "polycount": 15000,
+        "ai_model": "meshy-6-lite",
+    },
+    "field_mouse": {
+        "subject": "a small round field mouse: soft warm brown fur, cream belly, big round ears, tiny pink nose, long thin tail, standing on all four legs, side view",
+        "concept_prompt": QUADRUPED_PROMPT,
+        "symmetry": "on",
+        "polycount": 4000,
+    },
+    "fox": {
+        "subject": "a red fox: bright orange fur, white chest and tail tip, black socks on its legs, pointed ears, big bushy tail, standing calmly on all four legs, side view",
+        "concept_prompt": QUADRUPED_PROMPT,
+        "symmetry": "on",
+        "polycount": 8000,
+    },
+    "wild_boar": {
+        "subject": "a wild boar: stocky body with dark brown bristly fur, a ridge of longer hair on its back, small curved tusks, long snout, short legs, standing on all four legs, side view",
+        "concept_prompt": QUADRUPED_PROMPT,
+        "symmetry": "on",
+        "polycount": 8000,
+    },
+    "deer": {
+        "subject": "a gentle roe deer doe: slender body, warm reddish brown coat, white patch on the rump, big dark eyes, large ears, thin legs, no antlers, standing calmly on all four legs, side view",
+        "concept_prompt": QUADRUPED_PROMPT,
+        "symmetry": "on",
+        "polycount": 8000,
+    },
+    "buzzard": {
+        "subject": "a common buzzard bird of prey soaring in flight, seen from above at a slight angle, broad wings fully spread wide and flat, fanned rounded tail, brown plumage with pale barred underside",
+        "polycount": 5000,
+    },
 }
 
 CONCEPT_PROMPT = (
@@ -674,6 +759,18 @@ RIGS: dict[str, dict] = {
         "animations": {"idle": 0, "walk": 30, "run": 14, "jump": 466, "sit": 33, "crouch": 524,
                        "carry": 551, "push": 261, "pickup": 276},
     },
+    "villager_baker_tp": {
+        "height": 1.65,
+        "animations": {"idle": 0, "walk": 30, "look": 338},
+    },
+    "villager_gardener_tp": {
+        "height": 1.7,
+        "animations": {"idle": 0, "walk": 30, "look": 338},
+    },
+    "villager_weaver_tp": {
+        "height": 1.62,
+        "animations": {"idle": 0, "walk": 30, "look": 338},
+    },
 }
 
 # ── Sons (ElevenLabs) ───────────────────────────────────────────────────────
@@ -710,4 +807,19 @@ SOUNDS: dict[str, tuple] = {
     "mortar_grind": ("a stone pestle grinding and crushing fresh herbs in a stone mortar, two short grinding strokes", 1.0, False),
     "cauldron_bubble": ("a small cauldron of thick potion bubbling and blooping gently, short", 2.5, False),
     "potion_drink": ("a person uncorking a small glass bottle with a pop and drinking a gulp, then a small satisfied breath", 1.6, False),
+    "axe_chop": ("one single heavy axe chop biting into a tree trunk, sharp woody thunk", 0.7, False, 0.5),
+    "tree_fall": ("a big tree creaking and cracking, then crashing down to the ground with a heavy thud and rustling leaves", 4.0, False),
+    "leaves_burst": ("a sudden burst of rustling leaves and snapping small twigs scattering around", 1.2, False),
+    "log_drop": ("a heavy wooden log set down on a pile of logs, hollow wooden knock", 0.6, False, 0.45),
+    "amb_rain_light": ("steady light rain falling on grass and leaves in the countryside, soft gentle patter, continuous, no thunder", 12.0, True),
+    "amb_rain_heavy": ("heavy pouring rain downpour on a meadow and trees, dense roaring rain, continuous, no thunder", 12.0, True),
+    "amb_wind_strong": ("strong gusty wind howling across open countryside, rushing gusts through grass and trees, continuous", 14.0, True),
+    "thunder_1": ("a close loud thunder crack followed by a long deep rolling rumble", 6.0, False),
+    "thunder_2": ("a distant thunder rumbling low and long across the sky", 6.0, False),
+    "thunder_3": ("a medium distance thunder clap with a rolling echo over hills", 6.0, False),
+    "buzzard_cry": ("the high plaintive mewing cry of a buzzard bird of prey circling high in the sky, one long cry", 2.0, False),
+    "fox_yip": ("a red fox giving two short high yips in the countryside", 1.5, False),
+    "boar_grunt": ("a wild boar grunting and snuffling in the forest undergrowth", 2.0, False),
+    "deer_bark": ("a roe deer giving a short sharp alarm bark in the forest", 1.2, False),
+    "mouse_squeak": ("a tiny field mouse squeaking twice in the grass", 0.8, False),
 }

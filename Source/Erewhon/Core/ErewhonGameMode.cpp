@@ -1,5 +1,6 @@
 #include "Core/ErewhonGameMode.h"
 
+#include "World/Villagers.h"
 #include "Core/ErewhonGameState.h"
 #include "Core/ErewhonHUD.h"
 #include "Core/ErewhonPlayerController.h"
@@ -26,6 +27,8 @@
 #include "World/SpawnLayout.h"
 #include "World/Apothecary.h"
 #include "World/Farm.h"
+#include "World/Forestry.h"
+#include "World/FelledTree.h"
 #include "World/Bhurak.h"
 #include "World/DroppedItem.h"
 
@@ -107,7 +110,7 @@ void AErewhonGameMode::InitGameState()
 	const double Now = State->GetWorldClock();
 	for (const FSavedHarvest& Harvest : WorldSave->Harvests)
 	{
-		if (Now - Harvest.HarvestTime < Settings.RegrowSeconds)
+		if (Now - Harvest.HarvestTime < ErewhonForestry::RegrowSeconds(Harvest.PlantIndex))
 		{
 			State->AddHarvest(Harvest.Sector, Harvest.PlantIndex, Harvest.HarvestTime);
 		}
@@ -157,13 +160,30 @@ void AErewhonGameMode::SpawnDoors()
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	for (const EShopKind Kind : ErewhonSpawn::ShopKinds)
 	{
-		if (DoorsSpawned.Contains(Kind) || (Kind == EShopKind::Tailor && !State->HasVillageUpgrade(EVillageUpgrade::Tailor)))
+		if (DoorsSpawned.Contains(Kind) || !State->IsShopBuilt(Kind))
 		{
 			continue;
 		}
 		DoorsSpawned.Add(Kind);
 		const FTransform Hinge = ErewhonSpawn::DoorHingeTransform(Kind);
 		GetWorld()->SpawnActor<ADoor>(Hinge.GetLocation(), Hinge.Rotator(), Params);
+	}
+	// Les maisons des habitants : leur porte, et chacun chez soi.
+	if (!bVillagersSpawned)
+	{
+		bVillagersSpawned = true;
+		for (int32 House = 0; House < ErewhonVillagers::HouseCount; ++House)
+		{
+			const FTransform HouseT = ErewhonVillagers::HouseTransform(House);
+			const FTransform Hinge = FTransform(FVector(-ErewhonSpawn::CabinHalfLength + ErewhonSpawn::CabinWallThickness * 0.5f,
+				-ErewhonSpawn::DoorHalfWidth, ErewhonSpawn::CabinFloorTop)) * HouseT;
+			ADoor* Door = GetWorld()->SpawnActor<ADoor>(Hinge.GetLocation(), Hinge.Rotator(), Params);
+			const FTransform At(HouseT.Rotator(), HouseT.TransformPosition(FVector(60.f, 0.f, ErewhonSpawn::CabinFloorTop + 90.f)));
+			AVillager* Villager = GetWorld()->SpawnActorDeferred<AVillager>(AVillager::StaticClass(), At, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+			Villager->ResidentIndex = House;
+			Villager->HouseDoor = Door;
+			Villager->FinishSpawning(At);
+		}
 	}
 }
 
@@ -306,8 +326,7 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 	if (const FSavedPlayer* Saved = WorldSave ? WorldSave->Players.Find(Key) : nullptr)
 	{
 		PlayerState->SetCoins(Saved->Coins);
-		PlayerState->SetPlayerClass(Saved->PlayerClass == static_cast<uint8>(EPlayerClass::Apothecary) ? EPlayerClass::Apothecary
-			: Saved->PlayerClass == static_cast<uint8>(EPlayerClass::Farmer) ? EPlayerClass::Farmer : EPlayerClass::None);
+		PlayerState->SetPlayerClass(Saved->PlayerClass <= static_cast<uint8>(EPlayerClass::Forester) ? static_cast<EPlayerClass>(Saved->PlayerClass) : EPlayerClass::None);
 		Inventory->RestoreSlots(Saved->Slots);
 		PlayerState->GetBackpack()->Restore(Saved->bHasBackpack, Saved->bBackpackWorn, Saved->BackpackSlots, Saved->BackpackTransform);
 		if (APawn* Pawn = Controller->GetPawn(); Pawn && Saved->bHasLocation)
@@ -377,6 +396,89 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 		const FVector At(Spot.X, Spot.Y, ErewhonTerrain::Height(FVector2D(Spot), GetGameState<AErewhonGameState>()->GetWorldSeed()));
 		SpawnStorage(EStorageKind::Barrel, FTransform(At), Key, DisplayName);
 	}
+	// -ErewhonTestForest : le premier secteur boisé près de la place au joueur, devenu forestier, hache en main,
+	// face à un arbre ; -ErewhonTestFell : l'arbre tombe aussitôt ; -ErewhonTestLogs : un tas de 13 bûches et
+	// une charrette de 6 bûches à côté, deux bûches en main.
+	if (APawn* TestPawn = Controller->GetPawn(); TestPawn && FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestForest")))
+	{
+		AErewhonGameState* TestState = GetGameState<AErewhonGameState>();
+		USectorLayoutSubsystem* Layouts = GetWorld()->GetSubsystem<USectorLayoutSubsystem>();
+		FIntPoint Woods(INT32_MAX, INT32_MAX);
+		for (int32 Ring = 2; Ring < 8 && Woods.X == INT32_MAX; ++Ring)
+		{
+			for (int32 X = -Ring; X <= Ring && Woods.X == INT32_MAX; ++X)
+			{
+				for (int32 Y = -Ring; Y <= Ring && Woods.X == INT32_MAX; ++Y)
+				{
+					const FIntPoint Candidate(X, Y);
+					const ESectorType Type = ErewhonSector::TypeAt(Candidate, TestState->GetWorldSeed());
+					if ((Type == ESectorType::Edge || Type == ESectorType::Forest) && ErewhonSector::IsPurchasable(Candidate)
+						&& Layouts->GetLayout(Candidate, TestState->GetWorldSeed())->Trees.Num() > 0)
+					{
+						Woods = Candidate;
+					}
+				}
+			}
+		}
+		if (Woods.X != INT32_MAX)
+		{
+			TestState->SetSectorOwner(Woods, Key, DisplayName, 0, 0, 0);
+			PlayerState->SetPlayerClass(EPlayerClass::Forester);
+			if (FInventorySlot* Hand = Inventory->EditHandSlot())
+			{
+				Hand->ItemId = ErewhonForestry::Axe;
+				Hand->Count = 1;
+			}
+			Inventory->CommitChanges();
+			// L'arbre le plus près du centre du secteur, et le joueur à quatre mètres, face à lui.
+			const TSharedRef<const FSectorLayout> Layout = Layouts->GetLayout(Woods, TestState->GetWorldSeed());
+			int32 Best = 0;
+			for (int32 i = 1; i < Layout->Trees.Num(); ++i)
+			{
+				if (FVector::Dist2D(Layout->Trees[i].Location, ErewhonSector::Center(Woods)) < FVector::Dist2D(Layout->Trees[Best].Location, ErewhonSector::Center(Woods)))
+				{
+					Best = i;
+				}
+			}
+			const FVector TreeAt = Layout->Trees[Best].Location;
+			const FVector2D Foot = FVector2D(TreeAt) - FVector2D(400.f, 0.f);
+			TestPawn->TeleportTo(FVector(Foot, ErewhonTerrain::Height(Foot, TestState->GetWorldSeed()) + 100.f), FRotator::ZeroRotator);
+			Controller->SetControlRotation(FRotator(-10.f, 0.f, 0.f));
+			if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestFell")))
+			{
+				for (int32 Hit = 0; Hit < 12 && !TestState->IsHarvested(Woods, ErewhonForestry::HarvestIndexOfTree(Best)); ++Hit)
+				{
+					LastAxeHit.Reset();
+					TryChopTree(Controller, Woods, Best);
+				}
+			}
+			if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestLogs")))
+			{
+				const FVector2D PileAt = Foot + FVector2D(150.f, -300.f);
+				AStorageActor* Pile = SpawnStorage(EStorageKind::LogPile, FTransform(FRotator(0.f, 0.f, 0.f), FVector(PileAt, ErewhonTerrain::Height(PileAt, TestState->GetWorldSeed()))), Key, DisplayName);
+				Pile->StoreItem(ErewhonForestry::Log, 13);
+				Pile->Commit();
+				const FVector2D CartAt2D = Foot + FVector2D(150.f, 300.f);
+				const FTransform CartAt(FRotator(0.f, 0.f, 0.f), FVector(CartAt2D, ErewhonTerrain::Height(CartAt2D, TestState->GetWorldSeed())));
+				ACart* LogCart = GetWorld()->SpawnActorDeferred<ACart>(ACart::StaticClass(), CartAt);
+				LogCart->Setup(Key, DisplayName);
+				for (int32 i = 0; i < ACart::WoodSlots; ++i)
+				{
+					LogCart->EditWood()[i].ItemId = ErewhonForestry::Log;
+					LogCart->EditWood()[i].Count = 2;
+				}
+				LogCart->FinishSpawning(CartAt);
+				LogCart->CommitWood();
+				if (FInventorySlot* Hand = Inventory->EditHandSlot())
+				{
+					Inventory->StoreItem(ErewhonForestry::Axe, 1);
+					Hand->ItemId = ErewhonForestry::Log;
+					Hand->Count = 2;
+				}
+			}
+			Inventory->CommitChanges();
+		}
+	}
 	// -ErewhonTestFarm : le secteur 1:1 au joueur avec ses quatre champs (-ErewhonTestFarmMerged : réunis), un peu
 	// de chaque étape dans le champ nord-est (retourné, semé, pousses d'un et deux jours, mûr), et un fermier outillé.
 	if (APawn* TestPawn = Controller->GetPawn(); TestPawn && FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestFarm")))
@@ -444,7 +546,7 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 		FString TowName;
 		if (FParse::Value(FCommandLine::Get(), TEXT("ErewhonTestTow="), TowName))
 		{
-			const ECartKind TowKind = TowName == TEXT("seeder") ? ECartKind::Seeder : ECartKind::Cultivator;
+			const ECartKind TowKind = TowName == TEXT("seeder") ? ECartKind::Seeder : TowName == TEXT("harvester") ? ECartKind::Harvester : ECartKind::Cultivator;
 			const FVector2D Start = FVector2D(ErewhonSector::Origin(TestSector)) + FVector2D(2500.f, 5600.f);
 			const FTransform BeastAt(FRotator(0.f, 90.f, 0.f), FVector(Start, ErewhonTerrain::Height(Start, TestState->GetWorldSeed())));
 			ABhurak* Beast = SpawnBhurak(BeastAt, Key, DisplayName);
@@ -1225,14 +1327,14 @@ FText AErewhonGameMode::TryChooseClass(AErewhonPlayerController* Controller, uin
 	{
 		return LOCTEXT("ManagerTooFar", "La mairie est trop loin.");
 	}
-	const EPlayerClass Wanted = NewClass == static_cast<uint8>(EPlayerClass::Apothecary) ? EPlayerClass::Apothecary
-		: NewClass == static_cast<uint8>(EPlayerClass::Farmer) ? EPlayerClass::Farmer : EPlayerClass::None;
+	const EPlayerClass Wanted = NewClass <= static_cast<uint8>(EPlayerClass::Forester) ? static_cast<EPlayerClass>(NewClass) : EPlayerClass::None;
 	if (PlayerState->GetPlayerClass() == Wanted)
 	{
 		return FText::GetEmpty();
 	}
 	const int32 Price = Wanted == EPlayerClass::Apothecary ? UErewhonSettings::Get().ApothecaryClassPrice
-		: Wanted == EPlayerClass::Farmer ? UErewhonSettings::Get().FarmerClassPrice : 0;
+		: Wanted == EPlayerClass::Farmer ? UErewhonSettings::Get().FarmerClassPrice
+		: Wanted == EPlayerClass::Forester ? UErewhonSettings::Get().ForesterClassPrice : 0;
 	if (Price > 0 && !PlayerState->SpendCoins(Price))
 	{
 		return LOCTEXT("NotEnoughCoins", "Pas assez de pièces.");
@@ -1240,6 +1342,7 @@ FText AErewhonGameMode::TryChooseClass(AErewhonPlayerController* Controller, uin
 	PlayerState->SetPlayerClass(Wanted);
 	Controller->ClientToast(Wanted == EPlayerClass::Apothecary ? LOCTEXT("NowApothecary", "Vous voilà apothicaire !")
 		: Wanted == EPlayerClass::Farmer ? LOCTEXT("NowFarmer", "Vous voilà fermier !")
+		: Wanted == EPlayerClass::Forester ? LOCTEXT("NowForester", "Vous voilà forestier !")
 		: LOCTEXT("NowNone", "Vous n'avez plus de classe particulière."));
 	return FText::GetEmpty();
 }
@@ -1743,6 +1846,10 @@ FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName I
 	{
 		return LOCTEXT("FarmerOnlyItem", "Ce n'est vendu qu'aux fermiers (la classe se choisit à la mairie).");
 	}
+	if (Def->bForesterOnly && !PlayerState->IsForester())
+	{
+		return LOCTEXT("ForesterOnlyItem", "Ce n'est vendu qu'aux forestiers (la classe se choisit à la mairie).");
+	}
 	UInventoryComponent* Inventory = PlayerState->GetInventory();
 	if (Def->IsBackpack())
 	{
@@ -2126,6 +2233,7 @@ FText AErewhonGameMode::TryBuyVillageUpgrade(AErewhonPlayerController* Controlle
 		return LOCTEXT("NotEnoughCoins", "Pas assez de pièces.");
 	}
 	State->AddVillageUpgrade(Upgrade);
+	SpawnDoors();   // une boutique de plus : sa porte
 	SaveWorld();
 	return FText::GetEmpty();
 }
@@ -2263,7 +2371,14 @@ FText AErewhonGameMode::TryPickUpDropped(AErewhonPlayerController* Controller, A
 	{
 		return LOCTEXT("DroppedNotYours", "C'est sur le terrain de quelqu'un d'autre : seul son propriétaire peut le ramasser.");
 	}
-	const int32 Stored = PlayerState->GetInventory()->StoreItem(Dropped->GetItemId(), Dropped->GetCount());
+	// Les bûches : deux dans les bras, pas plus.
+	const bool bLogs = Dropped->GetItemId() == ErewhonForestry::Log;
+	const int32 Wanted = bLogs ? FMath::Min(Dropped->GetCount(), ErewhonForestry::RoomForLogs(PlayerState->GetInventory())) : Dropped->GetCount();
+	if (bLogs && Wanted <= 0)
+	{
+		return LOCTEXT("ArmsFullDrop", "Vos bras sont pleins : on ne porte que deux bûches.");
+	}
+	const int32 Stored = PlayerState->GetInventory()->StoreItem(Dropped->GetItemId(), Wanted);
 	if (Stored <= 0)
 	{
 		return LOCTEXT("InventoryFull", "Inventaire plein.");
@@ -2375,6 +2490,42 @@ FText AErewhonGameMode::TryPlace(AErewhonPlayerController* Controller, uint8 Typ
 			return FText::GetEmpty();
 		}
 		const EStorageKind Kind = Storage ? Storage->GetKind() : NewKind.GetValue();
+		// Des bûches en main : un tas neuf au sol, ou sur un tas à soi.
+		if (bFromHand && Kind == EStorageKind::LogPile)
+		{
+			FInventorySlot* LogSlot = Inventory->EditHandSlot();
+			const int32 Held = LogSlot && LogSlot->ItemId == ErewhonForestry::Log ? LogSlot->Count : 0;
+			AStorageActor* Pile = Type == 1 ? Cast<AStorageActor>(Target) : nullptr;
+			if (Held <= 0 || Type == 2)
+			{
+				return Type == 2 ? LOCTEXT("LogsByTheSide", "Les bûches se chargent par le côté de la charrette : [F] pour l'ouvrir.") : FText::GetEmpty();
+			}
+			if (Type == 1 && (!Pile || Pile->GetKind() != EStorageKind::LogPile || !Pile->IsOwnedBy(PlayerState->GetPlayerKey())))
+			{
+				return LOCTEXT("NotAPile", "On ne les pose que sur un de ses tas de bûches.");
+			}
+			if (Pile && Pile->CountStored(ErewhonForestry::Log) >= ErewhonForestry::PileCapacity)
+			{
+				return LOCTEXT("PileFull", "Ce tas est complet : vingt bûches.");
+			}
+			if (!Pile)
+			{
+				const FTransform Spawn(FRotator(0.f, Yaw, 0.f), Location);
+				Pile = GetWorld()->SpawnActorDeferred<AStorageActor>(AStorageActor::StaticClass(), Spawn);
+				Pile->Setup(EStorageKind::LogPile, PlayerState->GetPlayerKey(), PlayerState->GetPlayerName());
+				Pile->FinishSpawning(Spawn);
+				Pile->PlaceOnGround(Location, Yaw);
+			}
+			const int32 Put = Pile->StoreItem(ErewhonForestry::Log, Held);
+			LogSlot->Count -= Put;
+			if (LogSlot->Count <= 0)
+			{
+				LogSlot->Clear();
+			}
+			Inventory->CommitChanges();
+			Pile->Commit();
+			return FText::GetEmpty();
+		}
 		AStorageActor* Base = Type == 1 ? Cast<AStorageActor>(Target) : nullptr;
 		ACart* Cart = Type == 2 ? Cast<ACart>(Target) : nullptr;
 		const bool bMortarOnTable = Type == 1 && Base && Kind == EStorageKind::Mortar && Base->GetKind() == EStorageKind::Table && !Base->GetAbove();
@@ -2596,7 +2747,8 @@ FText AErewhonGameMode::TryMoveCartItem(AErewhonPlayerController* Controller, AC
 	if (bToCart && !Cart->AcceptsBulk(ItemId))
 	{
 		return Cart->GetCartKind() == ECartKind::Seeder ? LOCTEXT("SeedsOnly", "La trémie ne prend que des sacs de graines.")
-			: LOCTEXT("WoodOnly", "En vrac, la charrette ne porte que du petit bois.");
+			: Cart->GetCartKind() == ECartKind::Harvester ? LOCTEXT("HopperOnly", "Le coffre se remplit tout seul, en moissonnant.")
+			: LOCTEXT("WoodOnly", "En vrac, la charrette ne porte que du petit bois ou des bûches.");
 	}
 	const FItemDef* Def = Items->Find(ItemId);
 	const int32 Cap = Def ? FMath::Min(Def->MaxStack, 10) : 10;
@@ -2623,12 +2775,17 @@ FText AErewhonGameMode::TryMoveCartItem(AErewhonPlayerController* Controller, AC
 		}
 		else
 		{
-			Moved = Inventory->StoreItem(ItemId, Source[From].Count);
+			// Les bûches : deux dans les bras, pas plus.
+			Moved = Inventory->StoreItem(ItemId, ItemId == ErewhonForestry::Log ? FMath::Min(Source[From].Count, ErewhonForestry::RoomForLogs(Inventory)) : Source[From].Count);
 		}
 	}
 	else if (Target.IsValidIndex(To) && (Target[To].IsEmpty() || Target[To].ItemId == ItemId) && (bToCart || Target[To].Kind == ESlotKind::Inventory))
 	{
 		Moved = FMath::Min(Source[From].Count, (bToCart ? Cap : Def->MaxStack) - (Target[To].IsEmpty() ? 0 : Target[To].Count));
+		if (!bToCart && ItemId == ErewhonForestry::Log)
+		{
+			Moved = FMath::Min(Moved, ErewhonForestry::RoomForLogs(Inventory));
+		}
 		if (Moved > 0)
 		{
 			Target[To].Count = (Target[To].IsEmpty() ? 0 : Target[To].Count) + Moved;
@@ -2846,6 +3003,21 @@ void AErewhonGameMode::CaptureObjects()
 		WorldSave->Carts.Add({ It->GetOwnerKey(), It->GetOwnerName(), FTransform(FRotator(0.f, It->GetActorRotation().Yaw, 0.f), It->GetActorLocation()), It->GetWood(),
 			static_cast<uint8>(It->GetCartKind()), It->IsEngaged() });
 	}
+	// Les troncs couchés.
+	WorldSave->FelledTrees.Reset();
+	for (TActorIterator<AFelledTree> It(GetWorld()); It; ++It)
+	{
+		FSavedFelledTree& Saved = WorldSave->FelledTrees.AddDefaulted_GetRef();
+		Saved.Location = It->GetActorLocation();
+		Saved.Model = It->GetModel();
+		Saved.Height = It->GetTreeHeight();
+		Saved.Girth = It->GetGirth();
+		Saved.TreeYaw = It->GetTreeYaw();
+		Saved.FallYaw = It->GetFallYaw();
+		Saved.LogsLeft = It->GetLogsLeft();
+		Saved.OwnerKey = It->GetOwnerKey();
+		Saved.OwnerName = It->GetOwnerName();
+	}
 	// Du bas des piles vers le haut : une cagette est toujours enregistrée après celle qui la porte.
 	TArray<AStorageActor*> Ordered;
 	WorldSave->Bhuraks.Reset();
@@ -2915,6 +3087,23 @@ void AErewhonGameMode::CaptureObjects()
 
 void AErewhonGameMode::SpawnSavedObjects()
 {
+	// Les troncs couchés : déjà tombés depuis longtemps.
+	for (const FSavedFelledTree& Saved : WorldSave->FelledTrees)
+	{
+		if (Saved.LogsLeft <= 0)
+		{
+			continue;
+		}
+		FTreeInstance Tree;
+		Tree.Model = Saved.Model;
+		Tree.Height = Saved.Height;
+		Tree.Girth = Saved.Girth;
+		Tree.Yaw = Saved.TreeYaw;
+		const FTransform At(FRotator::ZeroRotator, Saved.Location);
+		AFelledTree* Felled = GetWorld()->SpawnActorDeferred<AFelledTree>(AFelledTree::StaticClass(), At, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		Felled->Setup(Tree, Saved.FallYaw, -1.0e6, Saved.OwnerKey, Saved.OwnerName, Saved.LogsLeft);
+		Felled->FinishSpawning(At);
+	}
 	TArray<ACart*> Carts;
 	for (const FSavedCart& Saved : WorldSave->Carts)
 	{

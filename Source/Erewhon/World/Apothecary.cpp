@@ -815,6 +815,7 @@ void AApothecary::BuildLocal()
 	FireLight->SetAttenuationRadius(900.f);
 	FireLight->SetLightColor(GFireColor);
 	FireLight->SetSourceRadius(20.f);
+	FireLight->SetCastShadows(false);
 	FireLight->SetVisibility(false);
 	FireLight->RegisterComponent();
 	AddInstanceComponent(FireLight);
@@ -843,6 +844,17 @@ void AApothecary::Tick(float DeltaSeconds)
 	if (GetNetMode() != NM_DedicatedServer)
 	{
 		UpdateFire(DeltaSeconds);
+		// Ses ombres dansantes, seulement quand on est dans la maison ou devant.
+		if (FireLight)
+		{
+			const APlayerController* Local = GetWorld()->GetFirstPlayerController();
+			const APawn* Viewer = Local ? Local->GetPawn() : nullptr;
+			const bool bNear = Viewer && FVector::Dist2D(Viewer->GetActorLocation(), GetActorLocation()) < 1200.f;
+			if (FireLight->CastShadows != bNear)
+			{
+				FireLight->SetCastShadows(bNear);
+			}
+		}
 	}
 	// Le feu qui faiblit se nourrit tout seul au rack à petit bois posé près de la cheminée.
 	if (HasAuthority() && (RefuelTimer += DeltaSeconds) >= 1.f)

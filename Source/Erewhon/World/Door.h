@@ -29,6 +29,7 @@ public:
 
 	/** Serveur : ouvre ou ferme. */
 	void Toggle();
+	bool IsOpen() const { return bOpen; }
 
 	/** Dimensions du battant (cm). */
 	UPROPERTY(EditAnywhere, Category = "Door")

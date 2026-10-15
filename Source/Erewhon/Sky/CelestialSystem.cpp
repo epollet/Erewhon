@@ -100,6 +100,17 @@ ACelestialSystem::ACelestialSystem()
 	Usha = MakeLight(TEXT("Usha"), FLinearColor::FromSRGBColor(FColor(255, 160, 110)), 4.5f, 1);
 	Moon = MakeLight(TEXT("Moon"), FLinearColor::FromSRGBColor(FColor(190, 210, 255)), 1.5f, -1);
 	Moon->SetCastShadows(false);
+	// Les nuages font de l'ombre au sol, et le Soleil perce en rayons à travers eux.
+	Sun->bCastCloudShadows = true;
+	Sun->CloudShadowStrength = 0.65f;
+	// L'ombre des nuages coûte cher (une carte d'ombre calculée par rayons dans les nuages) : on la limite
+	// aux 20 km autour du joueur, à demi-résolution et avec moins d'échantillons (150 km par défaut).
+	Sun->CloudShadowExtent = 20.f;
+	Sun->CloudShadowMapResolutionScale = 0.5f;
+	Sun->CloudShadowRaySampleCountScale = 0.35f;
+	Sun->bEnableLightShaftBloom = true;
+	Sun->BloomScale = 0.25f;
+	Sun->BloomThreshold = 4.f;
 	// Une seule ombre portée, celle du Soleil : la seconde carte d'ombres d'Usha coûte cher.
 	Usha->SetCastShadows(false);
 	// Une seule lumière sert à la brume et aux translucides : le Soleil d'abord.
@@ -124,6 +135,8 @@ ACelestialSystem::ACelestialSystem()
 
 	Clouds = CreateDefaultSubobject<UVolumetricCloudComponent>(TEXT("Clouds"));
 	Clouds->SetupAttachment(Root);
+	// Une couche de 4 km d'épaisseur : assez pour de gros cumulus, moins de nuage à traverser à chaque rayon.
+	Clouds->SetLayerHeight(4.f);
 
 	Grading = CreateDefaultSubobject<UPostProcessComponent>(TEXT("Grading"));
 	Grading->SetupAttachment(Root);
@@ -136,6 +149,11 @@ ACelestialSystem::ACelestialSystem()
 	PP.ColorContrast = FVector4(0.96f, 0.96f, 0.96f, 1.f);
 	PP.bOverride_BloomIntensity = true;
 	PP.BloomIntensity = 0.9f;
+	// Face au Soleil, des ronds lumineux alignés (reflets dans l'objectif).
+	PP.bOverride_LensFlareIntensity = true;
+	PP.LensFlareIntensity = 0.55f;
+	PP.bOverride_LensFlareBokehSize = true;
+	PP.LensFlareBokehSize = 2.5f;
 	// Pas de flou de mouvement : une image nette, comme peinte (et des étoiles qui restent des points).
 	PP.bOverride_MotionBlurAmount = true;
 	PP.MotionBlurAmount = 0.f;
@@ -165,6 +183,7 @@ ACelestialSystem::ACelestialSystem()
 void ACelestialSystem::BeginPlay()
 {
 	Super::BeginPlay();
+	ErewhonWeather::ReadTestOverrides();
 	SetupCloudMaterial();
 	ApplyUserSettings();
 	BuildNightSky();
@@ -209,11 +228,19 @@ void ACelestialSystem::SetupCloudMaterial()
 			CloudCoverageParam = Info.Name;
 			Base->GetScalarParameterValue(Info, CloudCoverageDefault);
 		}
+		if (Name == TEXT("StormClouds"))
+		{
+			CloudStormParam = Info.Name;
+		}
 	}
 	Base->GetAllVectorParameterInfo(Infos, Ids);
 	FLinearColor Wind = FLinearColor::Transparent;
 	for (const FMaterialParameterInfo& Info : Infos)
 	{
+		if (Info.Name.ToString() == TEXT("Cloud_AlbedoColor"))
+		{
+			CloudAlbedoParam = Info.Name;
+		}
 		// Le vent du matériau fait défiler la carte des nuages : direction (RG), vitesses (BA).
 		// On garde la direction, on accélère le défilement.
 		if (Info.Name.ToString().Contains(TEXT("WindControls")) && Base->GetVectorParameterValue(Info, Wind))
@@ -237,7 +264,9 @@ void ACelestialSystem::Tick(float DeltaSeconds)
 		return;
 	}
 	const double Clock = State->GetWorldClock();
-	UpdateBody(Sun, SunOrbit, SunLux, Clock);
+	Weather = ErewhonWeather::Sample(Clock, State->GetWorldSeed());
+	// Sous un ciel lourd, le Soleil n'éclaire plus qu'à travers les nuages.
+	UpdateBody(Sun, SunOrbit, SunLux * FMath::Lerp(1.f, 0.42f, Weather.Darkness), Clock);
 	UpdateBody(Usha, UshaOrbit, UshaLux, Clock);
 	UpdateBody(Moon, MoonOrbit, MoonLux, Clock);
 	UpdateClouds(Clock);
@@ -371,13 +400,42 @@ void ACelestialSystem::UpdateClouds(double WorldClock)
 	if (UErewhonMaterials* Materials = GetWorld()->GetSubsystem<UErewhonMaterials>())
 	{
 		// L'herbe ondule avec le même vent que les nuages : plus fort, plus vite.
-		const float Strength = FMath::Clamp(static_cast<float>(ErewhonWind::Velocity(WorldClock).Size() / (ErewhonWind::BaseSpeed + ErewhonWind::SpeedAmplitude)), 0.f, 1.f);
-		Materials->SetWind(FMath::Lerp(0.15f, 0.6f, Strength), FMath::Lerp(0.35f, 1.1f, Strength) * Settings.FoliageWindSpeedFactor);
+		// L'herbe ondule avec le vent du moment : la météo le renforce (orage) ou le calme.
+		const float Strength = FMath::Clamp(static_cast<float>(ErewhonWind::Velocity(WorldClock).Size() / (ErewhonWind::BaseSpeed + ErewhonWind::SpeedAmplitude)) * Weather.Wind, 0.f, 2.5f);
+		Materials->SetWind(FMath::Lerp(0.15f, 0.6f, FMath::Min(Strength, 1.f)) * FMath::Lerp(1.f, 1.8f, FMath::Clamp(Strength - 1.f, 0.f, 1.f)),
+			FMath::Lerp(0.35f, 1.1f, FMath::Min(Strength, 1.f)) * FMath::Lerp(1.f, 1.6f, FMath::Clamp(Strength - 1.f, 0.f, 1.f)) * Settings.FoliageWindSpeedFactor);
 	}
 	if (CloudMaterial && !CloudCoverageParam.IsNone())
 	{
-		// Le ciel se couvre et se dégage sur CloudCoveragePeriodSeconds, autour du réglage du matériau.
-		const float Wave = FMath::Sin(WorldClock * UE_DOUBLE_TWO_PI / Settings.CloudCoveragePeriodSeconds);
-		CloudMaterial->SetScalarParameterValue(CloudCoverageParam, CloudCoverageDefault * (1.f + CloudCoverageSwing * Wave));
+		// La couverture, l'orage et la couleur des nuages suivent la météo.
+		CloudMaterial->SetScalarParameterValue(CloudCoverageParam, Weather.Coverage);
+		if (!CloudStormParam.IsNone())
+		{
+			CloudMaterial->SetScalarParameterValue(CloudStormParam, Weather.Storm);
+		}
+		if (!CloudAlbedoParam.IsNone())
+		{
+			const float Albedo = FMath::Lerp(0.98f, 0.62f, Weather.Darkness);
+			CloudMaterial->SetVectorParameterValue(CloudAlbedoParam, FLinearColor(Albedo, Albedo, Albedo * 1.02f, 0.5f));
+		}
+	}
+	// La couche de nuages, plus ou moins basse.
+	if (FMath::Abs(Clouds->LayerBottomAltitude - Weather.CloudBase) > 0.02f)
+	{
+		Clouds->SetLayerBottomAltitude(Weather.CloudBase);
+	}
+	// La brume : la pluie la rend plus dense ; au soleil humide, elle se couche dans les creux.
+	Fog->SetFogDensity(0.007f + 0.02f * Weather.Rain + 0.09f * Weather.Mist);
+	Fog->SetFogHeightFalloff(FMath::Lerp(0.15f, 0.6f, Weather.Mist));
+	Fog->SetStartDistance(FMath::Lerp(5000.f, 300.f, FMath::Max(Weather.Mist, Weather.Rain * 0.6f)));
+	SkyLight->SetIntensity(FMath::Lerp(1.3f, 1.05f, Weather.Darkness));
+	// Un ciel chargé coûte cher à calculer : on échantillonne les nuages un peu moins finement.
+	const UErewhonUserSettings* User = UErewhonUserSettings::Get();
+	const int32 Quality = User ? User->CloudQuality : 1;
+	const float Samples = (Quality == 0 ? 0.25f : Quality == 1 ? 0.5f : 1.f) * FMath::Lerp(1.f, 0.55f, FMath::SmoothStep(-0.2f, 0.5f, Weather.Coverage));
+	if (FMath::Abs(Clouds->ViewSampleCountScale - Samples) > 0.02f)
+	{
+		Clouds->SetViewSampleCountScale(Samples);
+		Clouds->SetShadowViewSampleCountScale(Samples);
 	}
 }

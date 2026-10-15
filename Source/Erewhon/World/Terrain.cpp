@@ -1,5 +1,6 @@
 #include "World/Terrain.h"
 
+#include "World/Villagers.h"
 #include "Core/ErewhonSettings.h"
 #include "World/SectorTypes.h"
 #include "World/SpawnLayout.h"
@@ -133,6 +134,8 @@ namespace ErewhonTerrain
 			const float ToAnnex = FVector2D::Distance(World, Annex);
 			Flatten = FMath::Min(Flatten, FMath::SmoothStep(1500.f, 3500.f, FMath::Min(ToHouse, ToAnnex)));
 		}
+		// Les maisons des habitants et le marché.
+		Flatten = FMath::Min(Flatten, ErewhonVillagers::FlattenFactor(World));
 		return Height * Flatten;
 	}
 

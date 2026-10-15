@@ -162,6 +162,23 @@ struct FSavedStorage
 	UPROPERTY() float Level = 0.5f;
 };
 
+/** Un arbre abattu, couché au sol, et ce qu'il reste de bûches à en tirer. */
+USTRUCT()
+struct FSavedFelledTree
+{
+	GENERATED_BODY()
+
+	UPROPERTY() FVector Location = FVector::ZeroVector;
+	UPROPERTY() int32 Model = 0;
+	UPROPERTY() float Height = 1000.f;
+	UPROPERTY() float Girth = 1.f;
+	UPROPERTY() float TreeYaw = 0.f;
+	UPROPERTY() float FallYaw = 0.f;
+	UPROPERTY() int32 LogsLeft = 0;
+	UPROPERTY() FString OwnerKey;
+	UPROPERTY() FString OwnerName;
+};
+
 /** Sauvegarde serveur du monde (Saved/SaveGames/<WorldSaveSlot>.sav). */
 UCLASS()
 class EREWHON_API UErewhonWorldSave : public USaveGame
@@ -196,6 +213,9 @@ public:
 
 	UPROPERTY()
 	TArray<FSavedBhurak> Bhuraks;
+
+	UPROPERTY()
+	TArray<FSavedFelledTree> FelledTrees;
 
 	UPROPERTY()
 	TMap<FString, FSavedPlayer> Players;

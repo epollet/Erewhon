@@ -336,6 +336,26 @@
       "buy_price": 1000, "max_stack": 1, "color": [150, 110, 70]
     },
     {
+      "id": "harvester", "name": "Moissonneuse", "category": "placeable", "shop": "workshop", "farmer_only": true, "weight": 60,
+      "description": "Tirée par un bhurak harnaché, rabatteur baissé, elle coupe les cultures mûres sous elle et les garde dans son coffre (on avance 30 % moins vite).\nEn selle : [Clic] baisser ou lever le rabatteur. [F] sur le côté : vider le coffre.",
+      "buy_price": 2000, "max_stack": 1, "color": [150, 120, 80]
+    },
+    {
+      "id": "axe", "name": "Hache", "category": "tool", "forester_only": true, "weight": 2.5,
+      "description": "La hache du forestier : quelques coups au pied d'un arbre de ses secteurs, et il tombe. Sur le tronc couché, chaque coup détache une bûche.",
+      "buy_price": 350, "max_stack": 1, "color": [150, 150, 160]
+    },
+    {
+      "id": "log", "name": "Bûche", "category": "resource", "holdable": true, "weight": 10,
+      "description": "Une grosse bûche fendue au tronc. On n'en porte que deux à la fois.\nEn main, cliquez au sol pour faire un tas (vingt au plus), ou sur un tas pour l'y ajouter. La charrette en prend six.",
+      "sell_price": 8, "max_stack": 2, "color": [140, 96, 60]
+    },
+    {
+      "id": "branch", "name": "Branche feuillue", "category": "resource", "weight": 1,
+      "description": "Ce qui reste d'une cime abattue : une branche couverte de feuilles.",
+      "sell_price": 2, "max_stack": 10, "color": [110, 150, 70], "mesh": "/Game/Generated/Meshes/SM_leafy_branch.SM_leafy_branch"
+    },
+    {
       "id": "crate", "name": "Cagette", "category": "placeable", "weight": 3,
       "description": "Pour ranger ses plantes : 12 places. Elles s'empilent par trois.\nEn main, cliquez au sol pour la poser ; [E] pour la reprendre, [F] pour l'ouvrir.",
       "buy_price": 200, "max_stack": 3, "color": [200, 160, 100]

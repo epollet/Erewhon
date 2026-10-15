@@ -1,0 +1,117 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Player/Interactable.h"
+#include "Villagers.generated.h"
+
+class UCapsuleComponent;
+class USkeletalMeshComponent;
+class UAnimSequence;
+class ADoor;
+struct FClearing;
+
+/**
+ * Les habitants du village : trois maisons au bord des routes, juste après la place, et leurs propriétaires,
+ * qui vont et viennent chez eux puis sortent se promener (la place, le marché, les routes du village).
+ * Et le marché : une grande place de terre au nord-est, avec ses étals.
+ * Tout est en coordonnées monde, déduit de la place : le serveur et chaque client le calculent à l'identique.
+ */
+namespace ErewhonVillagers
+{
+	constexpr int32 HouseCount = 3;
+
+	struct FResident
+	{
+		const TCHAR* Character;   // Characters/<nom>/SK_<nom>
+		const TCHAR* Name;
+		const TCHAR* Trade;
+	};
+	EREWHON_API const FResident& Resident(int32 Index);
+
+	/** La maison (la porte côté −X du repère, vers la route), son perron, et où son sentier rejoint la route. */
+	EREWHON_API FTransform HouseTransform(int32 Index);
+	EREWHON_API FVector2D Doorstep(int32 Index);
+	EREWHON_API FVector2D LaneEnd(int32 Index);
+	/** La route que longe la maison : nord (+X), est (+Y), ouest (−Y). */
+	EREWHON_API FVector2D RoadDir(int32 Index);
+
+	/** Le marché : son centre, son rayon, ses étals (repère : comptoir face à −X, vers le centre). */
+	EREWHON_API FVector2D MarketCenter();
+	constexpr float MarketRadius = 1300.f;
+	constexpr int32 StallCount = 6;
+	EREWHON_API FTransform StallTransform(int32 Index);
+	/** Où le chemin du marché quitte la route du nord. */
+	EREWHON_API FVector2D MarketJunction();
+
+	/** La terre et les sentiers des maisons et du marché, pour le secteur Coord (ajoutés à Clearings et Paths). */
+	EREWHON_API void AddGrounds(const FIntPoint& Coord, TArray<FClearing>& Clearings, TArray<FBox2D>& Paths, TArray<bool>& Paved);
+
+	/** Le sol est aplani autour : 0 tout près, 1 loin (voir ErewhonTerrain). */
+	EREWHON_API float FlattenFactor(const FVector2D& World);
+}
+
+/**
+ * Un habitant : le serveur le fait marcher (mouvement répliqué), chaque machine l'anime
+ * (marche quand il avance, attente sinon, un regard de temps en temps). [E] : il vous salue.
+ */
+UCLASS()
+class EREWHON_API AVillager : public AActor, public IErewhonInteractable
+{
+	GENERATED_BODY()
+
+public:
+	AVillager();
+
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	virtual FText GetInteractionLabel() const override;
+	virtual void Interact(class AErewhonPlayerController* Controller) override;
+
+	/** À régler avant BeginPlay. */
+	UPROPERTY(Replicated)
+	int32 ResidentIndex = 0;
+
+	/** La porte de sa maison (serveur), qu'il ouvre en passant. */
+	TWeakObjectPtr<ADoor> HouseDoor;
+
+private:
+	// Serveur : où il va.
+	void PlanAtHome();
+	void PlanOuting();
+	void PlanReturn();
+	void StepServer(float DeltaSeconds);
+	float GroundZ(const FVector2D& At) const;
+	void HandleDoor();
+
+	// Client : l'animation.
+	void Play(FName Name, bool bLoop, float Rate = 1.f);
+	void StepAnimation(float DeltaSeconds);
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UCapsuleComponent> Capsule;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USkeletalMeshComponent> Body;
+
+	UPROPERTY(Transient)
+	TMap<FName, TObjectPtr<UAnimSequence>> Animations;
+
+	enum class EPlace : uint8 { Home, Out, Returning };
+	EPlace Place = EPlace::Home;
+	TArray<FVector2D> Route;
+	int32 NextPoint = 0;
+	float WaitLeft = 0.f;
+	float HomeLeft = 0.f;
+	int32 OutingStops = 0;
+	bool bOpenedDoor = false;
+
+	FName Playing;
+	double PlayingUntil = 0.0;
+	double NextLook = 0.0;
+	FVector LastLocation = FVector::ZeroVector;
+	float SmoothedSpeed = 0.f;
+	FRandomStream Rand;
+};

@@ -77,6 +77,7 @@ namespace
 		Obj->TryGetBoolField(TEXT("holdable"), Def.bHoldable);
 		Obj->TryGetBoolField(TEXT("apothecary_only"), Def.bApothecaryOnly);
 		Obj->TryGetBoolField(TEXT("farmer_only"), Def.bFarmerOnly);
+		Obj->TryGetBoolField(TEXT("forester_only"), Def.bForesterOnly);
 		double Seconds = 0.0;
 		if (Obj->TryGetNumberField(TEXT("potion_seconds"), Seconds))
 		{

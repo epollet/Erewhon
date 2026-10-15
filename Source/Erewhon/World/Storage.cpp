@@ -1,4 +1,5 @@
 #include "World/Storage.h"
+#include "World/Forestry.h"
 #include "GameFramework/Character.h"
 
 #include "Components/StaticMeshComponent.h"
@@ -57,6 +58,7 @@ namespace
 	/** Rotation des modèles d'outils tractés pour que leurs brancards pointent vers −X. */
 	constexpr float GCultivatorYaw = 270.f;
 	constexpr float GSeederYaw = 270.f;
+	constexpr float GHarvesterYaw = 270.f;
 }
 
 namespace ErewhonPlaceables
@@ -107,6 +109,10 @@ namespace ErewhonPlaceables
 		{
 			return EStorageKind::FirewoodRack;
 		}
+		if (ItemId == ErewhonForestry::Log)
+		{
+			return EStorageKind::LogPile;   // des bûches en main : on en fait un tas
+		}
 		return {};
 	}
 
@@ -124,6 +130,7 @@ namespace ErewhonPlaceables
 		case EStorageKind::Potpourri:  return TEXT("potpourri");
 		case EStorageKind::CauldronStand: return TEXT("cauldron_stand");
 		case EStorageKind::FirewoodRack:  return TEXT("firewood_rack");
+		case EStorageKind::LogPile:       return ErewhonForestry::Log;
 		default:                     return TEXT("crate");
 		}
 	}
@@ -150,6 +157,7 @@ namespace ErewhonPlaceables
 		case EStorageKind::Cauldron: return 6;   // ses ingrédients
 		case EStorageKind::FirewoodRack: return 4;
 		case EStorageKind::Saddlebag: return 12;   // un sac à dos
+		case EStorageKind::LogPile: return ErewhonForestry::PileCapacity / ErewhonForestry::LogCarry;   // des places de deux
 		default:                   return 0;
 		}
 	}
@@ -180,6 +188,7 @@ namespace ErewhonPlaceables
 		case EStorageKind::CauldronStand: return 150.f;
 		case EStorageKind::FirewoodRack:  return 110.f;
 		case EStorageKind::Saddlebag:     return 52.f;
+		case EStorageKind::LogPile:       return 70.f;
 		default:                     return 36.f;
 		}
 	}
@@ -199,6 +208,7 @@ namespace ErewhonPlaceables
 		case EStorageKind::CauldronStand: return LOCTEXT("CauldronStand", "Support de chaudron");
 		case EStorageKind::FirewoodRack:  return LOCTEXT("FirewoodRack", "Rack à petit bois");
 		case EStorageKind::Saddlebag:     return LOCTEXT("Saddlebag", "Sacoche");
+		case EStorageKind::LogPile:       return LOCTEXT("LogPile", "Tas de bûches");
 		default:                     return LOCTEXT("Crate", "Cagette");
 		}
 	}
@@ -306,7 +316,7 @@ namespace ErewhonPlaceables
 	UStaticMesh* StorageMesh(EStorageKind Kind, FTransform& OutFit)
 	{
 		// La cagette, l'étagère et la table sont construites en planches.
-		if (Kind == EStorageKind::Crate || Kind == EStorageKind::Shelf || Kind == EStorageKind::Table)
+		if (Kind == EStorageKind::Crate || Kind == EStorageKind::Shelf || Kind == EStorageKind::Table || Kind == EStorageKind::LogPile)
 		{
 			return nullptr;
 		}
@@ -346,10 +356,13 @@ namespace ErewhonPlaceables
 			return CartMesh(OutFit);
 		}
 		// Le grand côté (les brancards) sur Y une fois mis à la longueur : on le couche sur X, brancards vers −X.
-		UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), Kind == ECartKind::Cultivator ? TEXT("SM_cultivator") : TEXT("SM_seeder"));
+		UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), Kind == ECartKind::Cultivator ? TEXT("SM_cultivator") : Kind == ECartKind::Harvester ? TEXT("SM_harvester") : TEXT("SM_seeder"));
 		if (Mesh)
 		{
-			OutFit = FitToLength(Mesh, Kind == ECartKind::Cultivator ? 300.f : 320.f) * FTransform(FRotator(0.f, Kind == ECartKind::Cultivator ? GCultivatorYaw : GSeederYaw, 0.f), FVector(Kind == ECartKind::Cultivator ? -40.f : 70.f, 0.f, 0.f));
+			const float Length = Kind == ECartKind::Cultivator ? 300.f : Kind == ECartKind::Harvester ? 340.f : 320.f;
+			const float Yaw = Kind == ECartKind::Cultivator ? GCultivatorYaw : Kind == ECartKind::Harvester ? GHarvesterYaw : GSeederYaw;
+			const float Shift = Kind == ECartKind::Cultivator ? -40.f : Kind == ECartKind::Harvester ? 60.f : 70.f;
+			OutFit = FitToLength(Mesh, Length) * FTransform(FRotator(0.f, Yaw, 0.f), FVector(Shift, 0.f, 0.f));
 		}
 		return Mesh;
 	}
@@ -359,12 +372,14 @@ namespace ErewhonPlaceables
 		if (ItemId == TEXT("cart")) { return ECartKind::Cart; }
 		if (ItemId == TEXT("cultivator")) { return ECartKind::Cultivator; }
 		if (ItemId == TEXT("seeder")) { return ECartKind::Seeder; }
+		if (ItemId == TEXT("harvester")) { return ECartKind::Harvester; }
 		return {};
 	}
 
 	FName ItemForCartKind(ECartKind Kind)
 	{
-		return Kind == ECartKind::Cultivator ? FName(TEXT("cultivator")) : Kind == ECartKind::Seeder ? FName(TEXT("seeder")) : FName(TEXT("cart"));
+		return Kind == ECartKind::Cultivator ? FName(TEXT("cultivator")) : Kind == ECartKind::Seeder ? FName(TEXT("seeder"))
+			: Kind == ECartKind::Harvester ? FName(TEXT("harvester")) : FName(TEXT("cart"));
 	}
 
 	UStaticMesh* CartMesh(FTransform& OutFit)
@@ -551,6 +566,18 @@ void AStorageActor::BeginPlay()
 		UStaticMeshComponent* Hull = AddShape(this, Root, EShape::Cube, FVector(0, 0, H * 0.5f), FVector(L, W, H), Slat, FRotator::ZeroRotator, true);
 		Hull->SetHiddenInGame(true);
 		Body = Hull;
+	}
+	else if (Kind == EStorageKind::LogPile)
+	{
+		// Une boîte invisible pour la visée et la collision ; les bûches se dessinent selon le nombre.
+		UStaticMeshComponent* Hull = AddShape(this, Root, EShape::Cube, FVector(0, 0, 35.f), FVector(130.f, 215.f, 70.f), Palette::WoodDark, FRotator::ZeroRotator, true);
+		Hull->SetHiddenInGame(true);
+		Body = Hull;
+		DisplayFrame = NewObject<USceneComponent>(this);
+		DisplayFrame->SetupAttachment(Root);
+		DisplayFrame->RegisterComponent();
+		AddInstanceComponent(DisplayFrame);
+		RefreshDisplay();
 	}
 	if (Kind == EStorageKind::DryingRack && !DisplayFrame)
 	{
@@ -764,6 +791,45 @@ void AStorageActor::RefreshDisplay()
 			{
 				DisplayParts.Add(Bundle);
 				++Shown;
+			}
+		}
+	}
+	else if (Kind == EStorageKind::LogPile && DisplayFrame && GetNetMode() != NM_DedicatedServer)
+	{
+		// Deux pyramides de bûches couchées côte à côte (4, 3, 2, 1), qui montent avec le nombre.
+		for (UPrimitiveComponent* Part : DisplayParts)
+		{
+			if (Part)
+			{
+				Part->DestroyComponent();
+			}
+		}
+		DisplayParts.Reset();
+		UStaticMesh* LogMesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_log"));
+		const int32 Count = FMath::Min(CountStored(ErewhonForestry::Log), ErewhonForestry::PileCapacity);
+		for (int32 i = 0; i < Count; ++i)
+		{
+			const int32 InStack = i % 10;
+			const int32 Row = InStack < 4 ? 0 : InStack < 7 ? 1 : InStack < 9 ? 2 : 3;
+			const int32 First = Row == 0 ? 0 : Row == 1 ? 4 : Row == 2 ? 7 : 9;
+			const int32 InRow = 4 - Row;
+			const float X = ((InStack - First) - (InRow - 1) * 0.5f) * 30.f;
+			const FVector At(X, i < 10 ? -52.f : 52.f, 15.f + Row * 25.f);
+			const FRotator Turn(0.f, (i * 37 % 9) - 4.f, 0.f);   // un peu de désordre
+			if (LogMesh)
+			{
+				UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
+				Part->SetStaticMesh(LogMesh);
+				Part->SetupAttachment(DisplayFrame);
+				Part->SetRelativeTransform(FitToLength(LogMesh, 100.f, 30.f) * FTransform(Turn, At - FVector(0, 0, 15.f)));
+				Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				Part->RegisterComponent();
+				AddInstanceComponent(Part);
+				DisplayParts.Add(Part);
+			}
+			else
+			{
+				DisplayParts.Add(AddShape(this, DisplayFrame, EShape::Cylinder, At, FVector(28.f, 28.f, 100.f), FLinearColor::FromSRGBColor(FColor(120, 86, 58)), FRotator(0.f, Turn.Yaw, 90.f), false));
 			}
 		}
 	}
@@ -1014,6 +1080,7 @@ bool AStorageActor::Accepts(const FItemDef& Def) const
 	case EStorageKind::Shelf:  return ErewhonApothecary::IsShelvable(Def);
 	case EStorageKind::DryingRack: return Def.Category == EItemCategory::Plant;
 	case EStorageKind::FirewoodRack: return Def.Id == TEXT("firewood");
+	case EStorageKind::LogPile: return Def.Id == ErewhonForestry::Log;
 	case EStorageKind::Saddlebag: return Def.Category != EItemCategory::Placeable && Def.Category != EItemCategory::Backpack;
 	case EStorageKind::Cauldron: return ErewhonApothecary::IsIngredient(Def) && (Water <= 0.01f || Liquid == ErewhonApothecary::Water || Liquid == ErewhonApothecary::BaseLiquid);
 	default:                   return false;
@@ -1170,6 +1237,9 @@ FText AStorageActor::GetInteractionLabel() const
 			return LOCTEXT("MineRack", "Prendre : Séchoir    [F] Y mettre des plantes à sécher");
 		case EStorageKind::FirewoodRack:
 			return FText::Format(LOCTEXT("MineWoodRack", "Prendre : Rack à petit bois ({0})    [F] Ouvrir"), FText::AsNumber(CountStored(TEXT("firewood"))));
+		case EStorageKind::LogPile:
+			return FText::Format(LOCTEXT("MineLogPile", "Tas de bûches ({0} / {1}) : en reprendre deux    (des bûches en main : [Clic] pour les y poser)"),
+				FText::AsNumber(CountStored(ErewhonForestry::Log)), FText::AsNumber(ErewhonForestry::PileCapacity));
 		case EStorageKind::Workbench:
 			return LOCTEXT("MineBench", "Prendre : Atelier    [F] Pots-pourris, teintures, bouquets");
 		case EStorageKind::Potpourri:
@@ -1198,6 +1268,11 @@ FText AStorageActor::GetInteractionLabel() const
 
 void AStorageActor::Interact(AErewhonPlayerController* Controller)
 {
+	if (Controller && Kind == EStorageKind::LogPile)
+	{
+		Controller->ServerTakeLogs(this);   // un tas ne se déplace pas : on en reprend des bûches
+		return;
+	}
 	if (Controller && Kind == EStorageKind::Saddlebag)
 	{
 		// La sacoche reste sur le harnais : on l'ouvre.
@@ -1251,7 +1326,8 @@ bool ACart::AcceptsBulk(FName ItemId) const
 	{
 	case ECartKind::Seeder: return ErewhonFarm::CropOfSeed(ItemId) != INDEX_NONE;
 	case ECartKind::Cultivator: return false;
-	default: return ItemId == TEXT("firewood");
+	case ECartKind::Harvester: return false;   // son coffre se remplit tout seul
+	default: return ItemId == TEXT("firewood") || ItemId == ErewhonForestry::Log;
 	}
 }
 
@@ -1261,7 +1337,7 @@ float ACart::DragFactor() const
 	{
 		return 1.f;
 	}
-	return CartKind == ECartKind::Cultivator ? 0.5f : CartKind == ECartKind::Seeder ? 0.7f : 1.f;
+	return IsImplement() ? 0.7f : 1.f;   // un outil au travail : 30 % moins vite
 }
 
 void ACart::SetEngaged(bool bOn)
@@ -1291,9 +1367,16 @@ void ACart::Work()
 		return;
 	}
 	const double Now = State->GetWorldClock();
-	// Les cases sous l'outil : le cultivateur sur sa largeur (trois cases), le semoir trois sur trois autour de lui.
+	// Les cases sous l'outil : le cultivateur et la moissonneuse sur leur largeur (trois cases), le semoir trois sur trois autour de lui.
 	TArray<FVector2D> Points;
-	if (CartKind == ECartKind::Cultivator)
+	if (CartKind == ECartKind::Harvester)
+	{
+		for (const float Y : { -150.f, 0.f, 150.f })
+		{
+			Points.Add(FVector2D(GetActorTransform().TransformPosition(FVector(AxleX - 60.f, Y, 0.f))));
+		}
+	}
+	else if (CartKind == ECartKind::Cultivator)
 	{
 		for (const float Y : { -150.f, 0.f, 150.f })
 		{
@@ -1321,6 +1404,42 @@ void ACart::Work()
 			continue;
 		}
 		const FFieldCellEntry* Entry = State->FindFieldCell(Sector, Cell);
+		if (CartKind == ECartKind::Harvester)
+		{
+			// Une culture mûre : coupée, sa récolte tombe dans le coffre (s'il a la place), la case redevient terre grossière.
+			if (!Entry || Entry->Crop == 0 || Stage(Entry->SownAt, Now) < RipeStage || !Crops().IsValidIndex(Entry->Crop - 1))
+			{
+				continue;
+			}
+			const FCrop& Crop = Crops()[Entry->Crop - 1];
+			int32 Room = 0;
+			for (const FInventorySlot& Slot : Wood)
+			{
+				Room += Slot.IsEmpty() ? HopperStack : Slot.ItemId == Crop.Product ? FMath::Max(0, HopperStack - Slot.Count) : 0;
+			}
+			if (Room < Crop.Yield)
+			{
+				break;   // le coffre est plein
+			}
+			int32 Left = Crop.Yield;
+			for (const bool bEmptyPass : { false, true })
+			{
+				for (FInventorySlot& Slot : Wood)
+				{
+					if (Left <= 0 || Slot.IsEmpty() != bEmptyPass || (!bEmptyPass && Slot.ItemId != Crop.Product))
+					{
+						continue;
+					}
+					const int32 Put = FMath::Min(Left, HopperStack - (bEmptyPass ? 0 : Slot.Count));
+					Slot.ItemId = Crop.Product;
+					Slot.Count = (bEmptyPass ? 0 : Slot.Count) + Put;
+					Left -= Put;
+				}
+			}
+			State->ClearFieldCell(Sector, Cell);
+			bWoodChanged = true;
+			continue;
+		}
 		if (CartKind == ECartKind::Cultivator)
 		{
 			if (!Entry)
@@ -1469,6 +1588,11 @@ FText ACart::GetInteractionLabel() const
 		return bEngaged ? LOCTEXT("CultivatorDown", "Cultivateur (baissé : il retourne la terre)    [E] Le lever    [F] Le tirer (devant les brancards)")
 			: LOCTEXT("CultivatorUp", "Cultivateur (levé)    [E] Le baisser    [F] Le tirer (devant les brancards)");
 	}
+	if (IsOwnedBy(LocalPlayerKey(this)) && CartKind == ECartKind::Harvester)
+	{
+		return bEngaged ? LOCTEXT("HarvesterOn", "Moissonneuse (rabatteur baissé : elle coupe)    [E] Le lever    [F] Le coffre (sur le côté) ou la tirer (devant)")
+			: LOCTEXT("HarvesterOff", "Moissonneuse (rabatteur levé)    [E] Le baisser    [F] Le coffre (sur le côté) ou la tirer (devant)");
+	}
 	if (IsOwnedBy(LocalPlayerKey(this)) && CartKind == ECartKind::Seeder)
 	{
 		return bEngaged ? LOCTEXT("SeederOn", "Semoir (roue enclenchée)    [E] Désenclencher    [F] La trémie (sur le côté) ou le tirer (devant)")
@@ -1515,6 +1639,26 @@ void ACart::CommitWood()
 		for (const FInventorySlot& Slot : Wood)
 		{
 			Count += Slot.IsEmpty() ? 0 : Slot.Count;
+		}
+		// Les grosses bûches, couchées en long sur la plate-forme ; le petit bois, en piles.
+		int32 BigLogs = 0;
+		for (const FInventorySlot& Slot : Wood)
+		{
+			BigLogs += Slot.ItemId == ErewhonForestry::Log ? Slot.Count : 0;
+		}
+		Count -= BigLogs;
+		UStaticMesh* LogMesh = IsImplement() ? nullptr : LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_log"));
+		for (int32 i = 0; i < BigLogs && LogMesh; ++i)
+		{
+			const FVector At(10.f, -45.f + 30.f * (i % 4), 60.f + 26.f * (i / 4));
+			UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
+			Part->SetStaticMesh(LogMesh);
+			Part->SetupAttachment(Root);
+			Part->SetRelativeTransform(FitToLength(LogMesh, 100.f, 28.f) * FTransform(FRotator(0.f, 90.f, 0.f), At));
+			Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Part->RegisterComponent();
+			AddInstanceComponent(Part);
+			WoodParts.Add(Part);
 		}
 		UStaticMesh* Logs = IsImplement() ? nullptr : LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_firewood"));
 		const int32 Piles = FMath::Min(6, (Count + 4) / 5);

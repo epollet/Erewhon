@@ -25,6 +25,9 @@ struct FCharacterTarget
 	int32 FieldCell = INDEX_NONE;
 	/** Le quart de la case visé (bit 1 : côté +X, bit 2 : côté +Y) : la bêche retourne les 2 × 2 cases autour de ce coin. */
 	uint8 FieldCorner = 0;
+	/** La hache en main : l'arbre dont on vise le tronc (INDEX_NONE sinon). */
+	FIntPoint TreeSector = FIntPoint::ZeroValue;
+	int32 TreeIndex = INDEX_NONE;
 	FText Hint;
 };
 
@@ -257,6 +260,9 @@ private:
 	float DigTime = 0.f;
 	/** La place de l'objet tenu, vu de soi (pour le ramener après un geste qui le déplace). */
 	FVector HeldFirstLocation = FVector::ZeroVector;
+	/** Vu de soi : le point de la main, et le décalage (non tourné) du modèle tenu par rapport à elle ; un geste pivote autour. */
+	FVector HeldFirstHand = FVector::ZeroVector;
+	FVector HeldFirstPivotOffset = FVector::ZeroVector;
 	void PlayToolSound(const TCHAR* SoundName, float Volume);
 	/** Le pichet en main, en visant un tonneau ou le chaudron : puiser (F) ou verser (G), ou arrêter. Vrai si c'était ça. */
 	bool TryPitcher(class AStorageActor* Storage, bool bDraw);

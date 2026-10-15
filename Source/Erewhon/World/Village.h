@@ -64,6 +64,10 @@ private:
 	void BuildSignposts(bool bTailor, bool bLanterns);
 	void BuildLanterns(bool bTailor, bool bSignposts);
 	void BuildDecoration();
+	void BuildMarket();
+
+	/** Rotation du modèle d'étal pour que son comptoir regarde le centre du marché. */
+	float StallMeshYaw = 90.f;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Root;

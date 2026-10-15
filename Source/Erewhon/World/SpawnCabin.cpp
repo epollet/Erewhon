@@ -52,9 +52,25 @@ namespace
 		bool bTimberFrame = false;   // colombages sombres sur un enduit clair
 	};
 
-	FCabinStyle StyleFor(EShopKind Kind)
+	FCabinStyle StyleFor(EShopKind Kind, int32 HouseIndex = 0)
 	{
 		FCabinStyle Style;
+		if (Kind == EShopKind::House)
+		{
+			// Chaque habitant sa maison : enduit et tuiles, planches et chaume, pierre et ardoise.
+			const int32 Variant = HouseIndex % 3;
+			Style.Wall = Variant == 0 ? TEXT("plaster") : Variant == 1 ? TEXT("wood_planks") : TEXT("stone");
+			Style.WallTile = Variant == 2 ? 480.f : 240.f;
+			Style.WallColor = Variant == 0 ? FLinearColor::FromSRGBColor(FColor(240, 228, 206)) : Variant == 1 ? Palette::WoodLight : Palette::Stone;
+			Style.Roof = Variant == 0 ? TEXT("roof_tiles") : Variant == 1 ? TEXT("thatch") : TEXT("roof_slate");
+			Style.RoofTile = Variant == 1 ? 300.f : 220.f;
+			Style.RoofColor = Variant == 0 ? Palette::Roof : Variant == 1 ? FLinearColor::FromSRGBColor(FColor(214, 178, 96)) : FLinearColor::FromSRGBColor(FColor(100, 118, 112));
+			Style.RoofSlope = Variant == 1 ? 40.f : 34.f;
+			Style.Floor = TEXT("floor_boards");
+			Style.FloorTile = 200.f;
+			Style.bTimberFrame = Variant == 0;
+			return Style;
+		}
 		if (Kind == EShopKind::Tailor)
 		{
 			// Maisonnette enduite à colombages, toit d'ardoise plus pentu, plancher de chêne.
@@ -266,6 +282,31 @@ ASpawnCabin::ASpawnCabin()
 	Lamp->SetAttenuationRadius(900.f);
 	Lamp->SetLightColor(FLinearColor::FromSRGBColor(FColor(255, 196, 120)));
 	Lamp->SetSourceRadius(15.f);
+	Lamp->SetCastShadows(false);
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = 0.5f;
+}
+
+void ASpawnCabin::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	// Les ombres des lampes, seulement quand le joueur de cette machine est dans la maison ou à sa porte.
+	const APlayerController* Local = GetWorld()->GetFirstPlayerController();
+	const APawn* Viewer = Local ? Local->GetPawn() : nullptr;
+	const float Reach = FMath::Max(HalfLength, HalfWidth) + 700.f;
+	const bool bNear = Viewer && FVector::Dist2D(Viewer->GetActorLocation(), GetActorLocation()) < Reach + (ShadowLamps.Num() > 1 ? 900.f : 0.f);
+	if (bNear != bLampShadows)
+	{
+		bLampShadows = bNear;
+		Lamp->SetCastShadows(bNear);
+		for (UPointLightComponent* Light : ShadowLamps)
+		{
+			if (Light)
+			{
+				Light->SetCastShadows(bNear);
+			}
+		}
+	}
 }
 
 void ASpawnCabin::BeginPlay()
@@ -274,6 +315,14 @@ void ASpawnCabin::BeginPlay()
 	HalfLength = ErewhonSpawn::CabinHalfSize(Kind).X;
 	HalfWidth = ErewhonSpawn::CabinHalfSize(Kind).Y;
 	WallHeight = ErewhonSpawn::CabinWallHeightFor(Kind);
+	if (Kind == EShopKind::House)
+	{
+		// Une maison d'habitant, posée par ErewhonVillagers sur un sol aplani : pas de marchand.
+		Lamp->SetRelativeLocation(FVector(0, 0, GFloorTop + WallHeight - 60.f));
+		Lamp->SetIntensity(900.f);
+		BuildCabin();
+		return;
+	}
 	if (Kind == EShopKind::Apothecary)
 	{
 		// Au milieu d'une prairie vallonnée : le remblai descend jusqu'au point le plus bas de l'emprise.
@@ -337,7 +386,7 @@ void ASpawnCabin::BuildCabin()
 	const float HW = HalfWidth;
 	const float H = WallHeight;
 	const float T = GWallThickness;
-	const FCabinStyle Style = StyleFor(Kind);
+	const FCabinStyle Style = StyleFor(Kind, HouseIndex);
 
 	// Matériaux peints générés selon le style de la maison, avec la couleur unie en repli.
 	const auto Paint = [&Style](UStaticMeshComponent* Part, const FLinearColor& Color)
@@ -530,6 +579,8 @@ void ASpawnCabin::BuildCabin()
 		StoreLamp->SetIntensity(500.f);
 		StoreLamp->SetAttenuationRadius(500.f);
 		StoreLamp->SetLightColor(FLinearColor::FromSRGBColor(FColor(255, 196, 120)));
+		StoreLamp->SetCastShadows(false);
+		ShadowLamps.Add(StoreLamp);
 		StoreLamp->RegisterComponent();
 		AddInstanceComponent(StoreLamp);
 	}
@@ -565,11 +616,11 @@ void ASpawnCabin::BuildCabin()
 	// Enseigne peinte au-dessus de la porte, sur un fond de bois sombre.
 	{
 		const FVector Sign(-HL - 4.4f, 0.f, GFloorTop + 280.f);
-		const TCHAR* Texture = Kind == EShopKind::SectorManager ? TEXT("T_sign_town_hall")
+		const TCHAR* Texture = Kind == EShopKind::House ? TEXT("") : Kind == EShopKind::SectorManager ? TEXT("T_sign_town_hall")
 			: Kind == EShopKind::Tailor ? TEXT("T_sign_tailor")
 			: Kind == EShopKind::Apothecary ? TEXT("T_sign_apothecary") : Kind == EShopKind::Breeder ? TEXT("T_sign_breeder")
 			: Kind == EShopKind::Workshop ? TEXT("T_sign_workshop") : TEXT("T_sign_general_store");
-		if (AddPicture(this, Root, Sign, 200.f, 84.f, 0.f, Texture))
+		if (Kind != EShopKind::House && AddPicture(this, Root, Sign, 200.f, 84.f, 0.f, Texture))
 		{
 			Box(FVector(-HL - 3.8f, -106.f, 280.f - 48.f), FVector(-HL, 106.f, 280.f + 48.f), Palette::WoodDark);
 		}
@@ -593,6 +644,9 @@ void ASpawnCabin::BuildCabin()
 	case EShopKind::Workshop:
 		BuildWorkshopInterior();
 		BuildYard();
+		break;
+	case EShopKind::House:
+		BuildHouseInterior();
 		break;
 	default:
 		BuildStoreInterior();
@@ -1304,8 +1358,56 @@ void ASpawnCabin::BuildBarn()
 	BarnLamp->SetIntensity(1200.f);
 	BarnLamp->SetAttenuationRadius(1100.f);
 	BarnLamp->SetLightColor(FLinearColor::FromSRGBColor(FColor(255, 196, 120)));
+	BarnLamp->SetCastShadows(false);
+	ShadowLamps.Add(BarnLamp);
 	BarnLamp->RegisterComponent();
 	AddInstanceComponent(BarnLamp);
+}
+
+// ── Maison d'habitant ────────────────────────────────────────────────────────
+
+void ASpawnCabin::BuildHouseInterior()
+{
+	const float HL = HalfLength;
+	const float HW = HalfWidth;
+	const float T = GWallThickness;
+	const FVector Floor(0.f, 0.f, GFloorTop);
+	const FLinearColor Blankets[] = { FLinearColor::FromSRGBColor(FColor(196, 92, 72)), FLinearColor::FromSRGBColor(FColor(92, 132, 176)), FLinearColor::FromSRGBColor(FColor(150, 120, 190)) };
+	const FLinearColor Blanket = Blankets[HouseIndex % 3];
+	// Le lit, au fond à droite : un cadre de bois, un matelas, une couverture et un oreiller.
+	const FVector Bed(HL - T - 110.f, -HW + T + 75.f, 0.f);
+	AddBox(Root, Floor + Bed + FVector(-100.f, -70.f, 0.f), Floor + Bed + FVector(100.f, 70.f, 40.f), Palette::WoodDark, TEXT("wood_trim"), 140.f);
+	AddBox(Root, Floor + Bed + FVector(-95.f, -65.f, 40.f), Floor + Bed + FVector(95.f, 65.f, 52.f), FLinearColor::FromSRGBColor(FColor(236, 230, 214)), nullptr, 0.f, false);
+	AddBox(Root, Floor + Bed + FVector(-96.f, -67.f, 50.f), Floor + Bed + FVector(40.f, 67.f, 56.f), Blanket, nullptr, 0.f, false);
+	AddBox(Root, Floor + Bed + FVector(55.f, -45.f, 52.f), Floor + Bed + FVector(90.f, 45.f, 64.f), FLinearColor::White, nullptr, 0.f, false);
+	AddBox(Root, Floor + Bed + FVector(96.f, -70.f, 0.f), Floor + Bed + FVector(104.f, 70.f, 95.f), Palette::WoodDark, TEXT("wood_trim"), 140.f);
+	// La table et deux tabourets, au milieu de la pièce, sur un tapis.
+	const FVector Table(10.f, 110.f, 0.f);
+	AddBox(Root, Floor + Table + FVector(-150.f, -110.f, 0.f), Floor + Table + FVector(150.f, 110.f, 1.f), Blanket * 0.8f, nullptr, 0.f, false);
+	AddBox(Root, Floor + Table + FVector(-70.f, -45.f, 70.f), Floor + Table + FVector(70.f, 45.f, 76.f), Palette::WoodLight, TEXT("wood_planks"), 120.f);
+	for (const float SX : { -1.f, 1.f })
+	{
+		for (const float SY : { -1.f, 1.f })
+		{
+			AddBox(Root, Floor + Table + FVector(SX * 62.f - 4.f, SY * 37.f - 4.f, 0.f), Floor + Table + FVector(SX * 62.f + 4.f, SY * 37.f + 4.f, 70.f), Palette::WoodDark, TEXT("wood_trim"), 140.f, false);
+		}
+		AddShape(this, Root, EShape::Cylinder, Floor + Table + FVector(SX * 105.f, 0.f, 22.f), FVector(36.f, 36.f, 44.f), Palette::WoodLight, FRotator::ZeroRotator, true);
+	}
+	// Sur la table : un pot de fleurs, ou une miche de pain, ou une pelote.
+	if (UStaticMesh* Pot = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_flower_pot")))
+	{
+		AddGeneratedMesh(this, Root, Pot, Floor + Table + FVector(20.f, 0.f, 76.f), 35.f, 20.f * HouseIndex, false);
+	}
+	// Une étagère au mur, un tonneau et des caisses dans un coin.
+	AddShelf(FVector(-HL * 0.35f, -HW + T + 20.f, GFloorTop), -90.f, 3 + HouseIndex, HouseIndex == 2 ? EShelfGoods::Fabric : EShelfGoods::Pantry);
+	if (UStaticMesh* Barrel = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_barrel")))
+	{
+		AddGeneratedMesh(this, Root, Barrel, FVector(HL - T - 50.f, HW - T - 50.f, GFloorTop), 90.f, 15.f * HouseIndex);
+	}
+	if (UStaticMesh* Crates = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_crates")))
+	{
+		AddGeneratedMesh(this, Root, Crates, FVector(-HL - 160.f, HW - 60.f, 0.f), 90.f, 10.f + 30.f * HouseIndex);
+	}
 }
 
 // ── L'atelier ────────────────────────────────────────────────────────────────
@@ -1367,10 +1469,10 @@ void ASpawnCabin::BuildYard()
 	FenceRun(A + FVector2D(Half.X * 0.6f, 0.f), B);
 	FenceRun(E, E + FVector2D(Half.X * 0.35f, 0.f));
 	// Ce qui s'y vend : la charrette, le cultivateur, le semoir, alignés face à la route.
-	const ECartKind Shown[] = { ECartKind::Cart, ECartKind::Cultivator, ECartKind::Seeder };
-	for (int32 i = 0; i < 3; ++i)
+	const ECartKind Shown[] = { ECartKind::Cart, ECartKind::Cultivator, ECartKind::Seeder, ECartKind::Harvester };
+	for (int32 i = 0; i < UE_ARRAY_COUNT(Shown); ++i)
 	{
-		const FVector Spot(C.X + 80.f, C.Y - Half.Y * 0.62f + Half.Y * 0.62f * i, 0.f);
+		const FVector Spot(C.X + 80.f, C.Y - Half.Y * 0.7f + Half.Y * 1.4f * i / (UE_ARRAY_COUNT(Shown) - 1), 0.f);
 		FTransform Fit;
 		if (UStaticMesh* Body = ErewhonPlaceables::ImplementMesh(Shown[i], Fit))
 		{

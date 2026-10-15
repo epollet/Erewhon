@@ -164,6 +164,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
 	int32 FarmerClassPrice = 500;
 
+	/** Prix de la classe Forestier. */
+	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
+	int32 ForesterClassPrice = 500;
+
 	/** Prix d'un champ (un quart de secteur), et de la fusion des quatre en un seul. */
 	UPROPERTY(Config, EditAnywhere, Category = "Economy", meta = (ClampMin = 0))
 	int32 FieldPrice = 2000;

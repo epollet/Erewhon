@@ -41,3 +41,6 @@ Desktop.ini
 # Python
 __pycache__/
 *.pyc
+
+# Blender portable (rig et animation des animaux)
+Tools/Blender/

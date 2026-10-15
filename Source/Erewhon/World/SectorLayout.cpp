@@ -1,5 +1,6 @@
 #include "World/SectorLayout.h"
 
+#include "World/Villagers.h"
 #include "Core/ErewhonSettings.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -139,6 +140,33 @@ void FSectorLayout::GatherNear(const FVector& Point, float Radius, TArray<int32>
 	}
 }
 
+TSharedRef<const FSectorLayout> USectorLayoutSubsystem::GetFarLayout(const FIntPoint& Sector, int32 WorldSeed)
+{
+	if (WorldSeed != CachedSeed)
+	{
+		InvalidateAll();
+		CachedSeed = WorldSeed;
+	}
+	// Le plan complet, s'il est déjà là, fait l'affaire.
+	if (const TSharedRef<FSectorLayout>* Full = Cache.Find(Sector))
+	{
+		return *Full;
+	}
+	if (const TSharedRef<FSectorLayout>* Found = FarCache.Find(Sector))
+	{
+		return *Found;
+	}
+	TSharedRef<FSectorLayout> Layout = Build(Sector, WorldSeed, false);
+	FarCache.Add(Sector, Layout);
+	FarCacheOrder.Add(Sector);
+	if (FarCacheOrder.Num() > 400)
+	{
+		FarCache.Remove(FarCacheOrder[0]);
+		FarCacheOrder.RemoveAt(0);
+	}
+	return Layout;
+}
+
 TSharedRef<const FSectorLayout> USectorLayoutSubsystem::GetLayout(const FIntPoint& Sector, int32 WorldSeed)
 {
 	if (WorldSeed != CachedSeed)
@@ -246,6 +274,8 @@ void USectorLayoutSubsystem::InvalidateAround(const FIntPoint& Sector)
 	{
 		Cache.Remove(Sector + Offset);
 		CacheOrder.Remove(Sector + Offset);
+		FarCache.Remove(Sector + Offset);
+		FarCacheOrder.Remove(Sector + Offset);
 	}
 }
 
@@ -338,7 +368,7 @@ void USectorLayoutSubsystem::BuildAccessPaths(FSectorLayout& Layout) const
 	}
 }
 
-TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector, int32 WorldSeed) const
+TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector, int32 WorldSeed, bool bPlants) const
 {
 	TSharedRef<FSectorLayout> Layout = MakeShared<FSectorLayout>();
 	Layout->Coord = Sector;
@@ -415,6 +445,9 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 		}
 	}
 
+	// Les maisons des habitants et le marché : de la terre, des sentiers.
+	ErewhonVillagers::AddGrounds(Sector, Layout->Clearings, Layout->Paths, Layout->PathPaved);
+
 	Layout->CellSize = GCellSize;
 	Layout->CellsPerSide = FMath::CeilToInt32(Size / GCellSize);
 	Layout->Cells.SetNum(Layout->CellsPerSide * Layout->CellsPerSide);
@@ -425,7 +458,7 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 		return Layout;
 	}
 
-	for (const FItemDef* Item : Items->GetPlants())
+	for (const FItemDef* Item : bPlants ? Items->GetPlants() : TArray<const FItemDef*>())
 	{
 		const int32 Count = Item->Plant.CountFor(Layout->Type);
 		if (Count <= 0)
@@ -496,7 +529,10 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 			}
 		}
 	}
-	BuildBushes(*Layout, WorldSeed);
+	if (bPlants)
+	{
+		BuildBushes(*Layout, WorldSeed);
+	}
 	BuildTrees(*Layout, WorldSeed);
 
 	for (int32 Index = 0; Index < Layout->Plants.Num(); ++Index)

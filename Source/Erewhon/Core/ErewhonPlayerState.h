@@ -16,6 +16,7 @@ enum class EPlayerClass : uint8
 	None,         // aucune classe particulière
 	Apothecary,   // seul un apothicaire se sert des outils de l'apothicairerie
 	Farmer,       // seul un fermier achète des champs et la faux
+	Forester,     // seul un forestier manie la hache : il abat les arbres de ses secteurs et en tire des bûches
 };
 
 /** Identité persistante, pièces et inventaire d'un joueur. */
@@ -40,6 +41,7 @@ public:
 	EPlayerClass GetPlayerClass() const { return PlayerClass; }
 	bool IsApothecary() const { return PlayerClass == EPlayerClass::Apothecary; }
 	bool IsFarmer() const { return PlayerClass == EPlayerClass::Farmer; }
+	bool IsForester() const { return PlayerClass == EPlayerClass::Forester; }
 
 	// Serveur
 	void SetPlayerKey(const FString& InKey) { PlayerKey = InKey; }

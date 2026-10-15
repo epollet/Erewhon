@@ -19,7 +19,7 @@ def balance() -> int:
     return int(request_json(f"{_API}/balance", headers=_headers())["balance"])
 
 
-def image_to_3d(image: Path, out_glb: Path, *, polycount: int, texture_prompt: str = "", ai_model: str = "latest") -> Path:
+def image_to_3d(image: Path, out_glb: Path, *, polycount: int, texture_prompt: str = "", ai_model: str = "latest", symmetry: str = "auto") -> Path:
     """Crée une tâche Image to 3D, attend sa fin et télécharge le GLB.
 
     L'identifiant de tâche est mémorisé à côté du GLB : relancer le script après
@@ -38,6 +38,8 @@ def image_to_3d(image: Path, out_glb: Path, *, polycount: int, texture_prompt: s
             "should_texture": True,
             "enable_pbr": False,
             "target_formats": ["glb"],
+            # Symétrie forcée (« on ») : un animal en pose neutre garde la tête dans l'axe du corps.
+            "symmetry_mode": symmetry,
         }
         if texture_prompt:
             body["texture_prompt"] = texture_prompt[:800]

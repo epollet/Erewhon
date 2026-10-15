@@ -261,6 +261,14 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerUnstuck();
 
+	/** Forestier : un coup de hache dans un arbre, une bûche détachée d'un tronc, des bûches reprises sur un tas. */
+	UFUNCTION(Server, Reliable)
+	void ServerChopTree(FIntPoint Sector, int32 TreeIndex);
+	UFUNCTION(Server, Reliable)
+	void ServerChopLog(class AFelledTree* Felled);
+	UFUNCTION(Server, Reliable)
+	void ServerTakeLogs(class AStorageActor* Pile);
+
 	/** Un exemplaire est prêt : le bruit du pilon ou du chaudron. */
 	UFUNCTION(Client, Unreliable)
 	void ClientCraftStep(uint8 Craft);

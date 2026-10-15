@@ -203,6 +203,10 @@ struct FItemDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	bool bFarmerOnly = false;
 
+	/** Ne se vend qu'aux forestiers (la hache). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	bool bForesterOnly = false;
+
 	/** Le commerce imposé par le catalogue (« shop ») : l'éleveur, l'atelier. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	EShopKind ShopOverride = EShopKind::GeneralStore;

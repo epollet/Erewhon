@@ -1,4 +1,5 @@
 #include "World/Village.h"
+#include "World/Villagers.h"
 #include "World/Storage.h"
 #include "EngineUtils.h"
 #include "Sound/SoundWave.h"
@@ -79,6 +80,10 @@ namespace ErewhonVillage
 			{ EVillageUpgrade::PavedVillage, LOCTEXT("PavedVillage", "Pavés du village"),
 				LOCTEXT("PavedVillageDesc", "Les routes du village pavées à leur tour. Les propriétaires pourront ensuite paver leurs chemins d'accès."), 400,
 				EVillageUpgrade::PavedCenter },
+			{ EVillageUpgrade::Workshop, LOCTEXT("WorkshopUpgrade", "Atelier de l'artisane"),
+				LOCTEXT("WorkshopUpgradeDesc", "Au sud de la place, un atelier et sa cour : charrettes, cultivateurs, semoirs et moissonneuses."), 1000 },
+			{ EVillageUpgrade::Breeder, LOCTEXT("BreederUpgrade", "Ferme de l'éleveur"),
+				LOCTEXT("BreederUpgradeDesc", "Au nord de la place, une ferme et sa grange : des bhuraks, leurs harnais, selles et sacoches."), 2000 },
 		};
 		return List;
 	}
@@ -227,6 +232,45 @@ void AVillageDecor::BeginPlay()
 	{
 		BuildDecoration();
 	}
+	BuildMarket();
+}
+
+void AVillageDecor::BuildMarket()
+{
+	// La place du marché : des étals vides en couronne, tournés vers le centre, et quelques caisses.
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	const int32 Seed = State ? State->GetWorldSeed() : 0;
+	UStaticMesh* Stall = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_market_stall"));
+	UStaticMesh* Crates = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_crates"));
+	UStaticMesh* Barrel = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_barrel"));
+	for (int32 i = 0; i < ErewhonVillagers::StallCount; ++i)
+	{
+		const FTransform World = ErewhonVillagers::StallTransform(i);
+		const FVector2D Foot(World.GetLocation());
+		const FVector Local = GetActorTransform().InverseTransformPosition(FVector(Foot, ErewhonTerrain::Height(Foot, Seed)));
+		const float Yaw = World.Rotator().Yaw - GetActorRotation().Yaw;
+		if (Stall)
+		{
+			// Le grand côté (le comptoir) en travers du rayon ; l'auvent vers le centre.
+			UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this);
+			Part->SetStaticMesh(Stall);
+			Part->SetupAttachment(Root);
+			Part->SetRelativeTransform(FitToLength(Stall, 300.f, 280.f) * FTransform(FRotator(0.f, Yaw + StallMeshYaw, 0.f), Local));
+			Part->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+			Part->RegisterComponent();
+			AddInstanceComponent(Part);
+		}
+		else
+		{
+			AddShape(this, Root, EShape::Cube, Local + FVector(0, 0, 45.f), FVector(80.f, 280.f, 90.f), Palette::WoodLight, FRotator(0.f, Yaw, 0.f));
+		}
+		// Derrière chaque étal, une caisse ou un tonneau.
+		const FVector Behind = Local + FRotator(0.f, Yaw, 0.f).Vector() * 170.f;
+		if (UStaticMesh* Extra = i % 2 ? Barrel : Crates)
+		{
+			AddGeneratedMesh(this, Root, Extra, Behind, i % 2 ? 90.f : 80.f, Yaw + 25.f * i, true);
+		}
+	}
 }
 
 namespace
@@ -270,8 +314,9 @@ void AVillageDecor::BuildSignposts(bool bTailor, bool bLanterns)
 			const EShopKind Shop = Exit.Dir.Y > 0.f ? EShopKind::SectorManager : EShopKind::Tailor;
 			Arms.Add(ErewhonSigns::ShopArm(Shop, GetActorLocation() + FVector(Foot, 0.f), Yaw));
 		}
-		// Au nord l'éleveur, au sud l'atelier.
-		if (Exit.Dir.X != 0.f)
+		// Au nord l'éleveur, au sud l'atelier (une fois bâtis).
+		const AErewhonGameState* State = AErewhonGameState::Get(this);
+		if (Exit.Dir.X != 0.f && State && State->IsShopBuilt(Exit.Dir.X > 0.f ? EShopKind::Breeder : EShopKind::Workshop))
 		{
 			Arms.Add(ErewhonSigns::ShopArm(Exit.Dir.X > 0.f ? EShopKind::Breeder : EShopKind::Workshop, GetActorLocation() + FVector(Foot, 0.f), Yaw));
 		}
@@ -298,9 +343,10 @@ void AVillageDecor::BuildLanterns(bool bTailor, bool bSignposts)
 {
 	using namespace ErewhonSpawn;
 	// Deux lanternes en applique de part et d'autre de chaque porte.
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
 	for (const EShopKind Shop : ShopKinds)
 	{
-		if (Shop == EShopKind::Tailor && !bTailor)
+		if (!State || !State->IsShopBuilt(Shop))
 		{
 			continue;
 		}
@@ -441,7 +487,7 @@ void AVillageDecor::BuildDecoration()
 	};
 	for (const EShopKind Shop : ShopKinds)
 	{
-		if (Shop == EShopKind::Tailor && !HasUpgrade(this, EVillageUpgrade::Tailor))
+		if (!State->IsShopBuilt(Shop))
 		{
 			continue;
 		}

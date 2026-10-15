@@ -105,7 +105,7 @@ void AErewhonHUD::DrawHUD()
 		{
 			DrawRect(Liquid, X + Width * (1.f - Done), Top, Width * Done, Height);
 		}
-		DrawShadowedText(Job.Pour == 4 ? TEXT("On cueille…") : Job.Pour == 5 ? TEXT("On coupe…") : Job.Pour == 3 ? TEXT("On bêche…") : Job.Pour == 1 ? TEXT("On puise un litre…") : TEXT("On verse un litre…"), CX, Top + Height + 4.f, GTextColor, 0.75f, true);
+		DrawShadowedText(Job.Pour == 7 ? TEXT("On détache une bûche…") : Job.Pour == 4 ? TEXT("On cueille…") : Job.Pour == 5 ? TEXT("On coupe…") : Job.Pour == 3 ? TEXT("On bêche…") : Job.Pour == 1 ? TEXT("On puise un litre…") : TEXT("On verse un litre…"), CX, Top + Height + 4.f, GTextColor, 0.75f, true);
 	}
 
 	// Pièces et secteur courant, en haut à gauche.
@@ -152,8 +152,9 @@ void AErewhonHUD::DrawHUD()
 	if (const ACelestialSystem* Sky = ACelestialSystem::Find(this))
 	{
 		const double Clock = State->GetWorldClock();
-		const FString Line = FString::Printf(TEXT("Soleil %s   Usha %s"),
-			*ACelestialSystem::ClockString(Sky->GetSunOrbit(), Clock), *ACelestialSystem::ClockString(Sky->GetUshaOrbit(), Clock));
+		const FString Line = FString::Printf(TEXT("Soleil %s   Usha %s   ·   %s"),
+			*ACelestialSystem::ClockString(Sky->GetSunOrbit(), Clock), *ACelestialSystem::ClockString(Sky->GetUshaOrbit(), Clock),
+			*ErewhonWeather::KindName(Sky->GetWeather().Kind).ToString());
 		DrawShadowedText(Line, 20.f, Y + 24.f, GTextColor, 0.9f);
 	}
 

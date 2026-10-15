@@ -27,6 +27,7 @@ enum class EStorageKind : uint8
 	CauldronStand, // support de chaudron réglable en hauteur, posé dans la cheminée
 	FirewoodRack,  // rack à petit bois : 40 brassées, chacun peut s'y servir
 	Saddlebag,     // sacoche accrochée au harnais d'un bhurak : autant qu'un sac à dos
+	LogPile,       // tas de bûches, posé au sol : vingt au plus ; on en reprend deux à la fois
 };
 
 /** Ce qui se tire par les brancards : la charrette, et les outils tractés par un bhurak. */
@@ -36,6 +37,7 @@ enum class ECartKind : uint8
 	Cart,        // charrette : conteneurs ou petit bois
 	Cultivator,  // cultivateur : levier baissé, il retourne la terre des champs sous lui
 	Seeder,      // semoir : roue enclenchée, il sème autour de lui (trémie à graines)
+	Harvester,   // moissonneuse : rabatteur baissé, elle coupe les cultures mûres et les garde dans son coffre
 };
 
 /** Ce qu'on peut poser dans le monde depuis ses mains (objet de l'inventaire). */
@@ -328,6 +330,8 @@ public:
 
 	/** Le petit bois chargé en vrac (trois piles de dix), quand aucun conteneur n'occupe la charrette. */
 	static constexpr int32 WoodSlots = 3;
+	/** Le coffre de la moissonneuse : trois places de dix. */
+	static constexpr int32 HopperStack = 10;
 	const TArray<FInventorySlot>& GetWood() const { return Wood; }
 	TArray<FInventorySlot>& EditWood() { return Wood; }
 	bool HasWood() const { return Wood.ContainsByPredicate([](const FInventorySlot& S) { return !S.IsEmpty(); }); }

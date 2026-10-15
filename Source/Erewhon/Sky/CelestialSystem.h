@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Sky/ErewhonWeather.h"
 #include "CelestialSystem.generated.h"
 
 class UDirectionalLightComponent;
@@ -56,6 +57,9 @@ public:
 
 	static ACelestialSystem* Find(const UObject* WorldContext);
 
+	/** Le temps qu'il fait (calculé à chaque image, voir ErewhonWeather). */
+	const ErewhonWeather::FState& GetWeather() const { return Weather; }
+
 private:
 	void UpdateBody(UDirectionalLightComponent* Light, const FOrbit& Orbit, float MaxIntensity, double WorldClock) const;
 	void UpdateClouds(double WorldClock);
@@ -95,4 +99,9 @@ private:
 
 	/** Amplitude relative de la variation de couverture autour de la valeur du matériau. */
 	UPROPERTY(EditAnywhere, Category = "Sky") float CloudCoverageSwing = 0.5f;
+
+	ErewhonWeather::FState Weather;
+	/** Les noms des réglages du matériau de nuages (orage, couleur). */
+	FName CloudStormParam;
+	FName CloudAlbedoParam;
 };

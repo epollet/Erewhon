@@ -208,6 +208,8 @@ public:
 
 	/** Le commerce qui vend et rachète cet objet (les vêtements restent au General Store tant que le tailleur n'est pas là). */
 	EShopKind ShopFor(const FItemDef& Item) const;
+	/** La boutique est-elle bâtie ? Le tailleur, l'atelier et l'éleveur s'achètent comme améliorations du village. */
+	bool IsShopBuilt(EShopKind Kind) const;
 
 	uint8 GetPavedLinks(const FIntPoint& Sector) const;
 	uint8 GetBuildings(const FIntPoint& Sector) const;
@@ -269,7 +271,8 @@ private:
 	int32 VillageUpgrades = 0;
 
 	UPROPERTY(Transient) TObjectPtr<AActor> VillageDecor;
-	bool bTailorSpawned = false;
+	/** Les boutiques à amélioration déjà construites sur cette machine. */
+	TSet<EShopKind> SpawnedShops;
 
 	UPROPERTY(Replicated)
 	int32 WorldSeed = 0;

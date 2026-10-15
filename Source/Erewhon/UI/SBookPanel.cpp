@@ -15,7 +15,7 @@ using namespace ErewhonUI;
 
 namespace
 {
-	constexpr float GPanelWidth = 620.f;
+	constexpr float GBookPanelWidth = 620.f;
 	constexpr float GPageHeight = 380.f;
 }
 
@@ -27,7 +27,7 @@ void SBookPanel::Construct(const FArguments& InArgs)
 	[
 		Window(LOCTEXT("Title", "Herbier des breuvages"), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
-			GPanelWidth, LOCTEXT("Subtitle", "« Ce que la marmite sait faire, pour qui sait la conduire. »"))
+			GBookPanelWidth, LOCTEXT("Subtitle", "« Ce que la marmite sait faire, pour qui sait la conduire. »"))
 	];
 	ShowPage(0);
 }

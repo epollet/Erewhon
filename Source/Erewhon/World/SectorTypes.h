@@ -25,6 +25,8 @@ enum class EVillageUpgrade : uint8
 	Decoration,    // bordures, fleurs, arbres et bancs de la place
 	PavedCenter,   // pavés sur la place et ses chemins
 	PavedVillage,  // pavés sur les routes du village (après le centre)
+	Workshop,      // l'atelier de l'artisane, au sud (charrettes, outils tractés)
+	Breeder,       // la ferme de l'éleveur, au nord (bhuraks et leur harnachement)
 	Count UMETA(Hidden)
 };
 
@@ -38,6 +40,7 @@ enum class EShopKind : uint8
 	Apothecary,      // pas un commerce : la maison de l'apothicaire, sur un secteur acheté (voir AApothecary)
 	Breeder,         // l'éleveur : bhuraks (dans sa grange) et leur harnachement
 	Workshop,        // l'atelier : charrette, outils tractés (dans sa cour)
+	House,           // pas un commerce : la maison d'un habitant du village (voir ErewhonVillagers)
 };
 
 /**

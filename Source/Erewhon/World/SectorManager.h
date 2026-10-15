@@ -39,6 +39,19 @@ private:
 	UPROPERTY(Transient)
 	TMap<FIntPoint, TObjectPtr<ASector>> Loaded;
 
+	/** Les arbres et la canopée de tous les secteurs lointains, en un seul lot par modèle (peu d'appels de dessin). */
+	void RebuildFarForest(const TSet<FIntPoint>& Coords);
+	UPROPERTY(Transient) TArray<TObjectPtr<class UHierarchicalInstancedStaticMeshComponent>> FarForest;
+	TSet<FIntPoint> FarForestCoords;
+	/** Les arbres et la canopée de chaque secteur lointain (monde, par modèle), calculés une fois. */
+	TMap<FIntPoint, TArray<TArray<FTransform>>> FarTreeCache;
+	const TArray<TArray<FTransform>>& FarTreesOf(const FIntPoint& Coord);
+	double FarForestBuiltAt = -100.0;
+
+	/** Le fond : des collines puis des montagnes, en couronne, qui suivent le joueur. */
+	void BuildBackdrop();
+	UPROPERTY(Transient) TArray<TObjectPtr<class UProceduralMeshComponent>> Backdrop;
+
 	/** Prairie lointaine jusqu'à l'horizon, sous le sol des secteurs chargés. */
 	UPROPERTY(Transient)
 	TObjectPtr<class UStaticMeshComponent> FarGround;

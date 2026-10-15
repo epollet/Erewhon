@@ -17,7 +17,9 @@
 #include "World/SpawnLayout.h"
 #include "World/Terrain.h"
 #include "World/Farm.h"
+#include "World/Forestry.h"
 #include "TimerManager.h"
+#include "Async/ParallelFor.h"
 
 using namespace ErewhonVisuals;
 
@@ -84,15 +86,19 @@ FIntPoint ASector::GetCoord() const
 	return Layout.IsValid() ? Layout->Coord : FIntPoint::ZeroValue;
 }
 
-void ASector::Initialize(const TSharedRef<const FSectorLayout>& InLayout, bool bWithPlants)
+void ASector::Initialize(const TSharedRef<const FSectorLayout>& InLayout, bool bWithPlants, bool bInFar)
 {
 	Layout = InLayout;
+	bFar = bInFar && !bWithPlants;
 	SetActorLocation(ErewhonSector::Origin(InLayout->Coord));
 #if WITH_EDITOR
 	SetActorLabel(FString::Printf(TEXT("Sector_%s"), *ErewhonSector::ToString(InLayout->Coord)));
 #endif
 	BuildGround(GetNetMode() != NM_DedicatedServer);
-	BuildTrees(bWithPlants && GetNetMode() != NM_DedicatedServer);
+	if (!bFar)
+	{
+		BuildTrees(bWithPlants && GetNetMode() != NM_DedicatedServer);
+	}
 	if (InLayout->bFenced)
 	{
 		BuildFences(GetNetMode() != NM_DedicatedServer);
@@ -444,7 +450,7 @@ void ASector::BuildSignposts()
 		TArray<ErewhonSigns::FArm> Arms;
 		for (const EShopKind Kind : ErewhonSpawn::ShopKinds)
 		{
-			if (Kind != EShopKind::Tailor || State->HasVillageUpgrade(EVillageUpgrade::Tailor))
+			if (State->IsShopBuilt(Kind))
 			{
 				Arms.Add(ErewhonSigns::ShopArm(Kind, Spot.Location, Yaw));
 			}
@@ -467,19 +473,25 @@ void ASector::BuildGround(bool bVisual)
 	TArray<FVector> Normals;
 	TArray<FVector2D> UVs;
 	TArray<int32> Triangles;
-	const int32 N = GGroundResolution;
-	Vertices.Reserve((N + 1) * (N + 1));
-	for (int32 Y = 0; Y <= N; ++Y)
+	// Au loin, une grille quatre fois plus lâche suffit (et pas de collision : personne n'y marche).
+	const int32 N = bFar ? GGroundResolution / 4 : GGroundResolution;
+	// Le relief, rangée par rangée, sur tous les cœurs (la fonction de hauteur est sans état partagé).
+	Vertices.SetNum((N + 1) * (N + 1));
+	Normals.SetNum((N + 1) * (N + 1));
+	UVs.SetNum((N + 1) * (N + 1));
+	const int32 Seed = Layout->WorldSeed;
+	ParallelFor(N + 1, [&](int32 Y)
 	{
 		for (int32 X = 0; X <= N; ++X)
 		{
 			const FVector2D Local(X * Size / N, Y * Size / N);
 			const FVector2D World = Origin + Local;
-			Vertices.Add(FVector(Local.X, Local.Y, ErewhonTerrain::Height(World, Layout->WorldSeed)));
-			Normals.Add(ErewhonTerrain::Normal(World, Layout->WorldSeed));
-			UVs.Add(Local / Size);   // 0 → 1 sur le secteur : le masque terre/herbe s'y lit
+			const int32 Index = Y * (N + 1) + X;
+			Vertices[Index] = FVector(Local.X, Local.Y, ErewhonTerrain::Height(World, Seed));
+			Normals[Index] = ErewhonTerrain::Normal(World, Seed);
+			UVs[Index] = Local / Size;   // 0 → 1 sur le secteur : le masque terre/herbe s'y lit
 		}
-	}
+	});
 	for (int32 Y = 0; Y < N; ++Y)
 	{
 		for (int32 X = 0; X < N; ++X)
@@ -492,8 +504,8 @@ void ASector::BuildGround(bool bVisual)
 	UProceduralMeshComponent* Ground = NewObject<UProceduralMeshComponent>(this, TEXT("Ground"));
 	Ground->SetupAttachment(Root);
 	Ground->bUseAsyncCooking = false;   // le joueur doit pouvoir marcher dessus dès son apparition
-	Ground->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, {}, {}, true);
-	Ground->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+	Ground->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UVs, {}, {}, !bFar);
+	Ground->SetCollisionProfileName(bFar ? UCollisionProfile::NoCollision_ProfileName : UCollisionProfile::BlockAll_ProfileName);
 	Ground->SetCastShadow(false);
 	Ground->RegisterComponent();
 	AddInstanceComponent(Ground);
@@ -529,7 +541,9 @@ void ASector::BuildGround(bool bVisual)
 UTexture2D* ASector::BuildDirtMask() const
 {
 	// R : part de terre, G : part de pavés.
-	UTexture2D* Texture = UTexture2D::CreateTransient(GMaskResolution, GMaskResolution, PF_B8G8R8A8);
+	// Au loin, un masque quatre fois moins fin suffit.
+	const int32 Res = bFar ? GMaskResolution / 4 : GMaskResolution;
+	UTexture2D* Texture = UTexture2D::CreateTransient(Res, Res, PF_B8G8R8A8);
 	Texture->SRGB = false;
 	Texture->Filter = TF_Bilinear;
 	Texture->AddressX = TA_Clamp;
@@ -539,19 +553,21 @@ UTexture2D* ASector::BuildDirtMask() const
 	const FVector2D Origin(GetActorLocation());
 	FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
 	uint8* Texels = static_cast<uint8*>(Mip.BulkData.Lock(LOCK_READ_WRITE));
-	for (int32 Y = 0; Y < GMaskResolution; ++Y)
+	// Rangée par rangée, sur tous les cœurs : 262 000 texels, chacun mesurant sa distance aux chemins.
+	const FSectorLayout& Shapes = *Layout;
+	ParallelFor(Res, [&](int32 Y)
 	{
-		for (int32 X = 0; X < GMaskResolution; ++X)
+		for (int32 X = 0; X < Res; ++X)
 		{
 			// Texel (X, Y) ↔ monde (X, Y) : le matériau échantillonne avec les mêmes axes.
-			const FVector2D World = Origin + FVector2D(X + 0.5f, Y + 0.5f) * (Size / GMaskResolution);
-			uint8* Texel = Texels + (Y * GMaskResolution + X) * 4;   // B, G, R, A
+			const FVector2D World = Origin + FVector2D(X + 0.5f, Y + 0.5f) * (Size / Res);
+			uint8* Texel = Texels + (Y * Res + X) * 4;   // B, G, R, A
 			Texel[0] = 0;
-			Texel[1] = static_cast<uint8>(FMath::RoundToInt32(Layout->PavedAmount(World) * 255.f));
-			Texel[2] = static_cast<uint8>(FMath::RoundToInt32(Layout->DirtAmount(World) * 255.f));
+			Texel[1] = static_cast<uint8>(FMath::RoundToInt32(Shapes.PavedAmount(World) * 255.f));
+			Texel[2] = static_cast<uint8>(FMath::RoundToInt32(Shapes.DirtAmount(World) * 255.f));
 			Texel[3] = 255;
 		}
-	}
+	});
 	Mip.BulkData.Unlock();
 	Texture->UpdateResource();
 	return Texture;
@@ -643,8 +659,8 @@ void ASector::BuildTrees(bool bVisual)
 	{
 		return;
 	}
-	// Les troncs : des cylindres invisibles, en instances, qui arrêtent le joueur.
-	UHierarchicalInstancedStaticMeshComponent* Trunks = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
+	// Les troncs : des cylindres invisibles, en instances, qui arrêtent le joueur (une souche, l'arbre abattu).
+	Trunks = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
 	Trunks->SetStaticMesh(GetShape(EShape::Cylinder));
 	Trunks->SetupAttachment(Root);
 	Trunks->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
@@ -653,57 +669,55 @@ void ASector::BuildTrees(bool bVisual)
 	Trunks->RegisterComponent();
 	AddInstanceComponent(Trunks);
 	TArray<FTransform> TrunkTransforms;
+	TArray<FTransform> StumpTransforms;
 	TArray<TArray<FTransform>> Batches;
 	Batches.SetNum(ErewhonForest::TreeModelCount);
 	TArray<UStaticMesh*> Models;
-	TArray<FTransform> Fits;
+	TreeFits.Reset();
 	for (int32 i = 0; i < ErewhonForest::TreeModelCount; ++i)
 	{
 		UStaticMesh* Model = bVisual ? LoadGenerated<UStaticMesh>(TEXT("Meshes"), ErewhonForest::TreeModels[i]) : nullptr;
 		Models.Add(Model);
-		Fits.Add(Model ? FitToHeight(Model, 100.f) : FTransform::Identity);
+		TreeFits.Add(Model ? FitToHeight(Model, 100.f) : FTransform::Identity);
 	}
-	for (const FTreeInstance& Tree : Layout->Trees)
+	// Les arbres abattus (et pas encore repoussés) : une souche à leur place.
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	TreeInstance.Init(INDEX_NONE, Layout->Trees.Num());
+	for (int32 Index = 0; Index < Layout->Trees.Num(); ++Index)
 	{
-		const FVector Local = Tree.Location - GetActorLocation();
-		const float R = ErewhonForest::TrunkRadius * 2.f / 100.f * Tree.Girth * Tree.Height / 1100.f;
-		TrunkTransforms.Add(FTransform(FRotator::ZeroRotator, Local + FVector(0, 0, 150.f), FVector(R, R, 3.f)));
+		const FTreeInstance& Tree = Layout->Trees[Index];
+		const bool bCut = State && State->IsHarvested(Layout->Coord, ErewhonForestry::HarvestIndexOfTree(Index));
+		TrunkTransforms.Add(TrunkTransform(Index, bCut));
+		StumpTransforms.Add(StumpTransform(Index, bCut));
 		if (Models.IsValidIndex(Tree.Model) && Models[Tree.Model])
 		{
-			const float Scale = Tree.Height / 100.f;
-			Batches[Tree.Model].Add(Fits[Tree.Model] * FTransform(FRotator(0.f, Tree.Yaw, 0.f), Local - FVector(0, 0, 10.f), FVector(Scale * Tree.Girth, Scale * Tree.Girth, Scale)));
+			TreeInstance[Index] = Batches[Tree.Model].Num();
+			Batches[Tree.Model].Add(TreeTransform(Index, bCut));
 		}
 	}
 	Trunks->AddInstances(TrunkTransforms, false, false);
+	bTreesVisual = bVisual;
+	if (bVisual && StumpTransforms.ContainsByPredicate([](const FTransform& T) { return T.GetScale3D().X > 0.01f; }))
+	{
+		EnsureStumps();
+	}
 
 	// En forêt, la canopée : de larges masses de feuillage entre les cimes, qui ferment le ciel au-dessus de soi.
 	UStaticMesh* Crown = bVisual && Layout->Type == ESectorType::Forest ? LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_bush_box")) : nullptr;
 	if (Crown)
 	{
 		const FTransform CrownFit = FitToHeight(Crown, 100.f);
-		const float Size = UErewhonSettings::Get().SectorSize();
-		FRandomStream Rand(HashCombine(GetTypeHash(Layout->Coord), 0xC4A0u));
 		TArray<FTransform> Crowns;
-		for (float X = 350.f; X < Size; X += 700.f)
+		CanopyTransforms(*Layout, Crowns);
+		for (FTransform& At : Crowns)
 		{
-			for (float Y = 350.f; Y < Size; Y += 700.f)
-			{
-				const FVector2D Local(X + Rand.FRandRange(-220.f, 220.f), Y + Rand.FRandRange(-220.f, 220.f));
-				const FVector2D World = FVector2D(GetActorLocation()) + Local;
-				if (Layout->DirtAmount(World) > 0.3f)
-				{
-					continue;   // au-dessus des chemins et des clairières, le ciel reste ouvert
-				}
-				const float Ground = ErewhonTerrain::Height(World, Layout->WorldSeed) - GetActorLocation().Z;
-				const float Height = Rand.FRandRange(350.f, 520.f);
-				Crowns.Add(CrownFit * FTransform(FRotator(0.f, Rand.FRandRange(0.f, 360.f), 0.f), FVector(Local, Ground + Rand.FRandRange(950.f, 1350.f)),
-					FVector(Height / 100.f * 2.1f, Height / 100.f * 2.1f, Height / 100.f)));
-			}
+			At = CrownFit * FTransform(At.GetRotation(), At.GetLocation() - GetActorLocation(), At.GetScale3D());
 		}
 		UHierarchicalInstancedStaticMeshComponent* Canopy = MakeInstancedPart(Crown, nullptr, 400.f);
 		Canopy->SetCastShadow(true);
 		Canopy->AddInstances(Crowns, false, false);
 	}
+	TreeParts.Init(nullptr, Batches.Num());
 	for (int32 i = 0; i < Batches.Num(); ++i)
 	{
 		if (Batches[i].Num() == 0)
@@ -713,7 +727,109 @@ void ASector::BuildTrees(bool bVisual)
 		UHierarchicalInstancedStaticMeshComponent* Part = MakeInstancedPart(Models[i], nullptr, 400.f);
 		Part->SetCastShadow(true);   // de grands arbres : leur ombre compte
 		Part->AddInstances(Batches[i], false, false);
+		TreeParts[i] = Part;
 	}
+}
+
+void ASector::CanopyTransforms(const FSectorLayout& InLayout, TArray<FTransform>& Out)
+{
+	if (InLayout.Type != ESectorType::Forest)
+	{
+		return;
+	}
+	const float Size = UErewhonSettings::Get().SectorSize();
+	const FVector2D Origin(ErewhonSector::Origin(InLayout.Coord));
+	FRandomStream Rand(HashCombine(GetTypeHash(InLayout.Coord), 0xC4A0u));
+	for (float X = 350.f; X < Size; X += 700.f)
+	{
+		for (float Y = 350.f; Y < Size; Y += 700.f)
+		{
+			const FVector2D World = Origin + FVector2D(X + Rand.FRandRange(-220.f, 220.f), Y + Rand.FRandRange(-220.f, 220.f));
+			if (InLayout.DirtAmount(World) > 0.3f)
+			{
+				continue;   // au-dessus des chemins et des clairières, le ciel reste ouvert
+			}
+			const float Ground = ErewhonTerrain::Height(World, InLayout.WorldSeed);
+			const float Height = Rand.FRandRange(350.f, 520.f);
+			Out.Add(FTransform(FRotator(0.f, Rand.FRandRange(0.f, 360.f), 0.f), FVector(World, Ground + Rand.FRandRange(950.f, 1350.f)),
+				FVector(Height / 100.f * 2.1f, Height / 100.f * 2.1f, Height / 100.f)));
+		}
+	}
+}
+
+FTransform ASector::TreeTransform(int32 TreeIndex, bool bCut) const
+{
+	const FTreeInstance& Tree = Layout->Trees[TreeIndex];
+	const float Scale = Tree.Height / 100.f;
+	const FTransform Fit = TreeFits.IsValidIndex(Tree.Model) ? TreeFits[Tree.Model] : FTransform::Identity;
+	// Abattu : réduit à rien plutôt que retiré, les index restent stables.
+	return Fit * FTransform(FRotator(0.f, Tree.Yaw, 0.f), Tree.Location - GetActorLocation() - FVector(0, 0, 10.f),
+		bCut ? FVector(KINDA_SMALL_NUMBER) : FVector(Scale * Tree.Girth, Scale * Tree.Girth, Scale));
+}
+
+FTransform ASector::TrunkTransform(int32 TreeIndex, bool bCut) const
+{
+	const FTreeInstance& Tree = Layout->Trees[TreeIndex];
+	const float R = ErewhonForestry::TrunkRadius(Tree) * 2.f / 100.f;
+	// Debout : trois mètres de tronc ; abattu, la souche (cinquante centimètres).
+	return FTransform(FRotator::ZeroRotator, Tree.Location - GetActorLocation() + FVector(0, 0, bCut ? 25.f : 150.f), FVector(R, R, bCut ? 0.5f : 3.f));
+}
+
+FTransform ASector::StumpTransform(int32 TreeIndex, bool bCut) const
+{
+	const FTreeInstance& Tree = Layout->Trees[TreeIndex];
+	const float R = ErewhonForestry::TrunkRadius(Tree) * 2.f / 100.f;
+	return FTransform(FRotator::ZeroRotator, Tree.Location - GetActorLocation() + FVector(0, 0, 18.f), bCut ? FVector(R * 1.08f, R * 1.08f, 0.55f) : FVector(KINDA_SMALL_NUMBER));
+}
+
+void ASector::EnsureStumps()
+{
+	if (Stumps || !bTreesVisual)
+	{
+		return;
+	}
+	// Les souches : de courts cylindres d'écorce, à leur taille une fois l'arbre abattu (sinon réduites à rien).
+	const AErewhonGameState* State = AErewhonGameState::Get(this);
+	TArray<FTransform> StumpTransforms;
+	for (int32 Index = 0; Index < Layout->Trees.Num(); ++Index)
+	{
+		StumpTransforms.Add(StumpTransform(Index, State && State->IsHarvested(Layout->Coord, ErewhonForestry::HarvestIndexOfTree(Index))));
+	}
+	Stumps = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
+	Stumps->SetStaticMesh(GetShape(EShape::Cylinder));
+	Stumps->SetupAttachment(Root);
+	Stumps->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Stumps->SetMaterial(0, MakePaintedMaterial(Stumps, TEXT("bark"), 120.f, FLinearColor::FromSRGBColor(FColor(104, 80, 60)), FLinearColor(0.62f, 0.5f, 0.42f)));
+	Stumps->RegisterComponent();
+	AddInstanceComponent(Stumps);
+	Stumps->AddInstances(StumpTransforms, false, false);
+}
+
+void ASector::SetTreeCut(int32 TreeIndex, bool bCut)
+{
+	if (!Layout.IsValid() || !Layout->Trees.IsValidIndex(TreeIndex) || !Trunks)
+	{
+		return;
+	}
+	if (bCut)
+	{
+		EnsureStumps();
+	}
+	Trunks->UpdateInstanceTransform(TreeIndex, TrunkTransform(TreeIndex, bCut), false, true, false);
+	if (Stumps)
+	{
+		Stumps->UpdateInstanceTransform(TreeIndex, StumpTransform(TreeIndex, bCut), false, true, false);
+	}
+	const int32 Model = Layout->Trees[TreeIndex].Model;
+	if (TreeParts.IsValidIndex(Model) && TreeParts[Model] && TreeInstance.IsValidIndex(TreeIndex) && TreeInstance[TreeIndex] != INDEX_NONE)
+	{
+		TreeParts[Model]->UpdateInstanceTransform(TreeInstance[TreeIndex], TreeTransform(TreeIndex, bCut), false, true, false);
+	}
+}
+
+int32 ASector::TreeAtTrunk(const UPrimitiveComponent* Component, int32 Instance) const
+{
+	return Component && Component == Trunks && Layout.IsValid() && Layout->Trees.IsValidIndex(Instance) ? Instance : INDEX_NONE;
 }
 
 void ASector::BuildBushes()
@@ -930,6 +1046,11 @@ void ASector::BuildPlants()
 
 void ASector::SetPlantHarvested(int32 PlantIndex, bool bHarvested)
 {
+	if (ErewhonForestry::IsTreeHarvest(PlantIndex))
+	{
+		SetTreeCut(ErewhonForestry::TreeOfHarvestIndex(PlantIndex), bHarvested);
+		return;
+	}
 	if (!bPlantsBuilt || !KindOfPlant.IsValidIndex(PlantIndex) || Layout->CoveredPlants.Contains(PlantIndex))
 	{
 		return;

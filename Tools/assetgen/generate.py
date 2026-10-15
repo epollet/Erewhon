@@ -86,7 +86,7 @@ def models(only: set[str], force: bool) -> None:
         _run(f"modèle {name}", path, force,
              lambda p=path, c=concept, s=spec: image_to_3d(c, p, polycount=s["polycount"],
                                                            texture_prompt=f"{s['subject']}. {manifest.STYLE}",
-                                                           ai_model=s.get("ai_model", "latest")))
+                                                           ai_model=s.get("ai_model", "latest"), symmetry=s.get("symmetry", "auto")))
 
 
 def rigs(only: set[str], force: bool) -> None:

@@ -46,6 +46,16 @@ public:
 	FText TryBuyStoreroom(AErewhonPlayerController* Controller, const FIntPoint& Sector);
 	/** « Débloquer » (menu) : on descend de selle, on lâche la charrette, et on se retrouve devant la mairie. */
 	FText Unstuck(AErewhonPlayerController* Controller);
+
+	// Forestier
+	/** Un coup de hache au pied d'un arbre de ses secteurs ; au dernier, il tombe. */
+	FText TryChopTree(AErewhonPlayerController* Controller, const FIntPoint& Sector, int32 TreeIndex);
+	/** Une bûche détachée du tronc couché (une seconde, sans bNow). */
+	FText TryChopLog(AErewhonPlayerController* Controller, class AFelledTree* Felled, bool bNow = false);
+	/** Reprendre des bûches sur un tas (deux au plus dans les bras). */
+	FText TryTakeLogs(AErewhonPlayerController* Controller, class AStorageActor* Pile);
+	/** Poser des objets au sol à un endroit (le propriétaire du terrain les ramasse), pour LifeSeconds. */
+	void DropAt(const FVector& Where, FName ItemId, int32 Count, double LifeSeconds, bool bMerge = true);
 	/** Une place libre devant l'atelier, pour y livrer une charrette ou un outil attelé. */
 	TOptional<FVector> FindWorkshopSpot() const;
 	void DeliverCart(class AErewhonPlayerState* PlayerState, FName ItemId, const FVector& Spot);
@@ -151,6 +161,13 @@ private:
 	/** Seul un apothicaire se sert des outils de l'apothicairerie. */
 	FText CheckApothecary(AErewhonPlayerController* Controller) const;
 	FText CheckFarmer(AErewhonPlayerController* Controller) const;
+	FText CheckForester(AErewhonPlayerController* Controller) const;
+	/** Les branches d'une cime tombée. */
+	void SpawnBranches(class AFelledTree* Felled);
+	/** Les coups déjà donnés à chaque arbre, et l'heure du dernier coup de chacun. */
+	TMap<TPair<FIntPoint, int32>, int32> TreeHits;
+	bool bVillagersSpawned = false;
+	TMap<TWeakObjectPtr<AErewhonPlayerController>, double> LastAxeHit;
 	FText FinishScythe(AErewhonPlayerController* Controller);
 	void ReportResultTo(AErewhonPlayerController* Controller, const FText& Error);
 	/** Le coup de bêche en cours, par joueur : les cases qu'il retournera au bout d'une seconde. */

@@ -25,7 +25,7 @@ using namespace ErewhonApothecary;
 
 namespace
 {
-	constexpr float GPanelWidth = 760.f;
+	constexpr float GCauldronPanelWidth = 760.f;
 
 	const FProgressBarStyle& GaugeStyle(const FLinearColor& Fill)
 	{
@@ -50,7 +50,7 @@ namespace
 			];
 	}
 
-	int32 CountOwned(const AErewhonPlayerState* State, FName ItemId)
+	int32 CauldronCountOwned(const AErewhonPlayerState* State, FName ItemId)
 	{
 		return State->GetInventory()->CountStored(ItemId) + State->GetBackpack()->CountStored(ItemId);
 	}
@@ -97,7 +97,7 @@ void SCauldronPanel::Construct(const FArguments& InArgs)
 	[
 		Window(LOCTEXT("Title", "Le chaudron"), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
-			GPanelWidth, LOCTEXT("Subtitle", "De l'eau (pichet en main : clic gauche puiser, clic droit verser), les bons ingrédients, la bonne chaleur…"))
+			GCauldronPanelWidth, LOCTEXT("Subtitle", "De l'eau (pichet en main : clic gauche puiser, clic droit verser), les bons ingrédients, la bonne chaleur…"))
 	];
 	Rebuild();
 }
@@ -122,7 +122,7 @@ TSharedRef<SWidget> SCauldronPanel::BuildGauges() const
 	TWeakObjectPtr<AStorageActor> WeakStand = Stand;
 	TWeakObjectPtr<AStorageActor> WeakCauldron = Cauldron;
 	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
-	const int32 Carried = State ? CountOwned(State, TEXT("firewood")) : 0;
+	const int32 Carried = State ? CauldronCountOwned(State, TEXT("firewood")) : 0;
 	const int32 Racked = ErewhonApothecary::WoodNearFire(HouseOfHungCauldron(Cauldron.Get()));
 	const int32 Wood = Carried + Racked;
 
@@ -228,7 +228,7 @@ TSharedRef<SWidget> SCauldronPanel::BuildLiquid() const
 
 	TSharedRef<SWrapBox> Actions = SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(6.f, 6.f));
 	const auto Action = [&Actions](TSharedRef<SWidget> Widget) { Actions->AddSlot()[Widget]; };
-	const int32 Vials = CountOwned(State, EmptyVial);
+	const int32 Vials = CauldronCountOwned(State, EmptyVial);
 	const int32 Possible = FMath::Min(Vials, FMath::FloorToInt32(Liters / VialLiters + 0.001f));
 	Action(Button(FText::Format(LOCTEXT("FillVials", "Remplir des fioles ({0})"), FText::AsNumber(Possible)),
 		[WeakController, WeakCauldron, Possible]() { if (WeakController.IsValid()) { WeakController->ServerStartPour(WeakCauldron.Get(), 2, NAME_None, Possible); } },
@@ -294,7 +294,7 @@ TSharedRef<SWidget> SCauldronPanel::BuildIngredients() const
 	TSharedRef<SWrapBox> Mine = SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(6.f, 6.f));
 	for (const FItemDef& Def : Items->GetAll())
 	{
-		const int32 Have = IsIngredient(Def) ? CountOwned(State, Def.Id) : 0;
+		const int32 Have = IsIngredient(Def) ? CauldronCountOwned(State, Def.Id) : 0;
 		if (Have <= 0)
 		{
 			continue;

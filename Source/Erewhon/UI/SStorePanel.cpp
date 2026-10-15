@@ -30,7 +30,7 @@ using namespace ErewhonUI;
 
 namespace
 {
-	constexpr float GPanelWidth = 760.f;
+	constexpr float GStorePanelWidth = 760.f;
 	constexpr float GContentHeight = 430.f;
 	constexpr float GTileSize = 40.f;
 	constexpr int32 GBuyColumns = 4;
@@ -92,7 +92,7 @@ void SStorePanel::Construct(const FArguments& InArgs)
 	[
 		Window(FText::FromString(ErewhonSpawn::ShopName(Kind)), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
-			GPanelWidth, bManager
+			GStorePanelWidth, bManager
 				? LOCTEXT("ManagerSubtitle", "« Bienvenue à la mairie ! Un secteur, une amélioration, une vocation ? »")
 				: Kind == EShopKind::Tailor
 				? LOCTEXT("TailorSubtitle", "« Entrez donc ! Un peu d'étoffe, quelques poches de plus ? »")
@@ -212,11 +212,17 @@ TSharedRef<SWidget> SStorePanel::BuildClass()
 				LOCTEXT("ClassApothecaryDesc", "Bâtit l'apothicairerie et sa remise, se sert du mortier, du chaudron et de son support, du séchoir et de l'atelier."),
 				Settings.ApothecaryClassPrice)
 		]
-		+ SVerticalBox::Slot().AutoHeight()
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
 		[
 			ClassCard(EPlayerClass::Farmer, LOCTEXT("ClassFarmer", "Fermier"),
 				LOCTEXT("ClassFarmerDesc", "Change ses secteurs en champs (onglet Secteurs), les laboure, les sème et les récolte ; seul à manier la faux."),
 				Settings.FarmerClassPrice)
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			ClassCard(EPlayerClass::Forester, LOCTEXT("ClassForester", "Forestier"),
+				LOCTEXT("ClassForesterDesc", "Seul à manier la hache : il abat les arbres de ses secteurs, en ramasse les branches et fend les troncs en bûches."),
+				Settings.ForesterClassPrice)
 		];
 }
 
@@ -602,7 +608,7 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 		}
 		const bool bOwned = Def->IsBackpack() ? State->GetBackpack()->IsOwned() : Def->IsUnique() && State->GetInventory()->Owns(Def->Id);
 		const bool bAfford = State->GetCoins() >= Def->BuyPrice;
-		const bool bForbidden = (Def->bApothecaryOnly && !State->IsApothecary()) || (Def->bFarmerOnly && !State->IsFarmer());
+		const bool bForbidden = (Def->bApothecaryOnly && !State->IsApothecary()) || (Def->bFarmerOnly && !State->IsFarmer()) || (Def->bForesterOnly && !State->IsForester());
 		const FName Id = Def->Id;
 		TSharedRef<SWidget> ItemCard = CardBox(
 			SNew(SVerticalBox)
@@ -614,7 +620,7 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 0, 0, 8)[CoinBadge(Def->BuyPrice, 10)]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				Button(bOwned ? LOCTEXT("Owned", "Déjà à vous") : bForbidden ? (Def->bFarmerOnly ? LOCTEXT("FarmerOnlyBuy", "Fermiers") : LOCTEXT("ApothecaryOnlyBuy", "Apothicaires")) : LOCTEXT("BuyItem", "Acheter"),
+				Button(bOwned ? LOCTEXT("Owned", "Déjà à vous") : bForbidden ? (Def->bFarmerOnly ? LOCTEXT("FarmerOnlyBuy", "Fermiers") : Def->bForesterOnly ? LOCTEXT("ForesterOnlyBuy", "Forestiers") : LOCTEXT("ApothecaryOnlyBuy", "Apothicaires")) : LOCTEXT("BuyItem", "Acheter"),
 					[WeakController, Id]() { if (WeakController.IsValid()) { WeakController->ServerBuyItem(Id); } },
 					EButton::Primary, !bOwned && bAfford && !bForbidden, 0.f, 11)
 			],
