@@ -68,6 +68,8 @@ private:
 	/** La Lune et les étoiles, des images lointaines qui suivent la caméra. */
 	void BuildNightSky();
 	void UpdateNightSky(double WorldClock);
+	/** Éblouissement : adouci quand on regarde le Soleil en face. */
+	void UpdateSunGlare(double WorldClock);
 
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> Root;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USkyAtmosphereComponent> Atmosphere;

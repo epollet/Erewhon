@@ -5,6 +5,9 @@
 #include "World/Villagers.h"
 #include "World/Forestry.h"
 #include "Core/ErewhonSettings.h"
+#include "Core/ErewhonPlayerState.h"
+#include "Inventory/BackpackComponent.h"
+#include "Inventory/InventoryComponent.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "Sky/CelestialSystem.h"
@@ -96,6 +99,7 @@ void AErewhonGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AErewhonGameState, WorldSeed);
+	DOREPLIFETIME(AErewhonGameState, ForcedWeather);
 	DOREPLIFETIME(AErewhonGameState, WorldAgeAtStart);
 	DOREPLIFETIME(AErewhonGameState, Harvests);
 	DOREPLIFETIME(AErewhonGameState, SectorOwners);
@@ -210,13 +214,48 @@ void AErewhonGameState::OnRep_Village()
 EShopKind AErewhonGameState::ShopFor(const FItemDef& Item) const
 {
 	const EShopKind Shop = Item.ShopFor();
-	// Les vêtements, et la charrette, au General Store tant que leur boutique n'est pas bâtie ;
-	// bhuraks et outils tractés attendent l'éleveur et l'atelier.
-	if (!IsShopBuilt(Shop) && (Shop == EShopKind::Tailor || Item.Id == TEXT("cart")))
+	// Les teintures, et la charrette, au General Store tant que leur boutique n'est pas bâtie ;
+	// les vêtements, bhuraks et outils tractés attendent le tailleur, l'éleveur et l'atelier.
+	if (!IsShopBuilt(Shop) && ((Shop == EShopKind::Tailor && !Item.IsClothing()) || Item.Id == TEXT("cart")))
 	{
 		return EShopKind::GeneralStore;
 	}
 	return Shop;
+}
+
+#define LOCTEXT_NAMESPACE "ErewhonGameState"
+
+FText AErewhonGameState::WhyNotOffered(const FItemDef& Item, EShopKind Shop, const AErewhonPlayerState* Player) const
+{
+	if (!Player || Item.BuyPrice <= 0 || ShopFor(Item) != Shop || !IsShopBuilt(Shop))
+	{
+		return LOCTEXT("NotSold", "Le marchand ne vend pas cet objet.");
+	}
+	if (Item.bApothecaryOnly && !Player->IsApothecary())
+	{
+		return LOCTEXT("ApothecaryOnlyItem", "Ce n'est vendu qu'aux apothicaires (la classe se choisit à la mairie).");
+	}
+	if (Item.bFarmerOnly && !Player->IsFarmer())
+	{
+		return LOCTEXT("FarmerOnlyItem", "Ce n'est vendu qu'aux fermiers (la classe se choisit à la mairie).");
+	}
+	if (Item.bForesterOnly && !Player->IsForester())
+	{
+		return LOCTEXT("ForesterOnlyItem", "Ce n'est vendu qu'aux forestiers (la classe se choisit à la mairie).");
+	}
+	// Le sac se porte sur le dos, les outils ne s'achètent qu'une fois.
+	if (Item.IsBackpack() ? Player->GetBackpack()->IsOwned() : Item.IsUnique() && Player->GetInventory()->Owns(Item.Id))
+	{
+		return FText::Format(LOCTEXT("AlreadyHave", "Vous possédez déjà : {0}."), Item.Name);
+	}
+	return FText::GetEmpty();
+}
+
+#undef LOCTEXT_NAMESPACE
+
+bool AErewhonGameState::BuysBack(const FItemDef& Item, EShopKind Shop) const
+{
+	return ShopFor(Item) == Shop && IsShopBuilt(Shop) && Item.ResalePrice(UErewhonSettings::Get().ResaleRatio) > 0;
 }
 
 bool AErewhonGameState::IsShopBuilt(EShopKind Kind) const
@@ -251,6 +290,21 @@ void AErewhonGameState::AddPavedLink(const FIntPoint& Sector, int32 Side)
 double AErewhonGameState::GetWorldClock() const
 {
 	return WorldAgeAtStart + GetServerWorldTimeSeconds();
+}
+
+ErewhonWeather::FState AErewhonGameState::SampleWeather() const
+{
+	TOptional<ErewhonWeather::EKind> Forced;
+	if (ForcedWeather != 0)
+	{
+		Forced = static_cast<ErewhonWeather::EKind>(ForcedWeather - 1);
+	}
+	return ErewhonWeather::Sample(GetWorldClock(), WorldSeed, Forced);
+}
+
+void AErewhonGameState::SetForcedWeather(TOptional<ErewhonWeather::EKind> Kind)
+{
+	ForcedWeather = Kind.IsSet() ? static_cast<uint8>(Kind.GetValue()) + 1 : 0;
 }
 
 bool AErewhonGameState::IsHarvested(const FIntPoint& Sector, int32 PlantIndex) const

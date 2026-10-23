@@ -559,7 +559,7 @@
       "max_stack": 1, "color": [240, 140, 40], "mesh": "/Game/Generated/Meshes/SM_pitcher.SM_pitcher", "icon": "/Game/Generated/Icons/T_Icon_pitcher_brew.T_Icon_pitcher_brew"
     },
     {
-      "id": "vial", "name": "Fiole vide", "category": "resource", "holdable": true, "weight": 0.1,
+      "id": "vial", "name": "Fiole vide", "category": "resource", "holdable": true, "apothecary_only": true, "weight": 0.1,
       "description": "Une fiole de verre : remplie d'un demi-litre de breuvage, c'est une potion. En main, clic droit sur le chaudron pour la remplir. Une potion bue rend sa fiole.",
       "buy_price": 4, "max_stack": 20, "color": [200, 225, 235]
     },
@@ -569,7 +569,7 @@
       "buy_price": 120, "max_stack": 1, "color": [60, 58, 56]
     },
     {
-      "id": "herbal_book", "name": "Herbier des breuvages", "category": "resource", "weight": 1.2,
+      "id": "herbal_book", "name": "Herbier des breuvages", "category": "resource", "apothecary_only": true, "weight": 1.2,
       "description": "Le livre des breuvages du chaudron, page par page : ingrédients par litre, chaleur, temps.\nCliquez-le dans l'inventaire pour le lire.",
       "buy_price": 500, "max_stack": 1, "color": [120, 80, 50]
     },

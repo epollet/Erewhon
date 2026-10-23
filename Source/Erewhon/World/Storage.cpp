@@ -38,7 +38,7 @@ namespace
 	constexpr float GCartLength = 260.f;
 
 	/** Caisse sans roues (les roues sont des pièces à part, qui tournent) : même règle d'orientation. */
-	constexpr float GBodyYaw = 90.f;
+	constexpr float GCartBodyYaw = 90.f;
 	constexpr float GBodyLength = 230.f;
 	/** Décalage de la caisse pour que son moyeu tombe sur l'essieu des roues. */
 	const FVector GBodyOffset(-14.f, 0.f, 14.f);
@@ -387,7 +387,7 @@ namespace ErewhonPlaceables
 		// La caisse sans roues d'abord ; à défaut, l'ancien modèle d'un seul tenant.
 		if (UStaticMesh* Body = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_cart_body")))
 		{
-			OutFit = FitToLength(Body, GBodyLength) * FTransform(FRotator(0.f, GBodyYaw, 0.f), GBodyOffset);
+			OutFit = FitToLength(Body, GBodyLength) * FTransform(FRotator(0.f, GCartBodyYaw, 0.f), GBodyOffset);
 			return Body;
 		}
 		UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_cart"));

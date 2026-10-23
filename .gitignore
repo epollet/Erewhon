@@ -42,5 +42,8 @@ Desktop.ini
 __pycache__/
 *.pyc
 
+# Signalements en jeu (AltGr+²), propres à chaque poste
+Reports/
+
 # Blender portable (rig et animation des animaux)
 Tools/Blender/

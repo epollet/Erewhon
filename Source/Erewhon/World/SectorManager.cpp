@@ -216,6 +216,8 @@ void ASectorManager::Refresh()
 	{
 		return FVector::DistSquared2D(ErewhonSector::Center(A), Focus) < FVector::DistSquared2D(ErewhonSector::Center(B), Focus);
 	});
+	LocalPending = bHasLocalView ? Pending.Num() : -1;
+	LocalWanted = Wanted.Num();
 
 	USectorLayoutSubsystem* Layouts = World->GetSubsystem<USectorLayoutSubsystem>();
 	// Les arbres des secteurs lointains : redessinés en lot quand l'anneau change (au plus toutes les deux secondes).
@@ -501,6 +503,23 @@ ASector* ASectorManager::FindLoaded(const UObject* WorldContext, const FIntPoint
 	}
 	const TObjectPtr<ASector>* Found = It->Loaded.Find(Coord);
 	return Found ? Found->Get() : nullptr;
+}
+
+bool ASectorManager::GetLocalLoadState(const UObject* WorldContext, int32& OutPending, int32& OutWanted)
+{
+	UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	if (!World)
+	{
+		return false;
+	}
+	TActorIterator<ASectorManager> It(World);
+	if (!It || It->LocalPending < 0)
+	{
+		return false;
+	}
+	OutPending = It->LocalPending;
+	OutWanted = It->LocalWanted;
+	return true;
 }
 
 void ASectorManager::RebuildAll()

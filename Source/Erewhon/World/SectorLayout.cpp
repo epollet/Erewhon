@@ -387,36 +387,13 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 	Layout->PathPaved.Init(Layout->Type == ESectorType::Spawn ? bPavedCenter : bPavedRoad, Layout->Paths.Num());
 	if (Layout->Type == ESectorType::Spawn)
 	{
-		// La place ronde du General Store, puis la clairière de chaque cabane du bord des routes
-		// (celle du tailleur une fois sa boutique construite).
+		// La place ronde, puis la clairière de la mairie et celle du General Store, au bord de la route de l'est.
+		// Seul ce qui existe dès le départ vient avant les plantes : les terrains des améliorations
+		// (tailleur, éleveur, atelier, bancs) viennent après, pour ne pas en décaler les index.
 		Layout->Clearings.Add({ FVector2D(ErewhonSector::Center(Sector)), UErewhonSettings::Get().PlazaRadiusMeters * 100.f, bPavedCenter });
-		for (const EShopKind Kind : { EShopKind::SectorManager, EShopKind::Tailor })
+		for (const EShopKind Kind : { EShopKind::SectorManager, EShopKind::GeneralStore })
 		{
-			if (Kind == EShopKind::Tailor && !(State && State->HasVillageUpgrade(EVillageUpgrade::Tailor)))
-			{
-				continue;
-			}
 			Layout->Clearings.Add({ FVector2D(ErewhonSpawn::CabinTransform(Kind).GetLocation()), ErewhonSpawn::ManagerClearingRadius, bPavedCenter });
-		}
-		// L'éleveur et l'atelier : de la terre autour de la maison et de son annexe, et jusqu'à la route.
-		for (const EShopKind Kind : { EShopKind::Breeder, EShopKind::Workshop })
-		{
-			const FTransform House = ErewhonSpawn::CabinTransform(Kind);
-			const FVector2D Half = ErewhonSpawn::CabinHalfSize(Kind);
-			Layout->Clearings.Add({ FVector2D(House.GetLocation()), static_cast<float>(Half.X + 350.0), bPavedCenter });
-			const FVector2D AnnexAt(House.TransformPosition(FVector(ErewhonSpawn::AnnexCenter(Kind), 0.f)));
-			const FVector2D AnnexHalf = ErewhonSpawn::AnnexHalfSize(Kind);
-			Layout->Clearings.Add({ AnnexAt, static_cast<float>(FMath::Max(AnnexHalf.X, AnnexHalf.Y) + 250.0), false });
-			// Du perron à la route, et de la façade de l'annexe à la route.
-			for (const FVector& LocalFrom : { FVector(-Half.X - 100.f, 0.f, 0.f), FVector(ErewhonSpawn::AnnexCenter(Kind).X - AnnexHalf.X - 100.f, ErewhonSpawn::AnnexCenter(Kind).Y, 0.f) })
-			{
-				const FVector2D From(House.TransformPosition(LocalFrom));
-				const FVector2D Road(ErewhonSector::Center(Sector).X, ErewhonSector::Center(Sector).Y);
-				// La route du nord ou du sud court le long de X, à Y = centre.
-				const FVector2D To(From.X, Road.Y);
-				Layout->Paths.Add(FBox2D(FVector2D(From.X - 160.f, FMath::Min(From.Y, To.Y)), FVector2D(From.X + 160.f, FMath::Max(From.Y, To.Y))));
-				Layout->PathPaved.Add(false);
-			}
 		}
 		// La fontaine : un peu de terre autour, et un chemin jusqu'à l'allée.
 		{
@@ -427,21 +404,6 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 			const float AlleyEdge = ErewhonSector::Center(Sector).X - ErewhonSpawn::PathWidth * 0.5f;
 			Layout->Paths.Add(FBox2D(FVector2D(FMath::Min(Spot.X, AlleyEdge), Spot.Y - 110.f), FVector2D(FMath::Max(Spot.X, AlleyEdge) + 60.f, Spot.Y + 110.f)));
 			Layout->PathPaved.Add(false);
-		}
-		if (State && State->HasVillageUpgrade(EVillageUpgrade::Decoration))
-		{
-			// Sous chaque banc, la terre battue, et un petit sentier qui y mène depuis la place.
-			const FVector2D Plaza(ErewhonSector::Center(Sector));
-			for (const FTransform& Seat : ErewhonVillage::BenchSeats())
-			{
-				const FVector2D Bench(Seat.GetLocation());
-				Layout->Clearings.Add({ Bench, 150.f, false });
-				const FVector2D Toward = (Plaza - Bench).GetSafeNormal();
-				for (float Step = 120.f; Step < 420.f; Step += 60.f)
-				{
-					Layout->Clearings.Add({ Bench + Toward * Step, 70.f, false });
-				}
-			}
 		}
 	}
 
@@ -519,6 +481,55 @@ TSharedRef<FSectorLayout> USectorLayoutSubsystem::Build(const FIntPoint& Sector,
 
 	// Les chemins d'accès viennent après les plantes : ils n'en décalent pas les index.
 	BuildAccessPaths(*Layout);
+	if (Layout->Type == ESectorType::Spawn)
+	{
+		// De même, les terrains des améliorations du village : tant qu'elles ne sont pas achetées, l'herbe
+		// et les plantes y poussent comme ailleurs ; une fois bâties, leur terre recouvre ces plantes.
+		// Le tailleur : sa clairière, comme celle de la mairie.
+		if (State && State->IsShopBuilt(EShopKind::Tailor))
+		{
+			Layout->Clearings.Add({ FVector2D(ErewhonSpawn::CabinTransform(EShopKind::Tailor).GetLocation()), ErewhonSpawn::ManagerClearingRadius, bPavedCenter });
+		}
+		// L'éleveur et l'atelier : de la terre autour de la maison et de son annexe, et jusqu'à la route.
+		for (const EShopKind Kind : { EShopKind::Breeder, EShopKind::Workshop })
+		{
+			if (!State || !State->IsShopBuilt(Kind))
+			{
+				continue;
+			}
+			const FTransform House = ErewhonSpawn::CabinTransform(Kind);
+			const FVector2D Half = ErewhonSpawn::CabinHalfSize(Kind);
+			Layout->Clearings.Add({ FVector2D(House.GetLocation()), static_cast<float>(Half.X + 350.0), bPavedCenter });
+			const FVector2D AnnexAt(House.TransformPosition(FVector(ErewhonSpawn::AnnexCenter(Kind), 0.f)));
+			const FVector2D AnnexHalf = ErewhonSpawn::AnnexHalfSize(Kind);
+			Layout->Clearings.Add({ AnnexAt, static_cast<float>(FMath::Max(AnnexHalf.X, AnnexHalf.Y) + 250.0), false });
+			// Du perron à la route, et de la façade de l'annexe à la route.
+			for (const FVector& LocalFrom : { FVector(-Half.X - 100.f, 0.f, 0.f), FVector(ErewhonSpawn::AnnexCenter(Kind).X - AnnexHalf.X - 100.f, ErewhonSpawn::AnnexCenter(Kind).Y, 0.f) })
+			{
+				const FVector2D From(House.TransformPosition(LocalFrom));
+				const FVector2D Road(ErewhonSector::Center(Sector).X, ErewhonSector::Center(Sector).Y);
+				// La route du nord ou du sud court le long de X, à Y = centre.
+				const FVector2D To(From.X, Road.Y);
+				Layout->Paths.Add(FBox2D(FVector2D(From.X - 160.f, FMath::Min(From.Y, To.Y)), FVector2D(From.X + 160.f, FMath::Max(From.Y, To.Y))));
+				Layout->PathPaved.Add(false);
+			}
+		}
+		if (State && State->HasVillageUpgrade(EVillageUpgrade::Decoration))
+		{
+			// Sous chaque banc, la terre battue, et un petit sentier qui y mène depuis la place.
+			const FVector2D Plaza(ErewhonSector::Center(Sector));
+			for (const FTransform& Seat : ErewhonVillage::BenchSeats())
+			{
+				const FVector2D Bench(Seat.GetLocation());
+				Layout->Clearings.Add({ Bench, 150.f, false });
+				const FVector2D Toward = (Plaza - Bench).GetSafeNormal();
+				for (float Step = 120.f; Step < 420.f; Step += 60.f)
+				{
+					Layout->Clearings.Add({ Bench + Toward * Step, 70.f, false });
+				}
+			}
+		}
+	}
 	if (Layout->Paths.Num() > 0 || Layout->Clearings.Num() > 0)
 	{
 		for (int32 Index = 0; Index < Layout->Plants.Num(); ++Index)

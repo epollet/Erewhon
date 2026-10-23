@@ -9,7 +9,7 @@ class SBox;
 
 /**
  * Comptoir d'un commerce de la place :
- * - General Store, en deux onglets : Acheter (outils et vêtements en cartes illustrées) et
+ * - General Store, en deux onglets : Acheter (outils et fournitures en cartes illustrées, seulement ce qui est proposé au joueur) et
  *   Vendre (les objets rangés, à l'unité ou en totalité) ;
  * - Sector Manager : une carte des environs ; on choisit une case, on l'achète ou la revend.
  */

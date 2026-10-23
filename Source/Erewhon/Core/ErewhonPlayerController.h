@@ -68,14 +68,16 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void PlayerTick(float DeltaTime) override;
+	/** Rien ne passe au jeu tant que l'écran de chargement cache le monde. */
+	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
 
 	/** Actions d'entrée, créées à la première demande (le pawn peut les réclamer avant BeginPlay). */
 	const FErewhonInputActions& GetInputActions();
 
 	// ── Menus ──
 
-	/** Vrai aussi pendant l'image où un menu est en train de s'ouvrir. */
-	bool IsMenuOpen() const { return OpenMenu.IsValid() || PendingMenu.IsValid(); }
+	/** Vrai aussi pendant l'image où un menu est en train de s'ouvrir, et pendant un signalement. */
+	bool IsMenuOpen() const { return OpenMenu.IsValid() || PendingMenu.IsValid() || IsReportOpen(); }
 	void ToggleInventory();
 	/** Inventaire, avec à côté le sac à dos (porté, ou posé et visé : Bag). */
 	void OpenInventory(class ABackpack* Bag);
@@ -96,6 +98,16 @@ public:
 	/** Panneau de triche (Ctrl+Alt+ù puis Ctrl+Maj+*). */
 	void OpenCheats();
 	void CloseMenu();
+
+	/**
+	 * Signalement (AltGr+²), à tout moment : fige l'écran et l'état du jeu, puis ouvre la popup
+	 * par-dessus le menu éventuel, qu'on retrouve à sa fermeture.
+	 */
+	void OpenReport();
+	void CloseReport();
+	bool IsReportOpen() const { return ReportPanel.IsValid() || bReportPending; }
+	/** Le type du menu ouvert, pour le signalement. */
+	FString DescribeOpenMenu() const;
 
 	/** Échap : ferme le menu ouvert, sinon ouvre le menu de jeu. */
 	void HandleEscape();
@@ -193,6 +205,10 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerCheatAdvanceTime(float Seconds);
 
+	/** 0 : météo naturelle ; sinon ErewhonWeather::EKind + 1. */
+	UFUNCTION(Server, Reliable)
+	void ServerCheatSetWeather(uint8 Weather);
+
 	UFUNCTION(Server, Reliable)
 	void ServerBuyPavedLink(FIntPoint Sector, uint8 Side);
 
@@ -282,6 +298,8 @@ private:
 
 	void ReportResult(const FText& Error);
 	void ShowMenu(const TSharedRef<SWidget>& Widget, bool bIsStore);
+	/** Clavier au menu, souris libre : le jeu reçoit ce que le menu ne prend pas. */
+	void FocusMenu(const TSharedRef<SWidget>& Widget);
 	FString LoadOrCreatePlayerKey() const;
 
 	UPROPERTY()
@@ -310,6 +328,8 @@ private:
 	TWeakObjectPtr<class ABhurak> OpenedBhurak;
 	TWeakPtr<SWidget> BhurakWidget;
 	TWeakPtr<SWidget> ApothecaryWidget;
+	TSharedPtr<SWidget> ReportPanel;
+	bool bReportPending = false;
 
 	UFUNCTION()
 	void OnRep_CraftJob() { OnCraftChanged.Broadcast(); }
@@ -319,7 +339,7 @@ private:
 
 	TWeakObjectPtr<class AStorageActor> CraftStation;
 
-	/** Écoute des raccourcis de triche, avant les entrées du jeu et des menus. */
+	/** Écoute des raccourcis de triche et de signalement, avant les entrées du jeu et des menus. */
 	TSharedPtr<class IInputProcessor> CheatKeys;
 	TArray<FErewhonToast> Toasts;
 };

@@ -81,7 +81,7 @@ void SStorePanel::Construct(const FArguments& InArgs)
 	else if (State && !State->GetInventory()->GetSlots().ContainsByPredicate([this, State, World](const FInventorySlot& Slot)
 	{
 		const FItemDef* Def = Slot.Kind == ESlotKind::Inventory && !Slot.IsEmpty() ? UItemDatabase::Get(Controller.Get())->Find(Slot.ItemId) : nullptr;
-		return Def && World && World->ShopFor(*Def) == Kind && Def->ResalePrice(UErewhonSettings::Get().ResaleRatio) > 0;
+		return Def && World && World->BuysBack(*Def, Kind);
 	}))
 	{
 		Tab = ETab::Buy;
@@ -209,7 +209,7 @@ TSharedRef<SWidget> SStorePanel::BuildClass()
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
 		[
 			ClassCard(EPlayerClass::Apothecary, LOCTEXT("ClassApothecary", "Apothicaire"),
-				LOCTEXT("ClassApothecaryDesc", "Bâtit l'apothicairerie et sa remise, se sert du mortier, du chaudron et de son support, du séchoir et de l'atelier."),
+				LOCTEXT("ClassApothecaryDesc", "Bâtit l'apothicairerie et sa remise, se sert du mortier, du chaudron et de son support, du séchoir et de l'atelier ; seul à acheter fioles et herbier."),
 				Settings.ApothecaryClassPrice)
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
@@ -591,9 +591,10 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 TSharedRef<SWidget> SStorePanel::BuildBuy()
 {
 	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
+	const AErewhonGameState* World = AErewhonGameState::Get(Controller.Get());
 	const UItemDatabase* Items = UItemDatabase::Get(Controller.Get());
 	TSharedRef<SUniformGridPanel> Grid = SNew(SUniformGridPanel).SlotPadding(6.f);
-	if (!Items)
+	if (!Items || !World)
 	{
 		return Grid;
 	}
@@ -602,13 +603,11 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 	int32 Index = 0;
 	for (const FItemDef* Def : Items->GetPurchasable())
 	{
-		if (AErewhonGameState::Get(Controller.Get())->ShopFor(*Def) != Kind)
+		if (!World->IsOfferedTo(*Def, Kind, State))
 		{
-			continue;   // chaque commerce ne vend que sa marchandise
+			continue;   // ni la marchandise d'ici, ni pour sa classe, ou déjà à lui : on ne la montre pas
 		}
-		const bool bOwned = Def->IsBackpack() ? State->GetBackpack()->IsOwned() : Def->IsUnique() && State->GetInventory()->Owns(Def->Id);
 		const bool bAfford = State->GetCoins() >= Def->BuyPrice;
-		const bool bForbidden = (Def->bApothecaryOnly && !State->IsApothecary()) || (Def->bFarmerOnly && !State->IsFarmer()) || (Def->bForesterOnly && !State->IsForester());
 		const FName Id = Def->Id;
 		TSharedRef<SWidget> ItemCard = CardBox(
 			SNew(SVerticalBox)
@@ -620,9 +619,9 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 0, 0, 8)[CoinBadge(Def->BuyPrice, 10)]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				Button(bOwned ? LOCTEXT("Owned", "Déjà à vous") : bForbidden ? (Def->bFarmerOnly ? LOCTEXT("FarmerOnlyBuy", "Fermiers") : Def->bForesterOnly ? LOCTEXT("ForesterOnlyBuy", "Forestiers") : LOCTEXT("ApothecaryOnlyBuy", "Apothicaires")) : LOCTEXT("BuyItem", "Acheter"),
+				Button(LOCTEXT("BuyItem", "Acheter"),
 					[WeakController, Id]() { if (WeakController.IsValid()) { WeakController->ServerBuyItem(Id); } },
-					EButton::Primary, !bOwned && bAfford && !bForbidden, 0.f, 11)
+					EButton::Primary, bAfford, 0.f, 11)
 			],
 			10.f);
 		ItemCard->SetToolTip(ItemTooltip(*Def));
@@ -659,12 +658,13 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 		}
 	}
 
+	const AErewhonGameState* World = AErewhonGameState::Get(Controller.Get());
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	int32 Total = 0;
 	for (const FName Id : Seen)
 	{
 		const FItemDef* Def = Items->Find(Id);
-		const int32 Price = Def && AErewhonGameState::Get(Controller.Get())->ShopFor(*Def) == Kind ? Def->ResalePrice(ResaleRatio) : 0;
+		const int32 Price = Def && World && World->BuysBack(*Def, Kind) ? Def->ResalePrice(ResaleRatio) : 0;
 		if (Price <= 0)
 		{
 			continue;

@@ -121,7 +121,7 @@ namespace ErewhonTerrain
 		const float FlatRadius = Settings.SpawnFlatRadiusMeters * 100.f;
 		float Flatten = FMath::SmoothStep(FlatRadius, FlatRadius + 3000.f, FromSpawn);
 		// Même chose, plus serré, autour des cabanes du bord des routes.
-		for (const EShopKind Kind : { EShopKind::SectorManager, EShopKind::Tailor })
+		for (const EShopKind Kind : { EShopKind::SectorManager, EShopKind::GeneralStore, EShopKind::Tailor })
 		{
 			const FVector2D Cabin(ErewhonSpawn::CabinTransform(Kind).GetLocation());
 			Flatten = FMath::Min(Flatten, FMath::SmoothStep(1300.f, 3300.f, static_cast<float>(FVector2D::Distance(World, Cabin))));

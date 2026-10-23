@@ -63,8 +63,8 @@ namespace ErewhonForestry
 
 namespace
 {
-	const FLinearColor GBark = FLinearColor::FromSRGBColor(FColor(104, 80, 60));
-	const FLinearColor GLeaf = FLinearColor::FromSRGBColor(FColor(96, 150, 64));
+	const FLinearColor GTreeBark = FLinearColor::FromSRGBColor(FColor(104, 80, 60));
+	const FLinearColor GTreeLeaf = FLinearColor::FromSRGBColor(FColor(96, 150, 64));
 
 	FTreeInstance AsTree(int32 Model, float Height, float Girth, float Yaw)
 	{
@@ -170,8 +170,8 @@ void AFelledTree::BeginPlay()
 
 	// Le tronc : un cylindre d'écorce, du pied jusqu'à la naissance de la cime. Il arrête le joueur et la visée.
 	const float Radius = ErewhonForestry::TrunkRadius(Tree);
-	Trunk = AddShape(this, Pivot, EShape::Cylinder, FVector(-Radius, 0.f, Length * 0.5f), FVector(Radius * 2.f, Radius * 2.f, Length), GBark, FRotator::ZeroRotator, true);
-	Trunk->SetMaterial(0, MakePaintedMaterial(Trunk, TEXT("bark"), 160.f, GBark, FLinearColor(0.62f, 0.5f, 0.42f)));
+	Trunk = AddShape(this, Pivot, EShape::Cylinder, FVector(-Radius, 0.f, Length * 0.5f), FVector(Radius * 2.f, Radius * 2.f, Length), GTreeBark, FRotator::ZeroRotator, true);
+	Trunk->SetMaterial(0, MakePaintedMaterial(Trunk, TEXT("bark"), 160.f, GTreeBark, FLinearColor(0.62f, 0.5f, 0.42f)));
 	if (GetNetMode() != NM_DedicatedServer && ErewhonForest::TreeModels[FMath::Clamp(Model, 0, ErewhonForest::TreeModelCount - 1)])
 	{
 		if (UStaticMesh* Mesh = LoadGenerated<UStaticMesh>(TEXT("Meshes"), ErewhonForest::TreeModels[FMath::Clamp(Model, 0, ErewhonForest::TreeModelCount - 1)]))
@@ -287,20 +287,20 @@ void AFelledTree::StartBurst()
 		Part->SetCastShadow(false);
 		if (!bBranch && !Bush)
 		{
-			Part->SetMaterial(0, MakeColorMaterial(Part, GLeaf));
+			Part->SetMaterial(0, MakeColorMaterial(Part, GTreeLeaf));
 		}
 		const FVector Offset = Along * Rand.FRandRange(-0.6f, 0.6f) * Spread * 1.4f + FVector(Rand.FRandRange(-1.f, 1.f), Rand.FRandRange(-1.f, 1.f), Rand.FRandRange(-0.3f, 0.6f)) * Spread;
 		const float Size = (bBranch ? Rand.FRandRange(60.f, 110.f) : Rand.FRandRange(80.f, 140.f)) / 100.f;
 		const FTransform Fit = FitToHeight(Mesh, 100.f);
-		FLeaf Leaf;
-		Leaf.Part = Part;
-		Leaf.Scale = Fit.GetScale3D() * Size;
-		Leaf.Velocity = Offset.GetSafeNormal() * Rand.FRandRange(250.f, 650.f) + FVector(0.f, 0.f, Rand.FRandRange(150.f, 450.f));
-		Leaf.Spin = FRotator(Rand.FRandRange(-260.f, 260.f), Rand.FRandRange(-260.f, 260.f), Rand.FRandRange(-260.f, 260.f));
+		FLeaf Falling;
+		Falling.Part = Part;
+		Falling.Scale = Fit.GetScale3D() * Size;
+		Falling.Velocity = Offset.GetSafeNormal() * Rand.FRandRange(250.f, 650.f) + FVector(0.f, 0.f, Rand.FRandRange(150.f, 450.f));
+		Falling.Spin = FRotator(Rand.FRandRange(-260.f, 260.f), Rand.FRandRange(-260.f, 260.f), Rand.FRandRange(-260.f, 260.f));
 		Part->SetWorldLocationAndRotation(Crown + Offset, FRotator(Rand.FRandRange(0.f, 360.f), Rand.FRandRange(0.f, 360.f), 0.f));
-		Part->SetWorldScale3D(Leaf.Scale);
+		Part->SetWorldScale3D(Falling.Scale);
 		Part->RegisterComponent();
-		Leaves.Add(Leaf);
+		Leaves.Add(Falling);
 	}
 	BurstTime = 0.f;
 }
@@ -310,23 +310,23 @@ void AFelledTree::UpdateBurst(float DeltaSeconds)
 	constexpr float Life = 1.4f;
 	BurstTime += DeltaSeconds;
 	const float Fade = FMath::Clamp(1.f - BurstTime / Life, 0.f, 1.f);
-	for (FLeaf& Leaf : Leaves)
+	for (FLeaf& Falling : Leaves)
 	{
-		UStaticMeshComponent* Part = Leaf.Part.Get();
+		UStaticMeshComponent* Part = Falling.Part.Get();
 		if (!Part)
 		{
 			continue;
 		}
-		Leaf.Velocity += FVector(0.f, 0.f, -980.f) * DeltaSeconds;
-		Leaf.Velocity *= FMath::Max(0.f, 1.f - 1.2f * DeltaSeconds);   // l'air freine les feuilles
-		Part->SetWorldLocationAndRotation(Part->GetComponentLocation() + Leaf.Velocity * DeltaSeconds, Part->GetComponentRotation() + Leaf.Spin * DeltaSeconds);
-		Part->SetWorldScale3D(Leaf.Scale * FMath::Max(0.01f, Fade));
+		Falling.Velocity += FVector(0.f, 0.f, -980.f) * DeltaSeconds;
+		Falling.Velocity *= FMath::Max(0.f, 1.f - 1.2f * DeltaSeconds);   // l'air freine les feuilles
+		Part->SetWorldLocationAndRotation(Part->GetComponentLocation() + Falling.Velocity * DeltaSeconds, Part->GetComponentRotation() + Falling.Spin * DeltaSeconds);
+		Part->SetWorldScale3D(Falling.Scale * FMath::Max(0.01f, Fade));
 	}
 	if (BurstTime >= Life)
 	{
-		for (FLeaf& Leaf : Leaves)
+		for (FLeaf& Falling : Leaves)
 		{
-			if (UStaticMeshComponent* Part = Leaf.Part.Get())
+			if (UStaticMeshComponent* Part = Falling.Part.Get())
 			{
 				Part->DestroyComponent();
 			}

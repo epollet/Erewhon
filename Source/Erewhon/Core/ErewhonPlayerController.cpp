@@ -6,6 +6,7 @@
 #include "Core/ErewhonPlayerState.h"
 
 #include "Core/ErewhonGameMode.h"
+#include "Core/ErewhonLoadingScreen.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
@@ -19,6 +20,7 @@
 #include "UI/SInventoryPanel.h"
 #include "UI/SStorePanel.h"
 #include "UI/SCheatPanel.h"
+#include "UI/SReportPanel.h"
 #include "Framework/Application/IInputProcessor.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Player/ErewhonCharacter.h"
@@ -75,6 +77,7 @@ namespace
 {
 	/**
 	 * Raccourci de triche en deux temps : Ctrl+Alt+ù, puis Ctrl+Maj+* dans les 5 secondes.
+	 * Signalement : AltGr+² (Windows transmet AltGr comme Ctrl+Alt).
 	 * Les touches sont reconnues par le caractère qu'elles portent (clavier AZERTY).
 	 */
 	class FErewhonCheatKeys : public IInputProcessor
@@ -88,6 +91,14 @@ namespace
 		{
 			const uint32 Character = Event.GetCharacter();
 			const double Now = FPlatformTime::Seconds();
+			if (Event.IsControlDown() && Event.IsAltDown() && Character == 0x00B2)   // ²
+			{
+				if (Controller.IsValid())
+				{
+					Controller->OpenReport();
+				}
+				return true;
+			}
 			if (Event.IsControlDown() && Event.IsAltDown() && Character == 0x00F9)   // ù
 			{
 				ArmedAt = Now;
@@ -245,6 +256,7 @@ void AErewhonPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		FSlateApplication::Get().UnregisterInputPreProcessor(CheatKeys);
 		CheatKeys.Reset();
 	}
+	CloseReport();
 	CloseMenu();
 	Super::EndPlay(EndPlayReason);
 }
@@ -441,14 +453,78 @@ void AErewhonPlayerController::ShowMenu(const TSharedRef<SWidget>& Widget, bool 
 		OpenMenu = Widget;
 		bStoreOpen = bIsStore;
 		Viewport->AddViewportWidgetContent(Widget, 10);
+		if (!ReportPanel.IsValid())
+		{
+			FocusMenu(Widget);
+		}
+	}));
+}
 
-		FInputModeGameAndUI Mode;
-		Mode.SetWidgetToFocus(Widget);
+void AErewhonPlayerController::FocusMenu(const TSharedRef<SWidget>& Widget)
+{
+	FInputModeGameAndUI Mode;
+	Mode.SetWidgetToFocus(Widget);
+	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::LockInFullscreen);
+	Mode.SetHideCursorDuringCapture(false);
+	SetInputMode(Mode);
+	SetShowMouseCursor(true);
+}
+
+FString AErewhonPlayerController::DescribeOpenMenu() const
+{
+	return OpenMenu.IsValid() ? OpenMenu->GetTypeAsString() : TEXT("aucun");
+}
+
+void AErewhonPlayerController::OpenReport()
+{
+	if (IsReportOpen())
+	{
+		return;
+	}
+	// À l'image suivante, hors du traitement de la touche : l'écran tel que le joueur le voit, popup exclue.
+	bReportPending = true;
+	GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+	{
+		bReportPending = false;
+		UGameViewportClient* Viewport = GetLocalPlayer() ? GetLocalPlayer()->ViewportClient : nullptr;
+		if (!Viewport)
+		{
+			return;
+		}
+		const TSharedRef<SReportPanel> Panel = SNew(SReportPanel, ErewhonReport::Capture(this)).Controller(this);
+		ReportPanel = Panel;
+		Viewport->AddViewportWidgetContent(Panel, 100);
+
+		// Rien ne passe au jeu tant que la popup est ouverte : on y tape du texte.
+		FInputModeUIOnly Mode;
+		Mode.SetWidgetToFocus(Panel->GetFocusTarget());
 		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::LockInFullscreen);
-		Mode.SetHideCursorDuringCapture(false);
 		SetInputMode(Mode);
 		SetShowMouseCursor(true);
 	}));
+}
+
+void AErewhonPlayerController::CloseReport()
+{
+	bReportPending = false;
+	if (!ReportPanel.IsValid())
+	{
+		return;
+	}
+	if (UGameViewportClient* Viewport = GetLocalPlayer() ? GetLocalPlayer()->ViewportClient : nullptr)
+	{
+		Viewport->RemoveViewportWidgetContent(ReportPanel.ToSharedRef());
+	}
+	ReportPanel.Reset();
+	if (OpenMenu.IsValid())
+	{
+		FocusMenu(OpenMenu.ToSharedRef());
+	}
+	else
+	{
+		SetInputMode(FInputModeGameOnly());
+		SetShowMouseCursor(false);
+	}
 }
 
 void AErewhonPlayerController::CloseMenu()
@@ -464,8 +540,11 @@ void AErewhonPlayerController::CloseMenu()
 	}
 	OpenMenu.Reset();
 	bStoreOpen = false;
-	SetInputMode(FInputModeGameOnly());
-	SetShowMouseCursor(false);
+	if (!ReportPanel.IsValid())   // la popup de signalement garde le clavier
+	{
+		SetInputMode(FInputModeGameOnly());
+		SetShowMouseCursor(false);
+	}
 }
 
 void AErewhonPlayerController::ToggleInventory()
@@ -824,6 +903,17 @@ void AErewhonPlayerController::PlayerTick(float DeltaTime)
 	}
 }
 
+bool AErewhonPlayerController::InputKey(const FInputKeyEventArgs& Params)
+{
+	// Écran de chargement : on ne marche pas dans un monde qui se construit. Le signalement
+	// (AltGr+²) passe avant, par FErewhonCheatKeys.
+	if (UErewhonLoadingScreen::IsBlockingInput(this))
+	{
+		return true;
+	}
+	return Super::InputKey(Params);
+}
+
 // ── Messages ─────────────────────────────────────────────────────────────────
 
 void AErewhonPlayerController::ShowToast(const FText& Text)
@@ -987,6 +1077,14 @@ void AErewhonPlayerController::ServerCheatAdvanceTime_Implementation(float Secon
 	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
 	{
 		ReportResult(Mode->TryCheatAdvanceTime(this, Seconds));
+	}
+}
+
+void AErewhonPlayerController::ServerCheatSetWeather_Implementation(uint8 Weather)
+{
+	if (AErewhonGameMode* Mode = GetWorld()->GetAuthGameMode<AErewhonGameMode>())
+	{
+		ReportResult(Mode->TryCheatSetWeather(this, Weather));
 	}
 }
 

@@ -122,6 +122,8 @@ public:
 	// Triche (hôte, ou build de développement)
 	FText TryCheatSetCoins(AErewhonPlayerController* Controller, int32 Coins);
 	FText TryCheatAdvanceTime(AErewhonPlayerController* Controller, float Seconds);
+	/** Weather : 0 rend la météo naturelle, sinon ErewhonWeather::EKind + 1. */
+	FText TryCheatSetWeather(AErewhonPlayerController* Controller, uint8 Weather);
 
 	// Village
 	FText TryBuyVillageUpgrade(AErewhonPlayerController* Controller, uint8 Upgrade);

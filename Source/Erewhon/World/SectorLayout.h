@@ -86,7 +86,8 @@ struct EREWHON_API FSectorLayout
 	TArray<bool> PathPaved;
 
 	/**
-	 * Plantes recouvertes par un chemin d'accès tracé après coup (achat d'un secteur) :
+	 * Plantes recouvertes par un chemin d'accès tracé après coup (achat d'un secteur), ou par
+	 * le terrain d'une boutique bâtie au village (tailleur, éleveur, atelier, bancs de la place) :
 	 * leurs index restent valides, mais elles ne s'affichent ni ne se récoltent.
 	 */
 	TSet<int32> CoveredPlants;

@@ -40,8 +40,11 @@ namespace ErewhonWeather
 		float LightningPerMinute = 0.f;
 	};
 
-	/** Le temps qu'il fait à cet instant. */
-	EREWHON_API FState Sample(double WorldClock, int32 WorldSeed);
+	/**
+	 * Le temps qu'il fait à cet instant. Forced (triche) fixe le type : le temps continu prend une
+	 * valeur typique de ce type, pluie, vent et averses continuent de varier.
+	 */
+	EREWHON_API FState Sample(double WorldClock, int32 WorldSeed, TOptional<EKind> Forced = {});
 
 	EREWHON_API FText KindName(EKind Kind);
 

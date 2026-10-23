@@ -37,7 +37,8 @@ namespace ErewhonSpawn
 			// À l'est de la route du sud, la porte vers la route (−Y) ; la cour plus au sud.
 			return FTransform(FRotator(0.0, 90.0, 0.0), Plaza + FVector(-2100.0, 1600.0, 0.0));
 		}
-		return FTransform(FRotator::ZeroRotator, Plaza);
+		// Le General Store : à côté de la mairie, plus loin sur la route de l'est ; la place reste libre.
+		return FTransform(FRotator::ZeroRotator, Plaza + FVector(1100.0, 3100.0, 0.0));
 	}
 
 	FString ShopName(EShopKind Kind)
@@ -150,8 +151,8 @@ namespace ErewhonSpawn
 
 	FTransform PlayerSpawnTransform()
 	{
-		// Une dizaine de mètres au sud de la porte, regard vers le nord (+X).
-		const FVector Location = ErewhonSector::Center(FIntPoint::ZeroValue) + FVector(-CabinHalfLength - 900.f, 0.f, 100.f);
+		// Sur le chemin du sud, à l'entrée de la place, regard vers le nord (+X).
+		const FVector Location = ErewhonSector::Center(FIntPoint::ZeroValue) + FVector(-1350.f, 0.f, 100.f);
 		return FTransform(FRotator::ZeroRotator, Location);
 	}
 }

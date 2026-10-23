@@ -40,7 +40,7 @@ namespace ErewhonVillagers
 			{ TEXT("villager_weaver_tp"), TEXT("Lison"), TEXT("la tisserande") },
 		};
 
-		/** Où une route quitte la place, et le tour de la place (on contourne le General Store, au centre). */
+		/** Où une route quitte la place, et la couronne où l'on en fait le tour. */
 		constexpr float PlazaEntry = 1250.f;
 		constexpr float PlazaRing = 760.f;
 
@@ -271,7 +271,7 @@ void AVillager::PlanOuting()
 		}
 	}
 	const FVector2D From = Route.Num() > 0 ? Route.Last() : FVector2D(GetActorLocation());
-	// Faire le tour de la place jusqu'à une sortie (sans traverser le General Store).
+	// Faire le tour de la place jusqu'à une sortie (en couronne, sans couper au plus court).
 	const auto AroundTo = [&](const FVector2D& Exit)
 	{
 		const float A0 = FMath::Atan2(From.Y - Plaza.Y, From.X - Plaza.X);

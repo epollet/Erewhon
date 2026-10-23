@@ -18,6 +18,7 @@ public class Erewhon : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
 			"Slate", "SlateCore", "UMG", "Json", "ProceduralMeshComponent",
+			"ImageCore", "RHI",   // signalements : capture d'écran en PNG, nom du GPU
 		});
 	}
 }

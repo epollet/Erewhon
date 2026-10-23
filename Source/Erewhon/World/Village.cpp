@@ -42,7 +42,7 @@ namespace ErewhonVillage
 		/** De grands arbres autour de la place, qui l'ombragent ; ils évitent les chemins et les cabanes. */
 		constexpr float GTreeAngles[] = { 20.f, 40.f, 115.f, 140.f, 160.f, 200.f, 295.f, 320.f, 340.f };
 
-		FVector Plaza() { return ErewhonSpawn::CabinTransform(EShopKind::GeneralStore).GetLocation(); }
+		FVector Plaza() { return ErewhonSector::Center(FIntPoint::ZeroValue); }
 
 		/** Sur le modèle de la fontaine (repère de la fontaine) : le bec, et l'endroit où le tonneau reçoit l'eau (mesurés). */
 		constexpr float FountainSide = -18.f;   // le pilier est un peu décentré par rapport au bassin
@@ -308,11 +308,15 @@ void AVillageDecor::BuildSignposts(bool bTailor, bool bLanterns)
 		const FVector2D Foot = ExitFoot(Exit, 1.f);
 		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Exit.Dir.Y, Exit.Dir.X));
 		TArray<ErewhonSigns::FArm> Arms = { { Exit.Name, Yaw } };
-		// Les cabanes du bord des routes : à l'est le gérant, à l'ouest le tailleur (s'il est construit).
-		if (Exit.Dir.Y > 0.f || (Exit.Dir.Y < 0.f && bTailor))
+		// Les cabanes du bord des routes : à l'est le gérant et le General Store, à l'ouest le tailleur (s'il est construit).
+		if (Exit.Dir.Y > 0.f)
 		{
-			const EShopKind Shop = Exit.Dir.Y > 0.f ? EShopKind::SectorManager : EShopKind::Tailor;
-			Arms.Add(ErewhonSigns::ShopArm(Shop, GetActorLocation() + FVector(Foot, 0.f), Yaw));
+			Arms.Add(ErewhonSigns::ShopArm(EShopKind::SectorManager, GetActorLocation() + FVector(Foot, 0.f), Yaw));
+			Arms.Add(ErewhonSigns::ShopArm(EShopKind::GeneralStore, GetActorLocation() + FVector(Foot, 0.f), Yaw));
+		}
+		else if (Exit.Dir.Y < 0.f && bTailor)
+		{
+			Arms.Add(ErewhonSigns::ShopArm(EShopKind::Tailor, GetActorLocation() + FVector(Foot, 0.f), Yaw));
 		}
 		// Au nord l'éleveur, au sud l'atelier (une fois bâtis).
 		const AErewhonGameState* State = AErewhonGameState::Get(this);
@@ -323,8 +327,9 @@ void AVillageDecor::BuildSignposts(bool bTailor, bool bLanterns)
 		ErewhonSigns::AddSignpost(this, Root, FVector(Foot, 0.f), Arms, bLanterns);
 	}
 
-	// Au carrefour de chaque cabane du bord des routes : son perron d'un côté, la place de l'autre.
-	for (const EShopKind Shop : { EShopKind::SectorManager, EShopKind::Tailor })
+	// Au carrefour de chaque cabane du bord des routes : son perron d'un côté, de l'autre le General Store
+	// (ou, depuis le sien, la mairie), le long de la route.
+	for (const EShopKind Shop : { EShopKind::SectorManager, EShopKind::GeneralStore, EShopKind::Tailor })
 	{
 		if (Shop == EShopKind::Tailor && !bTailor)
 		{
@@ -332,9 +337,11 @@ void AVillageDecor::BuildSignposts(bool bTailor, bool bLanterns)
 		}
 		const FVector Foot = JunctionFoot(this, Shop, 1.f);
 		const FVector Doorstep = GetActorTransform().InverseTransformPosition(DoorstepLocation(Shop));
+		const EShopKind Other = Shop == EShopKind::GeneralStore ? EShopKind::SectorManager : EShopKind::GeneralStore;
+		const FVector OtherDoorstep = GetActorTransform().InverseTransformPosition(DoorstepLocation(Other));
 		ErewhonSigns::AddSignpost(this, Root, Foot, {
 			{ ShopName(Shop), Doorstep.X > 0.f ? 0.f : 180.f },
-			ErewhonSigns::ShopArm(EShopKind::GeneralStore, GetActorLocation() + Foot, Doorstep.Y < 0.f ? 90.f : -90.f),
+			ErewhonSigns::ShopArm(Other, GetActorLocation() + Foot, OtherDoorstep.Y > Foot.Y ? 90.f : -90.f),
 		}, bLanterns);
 	}
 }
@@ -374,7 +381,7 @@ void AVillageDecor::BuildLanterns(bool bTailor, bool bSignposts)
 		ErewhonVillage::AddLantern(this, Root, FVector(Foot, 0.f), FMath::RadiansToDegrees(FMath::Atan2(Exit.Dir.Y, Exit.Dir.X)) + 90.f, false);
 	}
 	// Aux carrefours des cabanes du bord des routes.
-	for (const EShopKind Shop : { EShopKind::SectorManager, EShopKind::Tailor })
+	for (const EShopKind Shop : { EShopKind::SectorManager, EShopKind::GeneralStore, EShopKind::Tailor })
 	{
 		if (Shop != EShopKind::Tailor || bTailor)
 		{
@@ -421,7 +428,7 @@ void AVillageDecor::BuildDecoration()
 	const auto Stone = [&](const FVector2D& P)
 	{
 		// Pas de bordure devant les cabanes du bord des routes : on doit pouvoir y entrer.
-		for (const EShopKind Shop : { EShopKind::SectorManager, EShopKind::Tailor })
+		for (const EShopKind Shop : { EShopKind::SectorManager, EShopKind::GeneralStore, EShopKind::Tailor })
 		{
 			if (FVector2D::Distance(P, FVector2D(CabinTransform(Shop).GetLocation())) < ManagerClearingRadius + 150.f)
 			{

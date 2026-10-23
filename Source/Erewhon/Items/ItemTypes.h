@@ -195,7 +195,7 @@ struct FItemDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	bool bHoldable = false;
 
-	/** Ne se vend qu'aux apothicaires (leurs outils). */
+	/** Ne se vend qu'aux apothicaires (leurs outils, les fioles, l'herbier). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	bool bApothecaryOnly = false;
 

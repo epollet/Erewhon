@@ -344,4 +344,8 @@ On ajoutera également le metier de forestier :
 - Les arbres tombent alors au sol, leur feuillage explose et se tranforme en branches avec feuillage qu'on peut ramasser
 - On peut donner des coups de hache sur un arbre tombé pour en couper des buches
 - On peut porter 2 buches à la fois et les poser en tas (max 20 par tas)
-- On peut mettre 6 buches dans la charette
+- On peut mettre 6 buches dans la charettee
+
+======================================================================
+
+Dans le general store, on 

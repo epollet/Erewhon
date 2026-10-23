@@ -20,6 +20,17 @@ if not exist "%EXE%" (
     exit /b 1
 )
 
+if not exist "%~dp0Binaries\Win64\UnrealEditor-Erewhon.dll" (
+    echo Module Erewhon non compile : lancez d'abord setup.bat.
+    pause
+    exit /b 1
+)
+if not exist "%~dp0Content\Maps\Erewhon.umap" (
+    echo Carte Content\Maps\Erewhon.umap absente : lancez d'abord setup.bat.
+    pause
+    exit /b 1
+)
+
 if /i "%~1"=="host" goto host
 if /i "%~1"=="join" goto join
 if not "%~1"=="" (

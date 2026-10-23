@@ -34,7 +34,7 @@ enum class EVillageUpgrade : uint8
 UENUM()
 enum class EShopKind : uint8
 {
-	GeneralStore,    // vend outils et vêtements, rachète les récoltes
+	GeneralStore,    // vend outils et fournitures, rachète les récoltes (les vêtements : chez le tailleur seulement)
 	SectorManager,   // vend et reprend les secteurs, les aménage
 	Tailor,          // vend et rachète les vêtements
 	Apothecary,      // pas un commerce : la maison de l'apothicaire, sur un secteur acheté (voir AApothecary)

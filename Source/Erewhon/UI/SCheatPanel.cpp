@@ -5,6 +5,7 @@
 #include "Core/ErewhonPlayerState.h"
 #include "Core/ErewhonSettings.h"
 #include "Sky/CelestialSystem.h"
+#include "Sky/ErewhonWeather.h"
 #include "UI/ErewhonSlate.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBox.h"
@@ -58,6 +59,14 @@ void SCheatPanel::Construct(const FArguments& InArgs)
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
 		[
+			SNew(STextBlock).Text(LOCTEXT("Weather", "Météo")).Font(Font(13, true)).ColorAndOpacity(Ink)
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 16)
+		[
+			SAssignNew(WeatherRow, SBox)
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 6)
+		[
 			SNew(STextBlock).Text(LOCTEXT("Coins", "Pièces")).Font(Font(13, true)).ColorAndOpacity(Ink)
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
@@ -86,8 +95,60 @@ void SCheatPanel::Construct(const FArguments& InArgs)
 	[
 		Window(LOCTEXT("Title", "Triche"), Content,
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
-			420.f, LOCTEXT("Subtitle", "Pour tester. Réservé à l'hôte de la partie."))
+			500.f, LOCTEXT("Subtitle", "Pour tester. Réservé à l'hôte de la partie."))
 	];
+	ShownWeather = CurrentWeather(bShownForced);
+	WeatherRow->SetContent(WeatherButtons());
+}
+
+void SCheatPanel::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	// Le temps change avec l'horloge (ou la triche, ou un autre joueur) : le bouton surligné suit.
+	bool bForced = false;
+	const uint8 Weather = CurrentWeather(bForced);
+	if (WeatherRow.IsValid() && (Weather != ShownWeather || bForced != bShownForced))
+	{
+		ShownWeather = Weather;
+		bShownForced = bForced;
+		WeatherRow->SetContent(WeatherButtons());
+	}
+}
+
+uint8 SCheatPanel::CurrentWeather(bool& bOutForced) const
+{
+	const AErewhonGameState* State = AErewhonGameState::Get(Controller.Get());
+	bOutForced = State && State->IsWeatherForced();
+	return State ? static_cast<uint8>(State->SampleWeather().Kind) + 1 : 0;
+}
+
+TSharedRef<SWidget> SCheatPanel::WeatherButtons() const
+{
+	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
+	const auto Choose = [WeakController](uint8 Weather)
+	{
+		return [WeakController, Weather]() { if (WeakController.IsValid()) { WeakController->ServerCheatSetWeather(Weather); } };
+	};
+
+	// Deux rangées de quatre : les sept types de temps, du soleil à l'orage, puis le retour au naturel.
+	TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
+	TSharedPtr<SHorizontalBox> Row;
+	for (uint8 Weather = 1; Weather <= static_cast<uint8>(ErewhonWeather::EKind::Storm) + 2; ++Weather)
+	{
+		if ((Weather - 1) % 4 == 0)
+		{
+			Rows->AddSlot().AutoHeight().Padding(0, 0, 0, 6)[SAssignNew(Row, SHorizontalBox)];
+		}
+		const bool bNatural = Weather > static_cast<uint8>(ErewhonWeather::EKind::Storm) + 1;
+		const bool bActive = bNatural ? !bShownForced : Weather == ShownWeather;
+		const FText Label = bNatural ? LOCTEXT("NaturalWeather", "Naturelle")
+			: ErewhonWeather::KindName(static_cast<ErewhonWeather::EKind>(Weather - 1));
+		Row->AddSlot().AutoWidth().Padding(0, 0, 6, 0)
+		[
+			Button(Label, Choose(bNatural ? 0 : Weather), bActive ? EButton::TabActive : EButton::Tab, true, 104.f, 11)
+		];
+	}
+	return Rows;
 }
 
 FText SCheatPanel::ClockText() const

@@ -1834,31 +1834,17 @@ FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName I
 	{
 		return LOCTEXT("TooFar", "Le marchand est trop loin.");
 	}
-	if (!Def || Def->BuyPrice <= 0)
+	// La même règle que l'étal (voir AErewhonGameState::WhyNotOffered) : commerce, classe, objet déjà à soi.
+	const FText NotOffered = GetGameState<AErewhonGameState>()->WhyNotOffered(*Def, GetGameState<AErewhonGameState>()->ShopFor(*Def), PlayerState);
+	if (!NotOffered.IsEmpty())
 	{
-		return LOCTEXT("NotSold", "Le marchand ne vend pas cet objet.");
-	}
-	if (Def->bApothecaryOnly && !PlayerState->IsApothecary())
-	{
-		return LOCTEXT("ApothecaryOnlyItem", "Ce n'est vendu qu'aux apothicaires (la classe se choisit à la mairie).");
-	}
-	if (Def->bFarmerOnly && !PlayerState->IsFarmer())
-	{
-		return LOCTEXT("FarmerOnlyItem", "Ce n'est vendu qu'aux fermiers (la classe se choisit à la mairie).");
-	}
-	if (Def->bForesterOnly && !PlayerState->IsForester())
-	{
-		return LOCTEXT("ForesterOnlyItem", "Ce n'est vendu qu'aux forestiers (la classe se choisit à la mairie).");
+		return NotOffered;
 	}
 	UInventoryComponent* Inventory = PlayerState->GetInventory();
 	if (Def->IsBackpack())
 	{
 		// Le sac se porte aussitôt sur le dos : il n'entre pas dans l'inventaire.
 		UBackpackComponent* Bag = PlayerState->GetBackpack();
-		if (Bag->IsOwned())
-		{
-			return FText::Format(LOCTEXT("AlreadyHave", "Vous possédez déjà : {0}."), Def->Name);
-		}
 		if (!PlayerState->SpendCoins(Def->BuyPrice))
 		{
 			return LOCTEXT("NotEnoughCoins", "Pas assez de pièces.");
@@ -1882,10 +1868,6 @@ FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName I
 		DeliverCart(PlayerState, ItemId, *Spot);
 		Controller->ClientToast(FText::Format(LOCTEXT("Delivered", "{0} vous attend devant l'atelier."), Def->Name));
 		return FText::GetEmpty();
-	}
-	if (Def->IsUnique() && Inventory->Owns(ItemId))
-	{
-		return FText::Format(LOCTEXT("AlreadyHave", "Vous possédez déjà : {0}."), Def->Name);
 	}
 	if (!Inventory->CanStore(ItemId, 1))
 	{
@@ -1976,8 +1958,8 @@ FText AErewhonGameMode::TrySellItem(AErewhonPlayerController* Controller, FName 
 	{
 		return LOCTEXT("TooFar", "Le marchand est trop loin.");
 	}
-	const int32 Price = Def ? Def->ResalePrice(UErewhonSettings::Get().ResaleRatio) : 0;
-	if (Price <= 0)
+	const int32 Price = Def->ResalePrice(UErewhonSettings::Get().ResaleRatio);
+	if (!GetGameState<AErewhonGameState>()->BuysBack(*Def, GetGameState<AErewhonGameState>()->ShopFor(*Def)))
 	{
 		return LOCTEXT("NotBought", "Le marchand n'achète pas cet objet.");
 	}
@@ -2201,6 +2183,21 @@ FText AErewhonGameMode::TryCheatAdvanceTime(AErewhonPlayerController* Controller
 		return LOCTEXT("NoCheat", "La triche est réservée à l'hôte de la partie.");
 	}
 	GetGameState<AErewhonGameState>()->AdvanceClock(FMath::Clamp(Seconds, 0.f, 86400.f));
+	return FText::GetEmpty();
+}
+
+FText AErewhonGameMode::TryCheatSetWeather(AErewhonPlayerController* Controller, uint8 Weather)
+{
+	if (!CanCheat(Controller))
+	{
+		return LOCTEXT("NoCheat", "La triche est réservée à l'hôte de la partie.");
+	}
+	TOptional<ErewhonWeather::EKind> Kind;
+	if (Weather != 0)
+	{
+		Kind = static_cast<ErewhonWeather::EKind>(FMath::Min<uint8>(Weather - 1, static_cast<uint8>(ErewhonWeather::EKind::Storm)));
+	}
+	GetGameState<AErewhonGameState>()->SetForcedWeather(Kind);
 	return FText::GetEmpty();
 }
 

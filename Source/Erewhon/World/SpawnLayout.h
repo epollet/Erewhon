@@ -5,8 +5,8 @@
 
 /**
  * Plan du secteur de spawn (0:0), partagé entre la génération de végétation
- * et la construction des cabanes : chemins en croix, place du General Store,
- * clairière du Sector Manager. Toutes les longueurs sont en cm.
+ * et la construction des cabanes : chemins en croix, place du village,
+ * clairières du Sector Manager et du General Store. Toutes les longueurs sont en cm.
  */
 namespace ErewhonSpawn
 {
@@ -45,9 +45,9 @@ namespace ErewhonSpawn
 	EREWHON_API bool HasAnnex(EShopKind Kind);
 
 	/**
-	 * Repère d'une cabane (monde) : le General Store au centre de la place, porte au sud ;
-	 * le Sector Manager au bord de la route de l'est, le tailleur au bord de celle de l'ouest,
-	 * portes tournées vers la route.
+	 * Repère d'une cabane (monde) : le Sector Manager puis le General Store au bord de la route
+	 * de l'est, le tailleur au bord de celle de l'ouest, portes tournées vers la route ; la place
+	 * reste libre.
 	 */
 	EREWHON_API FTransform CabinTransform(EShopKind Kind);
 
@@ -79,6 +79,6 @@ namespace ErewhonSpawn
 	/** Chemins principaux du secteur (cœur, à fondre dans l'herbe), en coordonnées monde. */
 	EREWHON_API void BuildPaths(const FIntPoint& Sector, ESectorType Type, TArray<FBox2D>& OutPaths);
 
-	/** Point d'apparition des joueurs : sur le chemin sud, face à la porte du General Store. */
+	/** Point d'apparition des joueurs : sur le chemin sud, face à la place. */
 	EREWHON_API FTransform PlayerSpawnTransform();
 }

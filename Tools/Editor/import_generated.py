@@ -347,9 +347,14 @@ def create_foliage():
     """Herbe : couleur des sommets, deux faces, ondulation au vent.
 
     WindIntensity et WindSpeed sont pilotés en jeu par ACelestialSystem.
+    Les normales des brins pointent vers le ciel (grass.py) : un matériau deux faces
+    les retourne sur la face arrière, qui regarde alors le sol et reste presque noire.
+    La normale tangente (0, 0, TwoSidedSign) annule ce retournement, et le modèle
+    « feuillage deux faces » laisse passer un peu de soleil à travers les brins.
     """
     material = recreate("M_Foliage", "Materials", unreal.Material, unreal.MaterialFactoryNew())
     material.set_editor_property("two_sided", True)
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_TWO_SIDED_FOLIAGE)
     material.set_editor_property("used_with_instanced_static_meshes", True)
     material.set_editor_property("used_with_nanite", True)
 
@@ -361,6 +366,21 @@ def create_foliage():
     connect(vertex_color, "", tinted, "A")
     connect(tint, "", tinted, "B")
     mel.connect_material_property(tinted, "", unreal.MaterialProperty.MP_BASE_COLOR)
+
+    # Lumière transmise : la teinte du brin, assombrie (contre-jour vert doré, sans éblouir).
+    transmission = scalar(material, "Transmission", 0.45, -500, -150)
+    subsurface = node(material, unreal.MaterialExpressionMultiply, -250, -100)
+    connect(tinted, "", subsurface, "A")
+    connect(transmission, "", subsurface, "B")
+    mel.connect_material_property(subsurface, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
+
+    # Face arrière : même normale que la face avant (le moteur la multiplie par TwoSidedSign).
+    flat = node(material, unreal.MaterialExpressionConstant2Vector, -800, -350)
+    sign = node(material, unreal.MaterialExpressionTwoSidedSign, -800, -250)
+    normal = node(material, unreal.MaterialExpressionAppendVector, -500, -300)
+    connect(flat, "", normal, "A")
+    connect(sign, "", normal, "B")
+    mel.connect_material_property(normal, "", unreal.MaterialProperty.MP_NORMAL)
 
     roughness = node(material, unreal.MaterialExpressionConstant, -500, 250)
     roughness.set_editor_property("r", 0.85)

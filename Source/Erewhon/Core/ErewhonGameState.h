@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
+#include "Sky/ErewhonWeather.h"
 #include "World/SectorTypes.h"
 #include "Net/Serialization/FastArraySerializer.h"
 #include "ErewhonGameState.generated.h"
@@ -161,6 +162,7 @@ DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnPlantHarvestChanged, const FIntPoint& 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnSectorOwnerChanged, const FIntPoint& /*Sector*/);
 DECLARE_MULTICAST_DELEGATE(FOnVillageChanged);
 struct FItemDef;
+class AErewhonPlayerState;
 
 /**
  * État partagé du monde : seed, horloge, propriétés et récoltes.
@@ -188,6 +190,14 @@ public:
 
 	int32 GetWorldSeed() const { return WorldSeed; }
 
+	// ── Météo ──
+
+	/** Le temps qu'il fait, le même sur toutes les machines (forcé par la triche, sinon naturel). */
+	ErewhonWeather::FState SampleWeather() const;
+	bool IsWeatherForced() const { return ForcedWeather != 0; }
+	/** Serveur : fixe le type de temps, ou rend la météo naturelle (Kind non défini). */
+	void SetForcedWeather(TOptional<ErewhonWeather::EKind> Kind);
+
 	// ── Récoltes ──
 
 	bool IsHarvested(const FIntPoint& Sector, int32 PlantIndex) const;
@@ -206,8 +216,17 @@ public:
 	int32 GetVillageUpgrades() const { return VillageUpgrades; }
 	bool IsVillagePaved() const { return HasVillageUpgrade(EVillageUpgrade::PavedCenter) && HasVillageUpgrade(EVillageUpgrade::PavedVillage); }
 
-	/** Le commerce qui vend et rachète cet objet (les vêtements restent au General Store tant que le tailleur n'est pas là). */
+	/** Le commerce qui vend et rachète cet objet (les vêtements chez le tailleur seulement, la charrette au General Store tant que l'atelier n'est pas là). */
 	EShopKind ShopFor(const FItemDef& Item) const;
+	/**
+	 * Pourquoi ce commerce ne propose pas l'objet à ce joueur (vide : il le lui propose) : pas sa marchandise,
+	 * boutique pas bâtie, réservé à une autre classe, objet unique déjà à lui. Seules les pièces n'y comptent pas :
+	 * l'étal ne montre que ce qui est proposé (bouton grisé faute d'argent), le serveur refuse le reste.
+	 */
+	FText WhyNotOffered(const FItemDef& Item, EShopKind Shop, const AErewhonPlayerState* Player) const;
+	bool IsOfferedTo(const FItemDef& Item, EShopKind Shop, const AErewhonPlayerState* Player) const { return WhyNotOffered(Item, Shop, Player).IsEmpty(); }
+	/** Ce commerce rachète-t-il cet objet ? */
+	bool BuysBack(const FItemDef& Item, EShopKind Shop) const;
 	/** La boutique est-elle bâtie ? Le tailleur, l'atelier et l'éleveur s'achètent comme améliorations du village. */
 	bool IsShopBuilt(EShopKind Kind) const;
 
@@ -276,6 +295,10 @@ private:
 
 	UPROPERTY(Replicated)
 	int32 WorldSeed = 0;
+
+	/** 0 : météo naturelle ; sinon ErewhonWeather::EKind + 1. Non sauvegardé : une triche de session. */
+	UPROPERTY(Replicated)
+	uint8 ForcedWeather = 0;
 
 	/** Âge du monde au lancement du serveur ; l'horloge en découle. */
 	UPROPERTY(Replicated)

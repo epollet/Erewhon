@@ -28,6 +28,10 @@ namespace
 	/** Diamètre apparent de la Lune (degrés) : plus grosse que la vraie, comme dans un conte. */
 	constexpr float GMoonDegrees = 3.2f;
 	constexpr int32 GStarCount = 900;
+	/** Éblouissement, Soleil hors de l'axe du regard : bloom, ronds de l'objectif, halo rayonnant. */
+	constexpr float GSunBloom = 0.9f;
+	constexpr float GSunLensFlare = 0.55f;
+	constexpr float GSunShaftBloom = 0.12f;
 }
 
 DEFINE_LOG_CATEGORY_STATIC(LogErewhonSky, Log, All);
@@ -108,9 +112,14 @@ ACelestialSystem::ACelestialSystem()
 	Sun->CloudShadowExtent = 20.f;
 	Sun->CloudShadowMapResolutionScale = 0.5f;
 	Sun->CloudShadowRaySampleCountScale = 0.35f;
+	// Halo rayonnant autour du Soleil (qualité 2 et plus) : discret, et plafonné pour qu'un regard
+	// en face ne noie pas un tiers de l'écran (UpdateSunGlare l'atténue encore dans l'axe).
 	Sun->bEnableLightShaftBloom = true;
-	Sun->BloomScale = 0.25f;
+	Sun->BloomScale = GSunShaftBloom;
 	Sun->BloomThreshold = 4.f;
+	Sun->BloomMaxBrightness = 4.f;
+	// Disque solaire un peu moins lumineux : il reste blanc, mais nourrit moins le bloom.
+	Sun->AtmosphereSunDiskColorScale = FLinearColor(0.6f, 0.6f, 0.6f);
 	// Une seule ombre portée, celle du Soleil : la seconde carte d'ombres d'Usha coûte cher.
 	Usha->SetCastShadows(false);
 	// Une seule lumière sert à la brume et aux translucides : le Soleil d'abord.
@@ -148,10 +157,11 @@ ACelestialSystem::ACelestialSystem()
 	PP.bOverride_ColorContrast = true;
 	PP.ColorContrast = FVector4(0.96f, 0.96f, 0.96f, 1.f);
 	PP.bOverride_BloomIntensity = true;
-	PP.BloomIntensity = 0.9f;
-	// Face au Soleil, des ronds lumineux alignés (reflets dans l'objectif).
+	PP.BloomIntensity = GSunBloom;
+	// Face au Soleil, des ronds lumineux alignés (reflets dans l'objectif). Disponibles à toutes les
+	// qualités (r.LensFlareQuality=1 au minimum, Config/DefaultScalability.ini).
 	PP.bOverride_LensFlareIntensity = true;
-	PP.LensFlareIntensity = 0.55f;
+	PP.LensFlareIntensity = GSunLensFlare;
 	PP.bOverride_LensFlareBokehSize = true;
 	PP.LensFlareBokehSize = 2.5f;
 	// Pas de flou de mouvement : une image nette, comme peinte (et des étoiles qui restent des points).
@@ -264,13 +274,14 @@ void ACelestialSystem::Tick(float DeltaSeconds)
 		return;
 	}
 	const double Clock = State->GetWorldClock();
-	Weather = ErewhonWeather::Sample(Clock, State->GetWorldSeed());
+	Weather = State->SampleWeather();
 	// Sous un ciel lourd, le Soleil n'éclaire plus qu'à travers les nuages.
 	UpdateBody(Sun, SunOrbit, SunLux * FMath::Lerp(1.f, 0.42f, Weather.Darkness), Clock);
 	UpdateBody(Usha, UshaOrbit, UshaLux, Clock);
 	UpdateBody(Moon, MoonOrbit, MoonLux, Clock);
 	UpdateClouds(Clock);
 	UpdateNightSky(Clock);
+	UpdateSunGlare(Clock);
 	// Les lanternes du village s'allument quand le Soleil passe sous l'horizon.
 	if (UErewhonLights* Lights = GetWorld()->GetSubsystem<UErewhonLights>())
 	{
@@ -391,6 +402,30 @@ void ACelestialSystem::UpdateBody(UDirectionalLightComponent* Light, const FOrbi
 	if (Light->IsVisible() != bVisible)
 	{
 		Light->SetVisibility(bVisible);
+	}
+}
+
+void ACelestialSystem::UpdateSunGlare(double WorldClock)
+{
+	const APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	if (!PC || !PC->PlayerCameraManager)
+	{
+		return;
+	}
+	// Regard dans l'axe du Soleil (à moins de ~18°) : l'éblouissement est adouci, pas supprimé.
+	// Un peu à côté, bloom et ronds de l'objectif gardent toute leur force.
+	const FVector ToSun = SunOrbit.Direction(WorldClock);
+	const float Facing = static_cast<float>(FVector::DotProduct(PC->PlayerCameraManager->GetCameraRotation().Vector(), ToSun));
+	const float Glare = FMath::SmoothStep(0.95f, 0.9986f, Facing) * FMath::SmoothStep(-0.04f, 0.12f, static_cast<float>(ToSun.Z));
+
+	FPostProcessSettings& PP = Grading->Settings;
+	PP.BloomIntensity = FMath::Lerp(GSunBloom, GSunBloom * 0.5f, Glare);
+	PP.LensFlareIntensity = FMath::Lerp(GSunLensFlare, GSunLensFlare * 0.6f, Glare);
+	// Changer le halo rayonnant recrée la lumière côté rendu : seulement par paliers.
+	const float ShaftBloom = FMath::Lerp(GSunShaftBloom, GSunShaftBloom * 0.3f, Glare);
+	if (FMath::Abs(Sun->BloomScale - ShaftBloom) > 0.004f)
+	{
+		Sun->SetBloomScale(ShaftBloom);
 	}
 }
 

@@ -32,7 +32,7 @@ namespace ErewhonVillage
 	EREWHON_API const TArray<FTransform>& BenchSeats();
 
 	/**
-	 * La fontaine de la place, au sud-ouest du General Store, son bec tourné vers l'allée du sud : son repère,
+	 * La fontaine de la place, au sud-est de son centre, son bec tourné vers l'allée du sud : son repère,
 	 * l'endroit où poser un tonneau pour le remplir (monde), et le débit (litres par seconde, à 1 C le litre).
 	 */
 	EREWHON_API FTransform FountainTransform();

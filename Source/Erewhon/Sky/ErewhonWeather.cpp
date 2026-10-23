@@ -45,12 +45,26 @@ namespace ErewhonWeather
 #endif
 	}
 
-	FState Sample(double WorldClock, int32 WorldSeed)
+	FState Sample(double WorldClock, int32 WorldSeed, TOptional<EKind> Forced)
 	{
 		FState S;
 		// Le temps change en une vingtaine de minutes ; l'orage, au sommet de la courbe, monte et retombe par degrés.
 		S.Cloudiness = GForcedCloudiness >= 0.f ? GForcedCloudiness : FMath::Pow(Drift(WorldClock, WorldSeed, 2600.0, 0.f), 1.15f);
 		S.Humidity = GForcedHumidity >= 0.f ? GForcedHumidity : Drift(WorldClock, WorldSeed, 3700.0, 41.f);
+		if (Forced.IsSet())
+		{
+			// Le milieu de chaque palier du barème ci-dessous ; au soleil, l'humidité décide de la brume.
+			static constexpr float Typical[] = { 0.07f, 0.07f, 0.22f, 0.4f, 0.6f, 0.76f, 0.92f };
+			S.Cloudiness = Typical[static_cast<uint8>(Forced.GetValue())];
+			if (Forced.GetValue() == EKind::MistySun)
+			{
+				S.Humidity = 0.8f;
+			}
+			else if (Forced.GetValue() == EKind::Clear)
+			{
+				S.Humidity = 0.35f;
+			}
+		}
 		const float V = S.Cloudiness;
 		S.Kind = V < 0.14f ? (S.Humidity > 0.62f ? EKind::MistySun : EKind::Clear)
 			: V < 0.3f ? EKind::FewClouds : V < 0.5f ? EKind::Cloudy : V < 0.68f ? EKind::Overcast : V < 0.84f ? EKind::Dark : EKind::Storm;

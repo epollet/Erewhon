@@ -26,6 +26,12 @@ public:
 	/** Secteur affiché à ces coordonnées, nul s'il n'est pas chargé. */
 	static ASector* FindLoaded(const UObject* WorldContext, const FIntPoint& Coord);
 
+	/**
+	 * Chargement autour du joueur local (écran de chargement) : secteurs encore à construire
+	 * et secteurs voulus. Faux tant qu'il n'y a pas de gestionnaire ou de pawn local.
+	 */
+	static bool GetLocalLoadState(const UObject* WorldContext, int32& OutPending, int32& OutWanted);
+
 private:
 	void Refresh();
 	void RebuildAll();
@@ -57,6 +63,10 @@ private:
 	TObjectPtr<class UStaticMeshComponent> FarGround;
 	FIntPoint FarGroundSector = FIntPoint(TNumericLimits<int32>::Max());
 	bool bFarGroundPlaced = false;
+
+	/** Dernier Refresh : secteurs à construire et voulus (-1 : pas encore de pawn local). */
+	int32 LocalPending = -1;
+	int32 LocalWanted = 0;
 
 	FDelegateHandle HarvestHandle;
 	FDelegateHandle DetailHandle;
