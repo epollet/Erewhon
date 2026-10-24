@@ -15,7 +15,7 @@ class UStaticMeshComponent;
  * - papillons au-dessus de l'herbe autour du joueur ;
  * - oiseaux (modèle généré, ailes animées par le matériau) en vols et en solitaires, qui chantent ;
  * - vent (suit la force du vent du jeu) et bruissement de l'herbe quand on y marche.
- * Les animaux se reposent la nuit.
+ * Les animaux se reposent la nuit, et s'abritent sous l'orage ou les fortes averses.
  */
 UCLASS()
 class EREWHON_API AWildlife : public AActor
@@ -38,6 +38,7 @@ private:
 		TObjectPtr<class UMaterialInstanceDynamic> Flap;
 		float FlapAmount = 1.f;
 		FVector Home = FVector::ZeroVector;       // papillon : centre de sa ronde ; oiseau : place dans le vol
+		FVector Away = FVector::ZeroVector;       // oiseau : direction où il part s'abriter (horizontale, unitaire)
 		float Phase = 0.f;
 		float Speed = 1.f;
 		float Radius = 0.f;
@@ -50,7 +51,7 @@ private:
 	UProceduralMeshComponent* MakeWing(USceneComponent* Parent, const FLinearColor& Inner, const FLinearColor& Outer, float Span, float Side, bool bBird);
 	void UpdateButterflies(const FVector& Focus, double Time);
 	void UpdateBirds(const FVector& Focus, double Time, float DeltaSeconds);
-	void UpdateAmbience(const FVector& Focus, double Clock, float DeltaSeconds, bool bDay);
+	void UpdateAmbience(const FVector& Focus, double Clock, float DeltaSeconds, bool bSinging);
 	float GroundAt(const FVector2D& World) const;
 
 	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> WingMaterial;
@@ -65,6 +66,8 @@ private:
 	FTransform BirdFit = FTransform::Identity;
 	bool bBirdSpanAlongX = false;
 	bool bVisible = true;
+	/** Part des bêtes à l'abri du mauvais temps (0 → 1), lissée ; négative avant la première image. */
+	float Shelter = -1.f;
 	float NextChirp = 3.f;
 	float GrassLevel = 0.f;
 	FRandomStream Rand;

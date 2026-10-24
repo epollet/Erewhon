@@ -4,6 +4,7 @@
 #include "Core/ErewhonSettings.h"
 #include "World/SectorTypes.h"
 #include "World/SpawnLayout.h"
+#include "World/VillageNetwork.h"
 
 namespace ErewhonTerrain
 {
@@ -89,6 +90,68 @@ namespace ErewhonTerrain
 			const float Amplitude = UErewhonSettings::Get().TerrainAmplitudeMeters * 100.f * 0.6f;
 			return Cache.Add(Corner, Noise * Amplitude * Factor);
 		}
+
+		/** Un endroit où le sol s'aplanit : plat jusqu'à Inner, rejoint le relief à Outer (cm). */
+		struct FTerrainFlatSpot
+		{
+			FVector2D At = FVector2D::ZeroVector;
+			float Inner = 0.f;
+			float Outer = 0.f;
+		};
+
+		/**
+		 * Les replats qui touchent un secteur : la place du village le plus proche, ses cabanes, ses maisons et son
+		 * marché (qu'ils soient bâtis ou non : le relief ne dépend pas des achats). Aucun loin des villages.
+		 * Mis de côté par secteur, comme les types : la hauteur est demandée des milliers de fois par secteur.
+		 */
+		const TArray<FTerrainFlatSpot>& FlatSpots(const FIntPoint& Sector, int32 WorldSeed)
+		{
+			thread_local TMap<FIntPoint, TArray<FTerrainFlatSpot>> Cache;
+			thread_local int32 CacheSeed = 0;
+			if (CacheSeed != WorldSeed || Cache.Num() > 8192)
+			{
+				Cache.Reset();
+				CacheSeed = WorldSeed;
+			}
+			if (const TArray<FTerrainFlatSpot>* Found = Cache.Find(Sector))
+			{
+				return *Found;
+			}
+			TArray<FTerrainFlatSpot> Spots;
+			const FIntPoint Village = ErewhonVillages::NearestVillage(Sector);
+			const FIntPoint FromCenter = Sector - ErewhonVillages::CenterOf(Village);
+			// Le plus lointain (une maison, à 75 m de la place, aplanie sur 26 m) ne déborde pas de deux secteurs.
+			if (FMath::Max(FMath::Abs(FromCenter.X), FMath::Abs(FromCenter.Y)) <= 2)
+			{
+				// Autour de la place du village, le sol est plat ; il rejoint le relief en pente douce.
+				const float FlatRadius = UErewhonSettings::Get().SpawnFlatRadiusMeters * 100.f;
+				Spots.Add({ FVector2D(ErewhonSector::Center(ErewhonVillages::CenterOf(Village))), FlatRadius, FlatRadius + 3000.f });
+				// Même chose, plus serré, autour des cabanes du bord des routes.
+				for (const EShopKind Kind : { EShopKind::SectorManager, EShopKind::GeneralStore, EShopKind::Tailor })
+				{
+					Spots.Add({ FVector2D(ErewhonSpawn::CabinTransform(Village, Kind).GetLocation()), 1300.f, 3300.f });
+				}
+				for (const EShopKind Kind : { EShopKind::Breeder, EShopKind::Workshop })
+				{
+					const FTransform House = ErewhonSpawn::CabinTransform(Village, Kind);
+					Spots.Add({ FVector2D(House.GetLocation()), 1500.f, 3500.f });
+					Spots.Add({ FVector2D(House.TransformPosition(FVector(ErewhonSpawn::AnnexCenter(Kind), 0.f))), 1500.f, 3500.f });
+				}
+				// Les maisons des habitants et le marché.
+				Spots.Add({ ErewhonVillagers::MarketCenter(Village), 1500.f, 3500.f });
+				for (int32 i = 0; i < ErewhonVillagers::HouseCount; ++i)
+				{
+					Spots.Add({ FVector2D(ErewhonVillagers::HouseTransform(Village, i).GetLocation()), 950.f, 2600.f });
+				}
+				// Seuls ceux qui atteignent ce secteur comptent.
+				const FBox2D Bounds(FVector2D(ErewhonSector::Origin(Sector)), FVector2D(ErewhonSector::Origin(Sector + FIntPoint(1, 1))));
+				Spots.RemoveAll([&Bounds](const FTerrainFlatSpot& Spot)
+				{
+					return Bounds.ComputeSquaredDistanceToPoint(Spot.At) > FMath::Square(Spot.Outer);
+				});
+			}
+			return Cache.Add(Sector, MoveTemp(Spots));
+		}
 	}
 
 	float Height(const FVector2D& World, int32 WorldSeed)
@@ -116,26 +179,13 @@ namespace ErewhonTerrain
 		const float Bumps = FMath::PerlinNoise2D(World / 2600.f + SeedOffset(WorldSeed, 1)) + 0.4f * FMath::PerlinNoise2D(World / 900.f + SeedOffset(WorldSeed, 2));
 		Height += BumpAmplitude(CachedType(Sector, WorldSeed)) * Window * Bumps;
 
-		// Autour de la place du village, le sol est plat ; il rejoint le relief en pente douce.
-		const float FromSpawn = FVector2D::Distance(World, FVector2D(ErewhonSector::Center(FIntPoint::ZeroValue)));
-		const float FlatRadius = Settings.SpawnFlatRadiusMeters * 100.f;
-		float Flatten = FMath::SmoothStep(FlatRadius, FlatRadius + 3000.f, FromSpawn);
-		// Même chose, plus serré, autour des cabanes du bord des routes.
-		for (const EShopKind Kind : { EShopKind::SectorManager, EShopKind::GeneralStore, EShopKind::Tailor })
+		// Autour de la place des villages, de leurs cabanes, maisons et marchés, le sol est plat ; il rejoint
+		// le relief en pente douce.
+		float Flatten = 1.f;
+		for (const FTerrainFlatSpot& Spot : FlatSpots(Sector, WorldSeed))
 		{
-			const FVector2D Cabin(ErewhonSpawn::CabinTransform(Kind).GetLocation());
-			Flatten = FMath::Min(Flatten, FMath::SmoothStep(1300.f, 3300.f, static_cast<float>(FVector2D::Distance(World, Cabin))));
+			Flatten = FMath::Min(Flatten, FMath::SmoothStep(Spot.Inner, Spot.Outer, static_cast<float>(FVector2D::Distance(World, Spot.At))));
 		}
-		for (const EShopKind Kind : { EShopKind::Breeder, EShopKind::Workshop })
-		{
-			const FTransform House = ErewhonSpawn::CabinTransform(Kind);
-			const FVector2D Annex(House.TransformPosition(FVector(ErewhonSpawn::AnnexCenter(Kind), 0.f)));
-			const float ToHouse = FVector2D::Distance(World, FVector2D(House.GetLocation()));
-			const float ToAnnex = FVector2D::Distance(World, Annex);
-			Flatten = FMath::Min(Flatten, FMath::SmoothStep(1500.f, 3500.f, FMath::Min(ToHouse, ToAnnex)));
-		}
-		// Les maisons des habitants et le marché.
-		Flatten = FMath::Min(Flatten, ErewhonVillagers::FlattenFactor(World));
 		return Height * Flatten;
 	}
 

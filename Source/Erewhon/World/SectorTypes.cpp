@@ -33,11 +33,16 @@ namespace ErewhonSector
 	{
 		/**
 		 * Les bois : un bruit doux à l'échelle de quelques secteurs, propre à chaque monde. Jamais sur
-		 * la place, les routes, ni tout près du village.
+		 * les places, les routes, ni tout près d'un village.
 		 */
 		bool IsWooded(const FIntPoint& Sector, int32 WorldSeed)
 		{
-			if (Sector == FIntPoint::ZeroValue || IsRoad(Sector) || FMath::Max(FMath::Abs(Sector.X), FMath::Abs(Sector.Y)) < 2)
+			if (IsRoad(Sector))
+			{
+				return false;
+			}
+			const FIntPoint FromPlaza = Sector - ErewhonVillages::CenterOf(ErewhonVillages::NearestVillage(Sector));
+			if (FMath::Max(FMath::Abs(FromPlaza.X), FMath::Abs(FromPlaza.Y)) < 2)
 			{
 				return false;
 			}
@@ -52,7 +57,7 @@ namespace ErewhonSector
 
 	ESectorType TypeAt(const FIntPoint& Sector, int32 WorldSeed)
 	{
-		if (Sector == FIntPoint::ZeroValue)
+		if (ErewhonVillages::IsCenter(Sector))
 		{
 			return ESectorType::Spawn;
 		}
@@ -77,7 +82,7 @@ namespace ErewhonSector
 
 	bool IsPurchasable(const FIntPoint& Sector)
 	{
-		return Sector != FIntPoint::ZeroValue && !IsRoad(Sector);
+		return !ErewhonVillages::IsCenter(Sector) && !IsRoad(Sector);
 	}
 
 	FText SideLabel(int32 Side)

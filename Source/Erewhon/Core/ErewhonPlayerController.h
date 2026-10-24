@@ -85,7 +85,10 @@ public:
 	void OpenStorage(class AStorageActor* Storage);
 	/** Inventaire, avec à côté le petit bois en vrac de la charrette. */
 	void OpenCart(class ACart* Cart);
+	/** Le comptoir d'un commerce du village où l'on se tient (celui dont la place est la plus proche). */
 	void OpenStore(EShopKind Kind);
+	/** Le village du comptoir ouvert (ou du dernier ouvert). */
+	const FIntPoint& GetStoreVillage() const { return StoreVillage; }
 	/** Son mortier ou son chaudron (meubles posés). */
 	void OpenApothecary(class AStorageActor* Station, uint8 Craft);
 	/** Le chaudron : eau, feu, hauteur, température, ingrédients, breuvage. */
@@ -312,6 +315,8 @@ private:
 	float ShotPitch = -6.f;
 	FVector ShotLocation = FVector::ZeroVector;
 	bool bShotHasLocation = false;
+	FIntPoint ShotVillage = FIntPoint::ZeroValue;
+	bool bShotAtVillage = false;
 	FString ShotMenu;
 	int32 ShotIndex = 0;
 	FTimerHandle ShotTimer;
@@ -321,6 +326,7 @@ private:
 	TSharedPtr<SWidget> PendingMenu;
 	bool bStoreOpen = false;
 	EShopKind StoreKind = EShopKind::GeneralStore;
+	FIntPoint StoreVillage = FIntPoint::ZeroValue;
 	TWeakObjectPtr<class ABackpack> OpenedBag;
 	TWeakObjectPtr<class AStorageActor> OpenedStorage;
 	TWeakObjectPtr<class ACart> OpenedCart;

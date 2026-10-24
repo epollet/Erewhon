@@ -7,6 +7,7 @@
 #include "Engine/StaticMesh.h"
 #include "Core/ErewhonGameState.h"
 #include "Core/ErewhonSettings.h"
+#include "Sky/ErewhonWeather.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -214,6 +215,10 @@ namespace
 	constexpr float GSoarSpeed = 900.f;       // cm/s
 	constexpr float GDiveSpeed = 2200.f;
 	constexpr float GClimbSpeed = 650.f;
+	/** Sous l'orage : durée de son départ (ou de son retour) (s), distance où elle file (cm), seuil où on la cache. */
+	constexpr float GBuzzardShelterSeconds = 25.f;
+	constexpr float GBuzzardShelterDistance = 30000.f;
+	constexpr float GBuzzardShelterHidden = 0.98f;
 }
 
 ABuzzard::ABuzzard()
@@ -255,6 +260,8 @@ void ABuzzard::BeginPlay()
 	Radius = Rand.FRandRange(2500.f, 4000.f);
 	Altitude = Rand.FRandRange(3500.f, 5500.f);
 	NextDive = Rand.FRandRange(30.f, 70.f);
+	const float AwayAngle = Rand.FRandRange(0.f, UE_TWO_PI);
+	Away = FVector2D(FMath::Cos(AwayAngle), FMath::Sin(AwayAngle));
 	if (bTest)
 	{
 		Radius = 700.f;
@@ -274,18 +281,29 @@ void ABuzzard::Tick(float DeltaSeconds)
 		Center = bTest ? FVector2D(Player->GetActorLocation()) + FVector2D(1500.f, 0.f)
 			: FMath::Vector2DInterpTo(Center, FVector2D(Player->GetActorLocation()) + FVector2D(1500.f, 800.f), DeltaSeconds, 0.05f);
 	}
+	// Sous l'orage ou une forte averse, elle file au loin en descendant, puis disparaît ; elle revient quand
+	// le temps se calme (la météo est la même sur chaque machine).
+	if (const AErewhonGameState* State = AErewhonGameState::Get(this))
+	{
+		const float Sheltering = ErewhonWeather::ShelterTarget(State->SampleWeather());
+		Shelter = Shelter < 0.f ? Sheltering : FMath::FInterpConstantTo(Shelter, Sheltering, DeltaSeconds, 1.f / GBuzzardShelterSeconds);
+	}
+	const float Sheltered = FMath::Max(Shelter, 0.f);
+	const FVector2D Refuge = Away * (GBuzzardShelterDistance * Sheltered * Sheltered);
+	SetActorHiddenInGame(Sheltered >= GBuzzardShelterHidden);
 	FVector Location = GetActorLocation();
 	FVector Velocity = FVector::ZeroVector;
 	float Bank = 0.f;
-	float WantedFlap = 0.06f;
+	// En fuite, elle bat des ailes contre le vent.
+	float WantedFlap = FMath::Max(0.06f, 0.6f * Sheltered);
 	switch (Mode)
 	{
 	case EMode::Soar:
 	{
 		// De grands cercles, penchée dans le virage ; quelques battements de temps en temps.
 		Angle += GSoarSpeed / Radius * DeltaSeconds;
-		const FVector2D OnCircle = Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius;
-		const FVector Wanted(OnCircle, GroundAt(OnCircle) + Altitude + 400.f * FMath::Sin(Angle * 0.7f));
+		const FVector2D OnCircle = Center + Refuge + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius;
+		const FVector Wanted(OnCircle, GroundAt(OnCircle) + FMath::Lerp(Altitude + 400.f * FMath::Sin(Angle * 0.7f), 1500.f, Sheltered));
 		const FVector Next = FMath::VInterpTo(Location, Wanted, DeltaSeconds, 2.f);
 		Velocity = (Next - Location) / FMath::Max(DeltaSeconds, 0.001f);
 		Location = Next;
@@ -295,7 +313,7 @@ void ABuzzard::Tick(float DeltaSeconds)
 			NextFlaps = Rand.FRandRange(6.f, 14.f);
 			FlapBurst = Rand.FRandRange(1.f, 2.2f);
 		}
-		if ((NextDive -= DeltaSeconds) <= 0.f)
+		if (Sheltered <= 0.f && (NextDive -= DeltaSeconds) <= 0.f)
 		{
 			// Une proie dans l'herbe, un peu devant : elle fond dessus.
 			const FVector2D Ahead = FVector2D(Location) + FVector2D(FMath::Cos(Angle + UE_HALF_PI), FMath::Sin(Angle + UE_HALF_PI)) * Rand.FRandRange(1500.f, 3000.f);
@@ -332,7 +350,7 @@ void ABuzzard::Tick(float DeltaSeconds)
 			WantedFlap = 0.f;
 			break;
 		}
-		const FVector2D OnCircle = Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius;
+		const FVector2D OnCircle = Center + Refuge + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius;
 		const FVector Wanted(OnCircle, GroundAt(OnCircle) + Altitude);
 		const FVector ToWanted = Wanted - Location;
 		Velocity = ToWanted.GetSafeNormal() * GClimbSpeed;
@@ -365,7 +383,7 @@ void ABuzzard::Tick(float DeltaSeconds)
 	}
 	SetActorLocationAndRotation(Location, FMath::RInterpTo(GetActorRotation(), Facing, DeltaSeconds, 3.f));
 	// Son cri, au-dessus des prés.
-	if ((NextCry -= DeltaSeconds) <= 0.f)
+	if ((NextCry -= DeltaSeconds) <= 0.f && Sheltered < 0.3f)
 	{
 		NextCry = Rand.FRandRange(15.f, 40.f);
 		ErewhonSound::PlayAt(this, ErewhonSound::Load(TEXT("buzzard_cry")), Location, 0.9f, 3000.f, 15000.f);

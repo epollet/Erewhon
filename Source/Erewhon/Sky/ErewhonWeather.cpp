@@ -101,6 +101,11 @@ namespace ErewhonWeather
 		default:               return LOCTEXT("Storm", "Orage");
 		}
 	}
+
+	float ShelterTarget(const FState& State)
+	{
+		return State.Kind == EKind::Storm ? 1.f : FMath::SmoothStep(0.55f, 0.85f, State.Rain);
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

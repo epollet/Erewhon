@@ -179,6 +179,21 @@ struct FSavedFelledTree
 	UPROPERTY() FString OwnerName;
 };
 
+/** Les améliorations achetées à la mairie d'un village. */
+USTRUCT()
+struct FSavedVillage
+{
+	GENERATED_BODY()
+
+	/** Le village : sa cellule (voir ErewhonVillages). */
+	UPROPERTY()
+	FIntPoint Village = FIntPoint::ZeroValue;
+
+	/** Un bit par EVillageUpgrade. */
+	UPROPERTY()
+	int32 Upgrades = 0;
+};
+
 /** Sauvegarde serveur du monde (Saved/SaveGames/<WorldSaveSlot>.sav). */
 UCLASS()
 class EREWHON_API UErewhonWorldSave : public USaveGame
@@ -201,9 +216,9 @@ public:
 	UPROPERTY()
 	TArray<FSavedStorage> Storages;
 
-	/** Améliorations du village (un bit par EVillageUpgrade). */
+	/** Améliorations des villages (ceux qui en ont au moins une). */
 	UPROPERTY()
-	int32 VillageUpgrades = 0;
+	TArray<FSavedVillage> Villages;
 
 	UPROPERTY()
 	TArray<FSavedHarvest> Harvests;

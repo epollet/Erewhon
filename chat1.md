@@ -348,4 +348,34 @@ On ajoutera également le metier de forestier :
 
 ======================================================================
 
-Dans le general store, on 
+Donc plusieurs secteurs forme un village, chaque secteur est relié à un village. Un secteur apprtenant à un village ne peut pas ête isolé, il doit etre relié au territoire du village par au moins un secteur.
+
+La zone de départ actuelle est un centre de village et il peux y avoir un infinité de centre de village plus ou moins éloignés. Chaque centre doit être à au moins 10 secteur d'un autre, maximum 20.
+
+La carte proposée par le maire doit être revue pour proposer un zoom in, zoom out et pan.
+
+Chaque village doit avoir un nom généré à la ghibli. On doit voir sur la carte, au niveau des routes, des indication sur le village qu'il y a dans cette direction.
+
+======================================================================
+
+Au marché, on ajoutera des vendeurs de fruits, légumes et graines. Les graines sont donc transférées du general store au vendeur de graines sur le marché.
+
+Dans la mairie, on ajoutera un panneau d'affichage. Sur ce panneau d'affichage, on peut E pour avoir le menu de travaux du village. On peut alors en prendre une à la fois. Chaque quête a un objectif et une récompense en crédits.
+
+On ajoutera aussi dans le centre du village : 
+- un petit pres entourés de barrières, disponible dès le départ du village
+- un petit potager, lui aussi entouré et disponible dès le départ
+
+Les missions du panneau d'affichage : 
+- Acheter des provisions et les livrer au village de la mairie : rapporte juste un petit 20%~(aléatoire) de plus que ce que coute à l'achat la marchandise
+- Acheter des provisions et les livrer à un autre village adjacent : rapporte 5x plus que les livraisons dans le même village, mais demande aussi de transporter bien plus
+- Récolte dans le prés (herbes, etc... récoltables à la main) : Rapporte plus en terme de temps dépensé que la livraison au village, mais nécessite que l'herbe repousse
+- Cultiver dans le verger (les missions sont disponible en fonction de l'état du verger) :
+    - Mission de préparation du verger (on béche, nécessite une béche du coup)
+    - Mission de semage : on séme des graines spécifique qu'il faut aller acheter
+    - Mission d'arrosage : nécessite un arosoir
+    - Mission de récolte
+
+Il faudra bien équilibrer ces différentes mission en terme de récompense pour que ce soit progressif. On commence avec la fauche et les livraisons pour se payer du materiel, et on peut alors envisager des missions de transport plus longues aprés achat d'un sac par exemple, et du verger aprés achat du materiel adéquat. Ces dernieres rapportent donc plus pour finalement permettre au joueur d'acheter son premier secteur.
+
+On commence à 0c et les secteurs valent entre 500c et 2000c en fonction de leur proximité avec le centre du village et un peu d'aléatoire.

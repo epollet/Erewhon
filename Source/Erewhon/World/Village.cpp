@@ -21,6 +21,7 @@
 #include "World/Signpost.h"
 #include "World/SpawnLayout.h"
 #include "World/Terrain.h"
+#include "World/VillageNetwork.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonVillage"
 
@@ -42,8 +43,6 @@ namespace ErewhonVillage
 		/** De grands arbres autour de la place, qui l'ombragent ; ils évitent les chemins et les cabanes. */
 		constexpr float GTreeAngles[] = { 20.f, 40.f, 115.f, 140.f, 160.f, 200.f, 295.f, 320.f, 340.f };
 
-		FVector Plaza() { return ErewhonSector::Center(FIntPoint::ZeroValue); }
-
 		/** Sur le modèle de la fontaine (repère de la fontaine) : le bec, et l'endroit où le tonneau reçoit l'eau (mesurés). */
 		constexpr float FountainSide = -18.f;   // le pilier est un peu décentré par rapport au bassin
 		const FVector FountainSpoutLocal(32.f, FountainSide, 132.f);
@@ -57,10 +56,10 @@ namespace ErewhonVillage
 			return FVector(FMath::Cos(A) * Radius, FMath::Sin(A) * Radius, 0.f);
 		}
 
-		bool HasUpgrade(const UObject* Context, EVillageUpgrade Upgrade)
+		bool HasUpgrade(const UObject* Context, const FIntPoint& Village, EVillageUpgrade Upgrade)
 		{
 			const AErewhonGameState* State = AErewhonGameState::Get(Context);
-			return State && State->HasVillageUpgrade(Upgrade);
+			return State && State->HasVillageUpgrade(Village, Upgrade);
 		}
 	}
 
@@ -93,38 +92,42 @@ namespace ErewhonVillage
 		return Upgrades()[FMath::Clamp(static_cast<int32>(Upgrade), 0, Upgrades().Num() - 1)];
 	}
 
-	bool IsInVillage(const FIntPoint& Sector)
+	bool IsInVillage(const FIntPoint& Sector, FIntPoint* OutVillage)
 	{
-		const int32 Radius = UErewhonSettings::Get().StoreSectorRadius;
-		return FMath::Max(FMath::Abs(Sector.X), FMath::Abs(Sector.Y)) <= Radius;
+		const FIntPoint Village = ErewhonVillages::NearestVillage(Sector);
+		if (OutVillage)
+		{
+			*OutVillage = Village;
+		}
+		const FIntPoint FromCenter = Sector - ErewhonVillages::CenterOf(Village);
+		return FMath::Max(FMath::Abs(FromCenter.X), FMath::Abs(FromCenter.Y)) <= UErewhonSettings::Get().StoreSectorRadius;
 	}
 
-	FTransform FountainTransform()
+	FTransform FountainTransform(const FIntPoint& Village)
 	{
 		// Dans le carré d'herbe au-delà des arbres de la place, entre l'allée nord (+Y) et celle de l'ouest (−X),
-		// le bec (+X) tourné vers l'allée nord, qu'un petit chemin rejoint.
-		const FVector At = Plaza() + FVector(-850.f, 2050.f, 0.f);
-		return FTransform(FRotator::ZeroRotator, FVector(At.X, At.Y, 0.f));
+		// le bec (+X) tourné vers l'allée nord, qu'un petit chemin rejoint (repère du village).
+		const FTransform At = FTransform(FVector(-850.f, 2050.f, 0.f)) * ErewhonVillages::VillageFrame(Village);
+		return FTransform(At.GetRotation(), FVector(At.GetLocation().X, At.GetLocation().Y, 0.f));
 	}
 
-	FVector FountainBarrelSpot()
+	FVector FountainBarrelSpot(const FIntPoint& Village)
 	{
-		return FountainTransform().TransformPosition(FountainSpotLocal);
+		return FountainTransform(Village).TransformPosition(FountainSpotLocal);
 	}
 
-	const TArray<FTransform>& BenchSeats()
+	TArray<FTransform> BenchSeats(const FIntPoint& Village)
 	{
-		// Quatre bancs entre les chemins, tournés vers la place.
-		static const TArray<FTransform> Seats = []()
+		// Quatre bancs entre les chemins, tournés vers la place (repère du village). Rendus par valeur :
+		// quatre repères, vite calculés, et rien à garder d'un village à l'autre.
+		const FTransform Frame = ErewhonVillages::VillageFrame(Village);
+		TArray<FTransform> Seats;
+		Seats.Reserve(UE_ARRAY_COUNT(GBenchAngles));
+		for (const float Angle : GBenchAngles)
 		{
-			TArray<FTransform> Result;
-			for (const float Angle : GBenchAngles)
-			{
-				const FVector Location = Plaza() + OnRing(Angle, 1250.f) + FVector(0.f, 0.f, 45.f);
-				Result.Add(FTransform(FRotator(0.f, Angle + 180.f, 0.f), Location));
-			}
-			return Result;
-		}();
+			const FVector Location = OnRing(Angle, 1250.f) + FVector(0.f, 0.f, 45.f);
+			Seats.Add(FTransform(FRotator(0.f, Angle + 180.f, 0.f), Location) * Frame);
+		}
 		return Seats;
 	}
 
@@ -216,10 +219,11 @@ void AVillageDecor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void AVillageDecor::BeginPlay()
 {
 	Super::BeginPlay();
-	SetActorLocation(ErewhonVillage::Plaza());
-	const bool bTailor = ErewhonVillage::HasUpgrade(this, EVillageUpgrade::Tailor);
-	const bool bSignposts = ErewhonVillage::HasUpgrade(this, EVillageUpgrade::Signposts);
-	const bool bLanterns = ErewhonVillage::HasUpgrade(this, EVillageUpgrade::Lanterns);
+	// Dans le repère du village : origine au centre de la place, tourné comme lui.
+	SetActorTransform(ErewhonVillages::VillageFrame(Village));
+	const bool bTailor = ErewhonVillage::HasUpgrade(this, Village, EVillageUpgrade::Tailor);
+	const bool bSignposts = ErewhonVillage::HasUpgrade(this, Village, EVillageUpgrade::Signposts);
+	const bool bLanterns = ErewhonVillage::HasUpgrade(this, Village, EVillageUpgrade::Lanterns);
 	if (bSignposts)
 	{
 		BuildSignposts(bTailor, bLanterns);
@@ -228,7 +232,7 @@ void AVillageDecor::BeginPlay()
 	{
 		BuildLanterns(bTailor, bSignposts);
 	}
-	if (ErewhonVillage::HasUpgrade(this, EVillageUpgrade::Decoration))
+	if (ErewhonVillage::HasUpgrade(this, Village, EVillageUpgrade::Decoration))
 	{
 		BuildDecoration();
 	}
@@ -245,7 +249,7 @@ void AVillageDecor::BuildMarket()
 	UStaticMesh* Barrel = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_barrel"));
 	for (int32 i = 0; i < ErewhonVillagers::StallCount; ++i)
 	{
-		const FTransform World = ErewhonVillagers::StallTransform(i);
+		const FTransform World = ErewhonVillagers::StallTransform(Village, i);
 		const FVector2D Foot(World.GetLocation());
 		const FVector Local = GetActorTransform().InverseTransformPosition(FVector(Foot, ErewhonTerrain::Height(Foot, Seed)));
 		const float Yaw = World.Rotator().Yaw - GetActorRotation().Yaw;
@@ -289,10 +293,24 @@ namespace
 		return Exit.Dir * (Plaza + 80.f) + Right * Side * (ErewhonSpawn::PathWidth * 0.5f + 60.f);
 	}
 
-	/** Pied d'un poste au carrefour d'une cabane du bord des routes (Side = 1 : côté place). */
-	FVector JunctionFoot(const AActor* Decor, EShopKind Shop, float Side)
+	/** Le point cardinal vers lequel regarde une sortie, en monde : le village peut être tourné. */
+	const TCHAR* ExitCardinalName(const AActor* Decor, const FExit& Exit)
 	{
-		const FVector Doorstep = Decor->GetActorTransform().InverseTransformPosition(ErewhonSpawn::DoorstepLocation(Shop));
+		const FVector World = Decor->GetActorTransform().TransformVectorNoScale(FVector(Exit.Dir, 0.f));
+		for (const FExit& Candidate : GExits)
+		{
+			if (FVector2D::DotProduct(Candidate.Dir, FVector2D(World)) > 0.5f)
+			{
+				return Candidate.Name;
+			}
+		}
+		return Exit.Name;
+	}
+
+	/** Pied d'un poste au carrefour d'une cabane du bord des routes (Side = 1 : côté place). */
+	FVector JunctionFoot(const AVillageDecor* Decor, EShopKind Shop, float Side)
+	{
+		const FVector Doorstep = Decor->GetActorTransform().InverseTransformPosition(ErewhonSpawn::DoorstepLocation(Decor->Village, Shop));
 		const float SideX = FMath::Sign(Doorstep.X);
 		const float TowardPlaza = -FMath::Sign(Doorstep.Y);
 		return FVector(SideX * (ErewhonSpawn::PathWidth * 0.5f + 60.f), Doorstep.Y + TowardPlaza * Side * 420.f, 0.f);
@@ -302,27 +320,29 @@ namespace
 void AVillageDecor::BuildSignposts(bool bTailor, bool bLanterns)
 {
 	using namespace ErewhonSpawn;
-	// À chaque sortie de la place, un panneau aux points cardinaux (nord = +X).
+	// À chaque sortie de la place, un panneau aux points cardinaux (nord = +X du monde). Les sorties et les
+	// cabanes sont, elles, dans le repère du village, qui peut être tourné.
 	for (const FExit& Exit : GExits)
 	{
 		const FVector2D Foot = ExitFoot(Exit, 1.f);
+		const FVector FootWorld = GetActorTransform().TransformPosition(FVector(Foot, 0.f));
 		const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Exit.Dir.Y, Exit.Dir.X));
-		TArray<ErewhonSigns::FArm> Arms = { { Exit.Name, Yaw } };
+		TArray<ErewhonSigns::FArm> Arms = { { ExitCardinalName(this, Exit), Yaw } };
 		// Les cabanes du bord des routes : à l'est le gérant et le General Store, à l'ouest le tailleur (s'il est construit).
 		if (Exit.Dir.Y > 0.f)
 		{
-			Arms.Add(ErewhonSigns::ShopArm(EShopKind::SectorManager, GetActorLocation() + FVector(Foot, 0.f), Yaw));
-			Arms.Add(ErewhonSigns::ShopArm(EShopKind::GeneralStore, GetActorLocation() + FVector(Foot, 0.f), Yaw));
+			Arms.Add(ErewhonSigns::ShopArm(EShopKind::SectorManager, FootWorld, Yaw));
+			Arms.Add(ErewhonSigns::ShopArm(EShopKind::GeneralStore, FootWorld, Yaw));
 		}
 		else if (Exit.Dir.Y < 0.f && bTailor)
 		{
-			Arms.Add(ErewhonSigns::ShopArm(EShopKind::Tailor, GetActorLocation() + FVector(Foot, 0.f), Yaw));
+			Arms.Add(ErewhonSigns::ShopArm(EShopKind::Tailor, FootWorld, Yaw));
 		}
 		// Au nord l'éleveur, au sud l'atelier (une fois bâtis).
 		const AErewhonGameState* State = AErewhonGameState::Get(this);
-		if (Exit.Dir.X != 0.f && State && State->IsShopBuilt(Exit.Dir.X > 0.f ? EShopKind::Breeder : EShopKind::Workshop))
+		if (Exit.Dir.X != 0.f && State && State->IsShopBuilt(Village, Exit.Dir.X > 0.f ? EShopKind::Breeder : EShopKind::Workshop))
 		{
-			Arms.Add(ErewhonSigns::ShopArm(Exit.Dir.X > 0.f ? EShopKind::Breeder : EShopKind::Workshop, GetActorLocation() + FVector(Foot, 0.f), Yaw));
+			Arms.Add(ErewhonSigns::ShopArm(Exit.Dir.X > 0.f ? EShopKind::Breeder : EShopKind::Workshop, FootWorld, Yaw));
 		}
 		ErewhonSigns::AddSignpost(this, Root, FVector(Foot, 0.f), Arms, bLanterns);
 	}
@@ -336,12 +356,12 @@ void AVillageDecor::BuildSignposts(bool bTailor, bool bLanterns)
 			continue;
 		}
 		const FVector Foot = JunctionFoot(this, Shop, 1.f);
-		const FVector Doorstep = GetActorTransform().InverseTransformPosition(DoorstepLocation(Shop));
+		const FVector Doorstep = GetActorTransform().InverseTransformPosition(DoorstepLocation(Village, Shop));
 		const EShopKind Other = Shop == EShopKind::GeneralStore ? EShopKind::SectorManager : EShopKind::GeneralStore;
-		const FVector OtherDoorstep = GetActorTransform().InverseTransformPosition(DoorstepLocation(Other));
+		const FVector OtherDoorstep = GetActorTransform().InverseTransformPosition(DoorstepLocation(Village, Other));
 		ErewhonSigns::AddSignpost(this, Root, Foot, {
 			{ ShopName(Shop), Doorstep.X > 0.f ? 0.f : 180.f },
-			ErewhonSigns::ShopArm(Other, GetActorLocation() + Foot, OtherDoorstep.Y > Foot.Y ? 90.f : -90.f),
+			ErewhonSigns::ShopArm(Other, GetActorTransform().TransformPosition(Foot), OtherDoorstep.Y > Foot.Y ? 90.f : -90.f),
 		}, bLanterns);
 	}
 }
@@ -353,15 +373,15 @@ void AVillageDecor::BuildLanterns(bool bTailor, bool bSignposts)
 	const AErewhonGameState* State = AErewhonGameState::Get(this);
 	for (const EShopKind Shop : ShopKinds)
 	{
-		if (!State || !State->IsShopBuilt(Shop))
+		if (!State || !State->IsShopBuilt(Village, Shop))
 		{
 			continue;
 		}
-		const FTransform Cabin = CabinTransform(Shop);
+		const FTransform Cabin = CabinTransform(Village, Shop);
 		for (const float Side : { -1.f, 1.f })
 		{
 			const FVector World = Cabin.TransformPosition(FVector(-CabinHalfSize(Shop).X - 3.f, Side * (DoorHalfWidth + 42.f), CabinFloorTop + 200.f));
-			const float Yaw = Cabin.Rotator().Yaw + 180.f;   // la potence sort du mur vers l'avant
+			const float Yaw = Cabin.Rotator().Yaw - GetActorRotation().Yaw + 180.f;   // la potence sort du mur vers l'avant
 			ErewhonVillage::AddLantern(this, Root, GetActorTransform().InverseTransformPosition(World), Yaw, true);
 		}
 	}
@@ -399,7 +419,7 @@ void AVillageDecor::BuildDecoration()
 	{
 		return;
 	}
-	const TSharedRef<const FSectorLayout> Layout = GetWorld()->GetSubsystem<USectorLayoutSubsystem>()->GetLayout(FIntPoint::ZeroValue, State->GetWorldSeed());
+	const TSharedRef<const FSectorLayout> Layout = GetWorld()->GetSubsystem<USectorLayoutSubsystem>()->GetLayout(ErewhonVillages::CenterOf(Village), State->GetWorldSeed());
 	const FVector2D Center(GetActorLocation());
 	FRandomStream Rand(1789);
 
@@ -430,12 +450,12 @@ void AVillageDecor::BuildDecoration()
 		// Pas de bordure devant les cabanes du bord des routes : on doit pouvoir y entrer.
 		for (const EShopKind Shop : { EShopKind::SectorManager, EShopKind::GeneralStore, EShopKind::Tailor })
 		{
-			if (FVector2D::Distance(P, FVector2D(CabinTransform(Shop).GetLocation())) < ManagerClearingRadius + 150.f)
+			if (FVector2D::Distance(P, FVector2D(CabinTransform(Village, Shop).GetLocation())) < ManagerClearingRadius + 150.f)
 			{
 				return;
 			}
 		}
-		const FVector Local(P - Center, ErewhonTerrain::Height(P, State->GetWorldSeed()));
+		const FVector Local = GetActorTransform().InverseTransformPosition(FVector(P, ErewhonTerrain::Height(P, State->GetWorldSeed())));
 		StoneInstances.Add(FTransform(FRotator(0.f, Rand.FRandRange(0.f, 360.f), 0.f), Local + FVector(0, 0, 2.f),
 			FVector(Rand.FRandRange(0.16f, 0.24f), Rand.FRandRange(0.12f, 0.17f), Rand.FRandRange(0.07f, 0.1f))));
 	};
@@ -494,11 +514,11 @@ void AVillageDecor::BuildDecoration()
 	};
 	for (const EShopKind Shop : ShopKinds)
 	{
-		if (!State->IsShopBuilt(Shop))
+		if (!State->IsShopBuilt(Village, Shop))
 		{
 			continue;
 		}
-		const FTransform Cabin = CabinTransform(Shop);
+		const FTransform Cabin = CabinTransform(Village, Shop);
 		for (const float Side : { -1.f, 1.f })
 		{
 			Pot(GetActorTransform().InverseTransformPosition(Cabin.TransformPosition(FVector(-CabinHalfSize(Shop).X - 140.f, Side * 150.f, 0.f))));
@@ -565,9 +585,10 @@ void AVillageDecor::BuildDecoration()
 	}
 
 	// Les bancs : des acteurs à part, pour qu'on puisse s'y asseoir.
-	for (int32 Index = 0; Index < BenchSeats().Num(); ++Index)
+	const TArray<FTransform> Seats = BenchSeats(Village);
+	for (int32 Index = 0; Index < Seats.Num(); ++Index)
 	{
-		const FTransform Seat = BenchSeats()[Index];
+		const FTransform Seat = Seats[Index];
 		const FTransform Ground(Seat.GetRotation(), Seat.GetLocation() - FVector(0, 0, 45.f));
 		if (ABench* Bench = GetWorld()->SpawnActorDeferred<ABench>(ABench::StaticClass(), Ground, this))
 		{
@@ -650,7 +671,7 @@ void AFountain::BeginPlay()
 {
 	Super::BeginPlay();
 	using namespace ErewhonVillage;
-	FTransform At = FountainTransform();
+	FTransform At = FountainTransform(Village);
 	if (const AErewhonGameState* State = AErewhonGameState::Get(this))
 	{
 		At.SetLocation(FVector(At.GetLocation().X, At.GetLocation().Y, ErewhonTerrain::Height(FVector2D(At.GetLocation()), State->GetWorldSeed())));
@@ -703,7 +724,7 @@ void AFountain::Tick(float DeltaSeconds)
 	{
 		// Du bec jusqu'au haut du tonneau posé dessous, sinon jusqu'à la dalle ; le filet frémit.
 		bool bBarrel = false;
-		const FVector Spot = ErewhonVillage::FountainBarrelSpot();
+		const FVector Spot = ErewhonVillage::FountainBarrelSpot(Village);
 		for (TActorIterator<AStorageActor> It(GetWorld()); It && !bBarrel; ++It)
 		{
 			bBarrel = It->GetKind() == EStorageKind::Barrel && !It->GetCarrier() && FVector::Dist2D(It->GetActorLocation(), Spot) < 80.f;

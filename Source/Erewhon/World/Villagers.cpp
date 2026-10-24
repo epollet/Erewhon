@@ -15,6 +15,7 @@
 #include "World/SectorTypes.h"
 #include "World/SpawnLayout.h"
 #include "World/Terrain.h"
+#include "World/VillageNetwork.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonVillagers"
 
@@ -24,7 +25,17 @@ namespace ErewhonVillagers
 {
 	namespace
 	{
-		FVector2D Plaza() { return FVector2D(ErewhonSector::Center(FIntPoint::ZeroValue)); }
+		/** Un point du plan du village (depuis le centre de la place), en monde. */
+		FVector2D VillagersPlanPoint(const FIntPoint& Village, const FVector2D& Local)
+		{
+			return FVector2D(ErewhonVillages::VillageFrame(Village).TransformPosition(FVector(Local, 0.0)));
+		}
+
+		/** Une direction du plan du village, en monde. */
+		FVector2D VillagersPlanDir(const FIntPoint& Village, const FVector2D& Local)
+		{
+			return FVector2D(ErewhonVillages::VillageFrame(Village).TransformVectorNoScale(FVector(Local, 0.0)));
+		}
 
 		/** Chaque maison : son centre (depuis la place), son orientation (la porte, −X, vers la route), sa route. */
 		struct FHouseSpot { FVector2D Offset; float Yaw; FVector2D Road; };
@@ -40,11 +51,8 @@ namespace ErewhonVillagers
 			{ TEXT("villager_weaver_tp"), TEXT("Lison"), TEXT("la tisserande") },
 		};
 
-		/** Où une route quitte la place, et la couronne où l'on en fait le tour. */
-		constexpr float PlazaEntry = 1250.f;
-		constexpr float PlazaRing = 760.f;
-
-		FVector2D Entry(const FVector2D& Road) { return Plaza() + Road * PlazaEntry; }
+		/** Le marché, depuis la place (repère du village). */
+		const FVector2D GMarketOffset(3300.f, 3300.f);
 	}
 
 	const FResident& Resident(int32 Index)
@@ -52,83 +60,88 @@ namespace ErewhonVillagers
 		return GResidents[FMath::Clamp(Index, 0, HouseCount - 1)];
 	}
 
-	FTransform HouseTransform(int32 Index)
+	FTransform HouseTransform(const FIntPoint& Village, int32 Index)
 	{
 		const FHouseSpot& Spot = GHouses[FMath::Clamp(Index, 0, HouseCount - 1)];
-		// Le sol est aplani tout autour (FlattenFactor) : la maison est posée à Z = 0.
-		return FTransform(FRotator(0.f, Spot.Yaw, 0.f), FVector(Plaza() + Spot.Offset, 0.f));
+		// Le sol est aplani tout autour (voir ErewhonTerrain) : la maison est posée à Z = 0.
+		const FTransform House = FTransform(FRotator(0.f, Spot.Yaw, 0.f), FVector(Spot.Offset, 0.f)) * ErewhonVillages::VillageFrame(Village);
+		return FTransform(House.GetRotation(), FVector(House.GetLocation().X, House.GetLocation().Y, 0.f));
 	}
 
-	FVector2D Doorstep(int32 Index)
+	FVector2D Doorstep(const FIntPoint& Village, int32 Index)
 	{
-		return FVector2D(HouseTransform(Index).TransformPosition(FVector(-ErewhonSpawn::CabinHalfLength - 220.f, 0.f, 0.f)));
+		return FVector2D(HouseTransform(Village, Index).TransformPosition(FVector(-ErewhonSpawn::CabinHalfLength - 220.f, 0.f, 0.f)));
 	}
 
-	FVector2D RoadDir(int32 Index)
+	FVector2D RoadDir(const FIntPoint& Village, int32 Index)
 	{
-		return GHouses[FMath::Clamp(Index, 0, HouseCount - 1)].Road;
+		return VillagersPlanDir(Village, GHouses[FMath::Clamp(Index, 0, HouseCount - 1)].Road);
 	}
 
-	FVector2D LaneEnd(int32 Index)
+	FVector2D LaneEnd(const FIntPoint& Village, int32 Index)
 	{
 		// Le pied du sentier, sur l'axe de la route.
-		const FVector2D Road = RoadDir(Index);
-		const FVector2D Step = Doorstep(Index) - Plaza();
-		return Plaza() + Road * FVector2D::DotProduct(Step, Road);
+		const FVector2D Plaza(ErewhonSector::Center(ErewhonVillages::CenterOf(Village)));
+		const FVector2D Road = RoadDir(Village, Index);
+		const FVector2D Step = Doorstep(Village, Index) - Plaza;
+		return Plaza + Road * FVector2D::DotProduct(Step, Road);
 	}
 
-	FVector2D MarketCenter()
+	FVector2D MarketCenter(const FIntPoint& Village)
 	{
-		return Plaza() + FVector2D(3300.f, 3300.f);
+		return VillagersPlanPoint(Village, GMarketOffset);
 	}
 
-	FVector2D MarketJunction()
+	FVector2D MarketJunction(const FIntPoint& Village)
 	{
-		return FVector2D(MarketCenter().X, Plaza().Y);
+		// Sur la route du nord (l'axe X du repère du village), à la hauteur du marché.
+		return VillagersPlanPoint(Village, FVector2D(GMarketOffset.X, 0.f));
 	}
 
-	FTransform StallTransform(int32 Index)
+	FVector2D MarketEntry(const FIntPoint& Village)
+	{
+		return VillagersPlanPoint(Village, GMarketOffset - FVector2D(0.f, MarketRadius * 0.6f));
+	}
+
+	FTransform StallTransform(const FIntPoint& Village, int32 Index)
 	{
 		// En couronne, le comptoir (−X) tourné vers le centre ; on laisse le côté de l'arrivée (vers la route du nord) libre.
 		const float Angle = 30.f + 360.f / StallCount * Index;
 		const FVector2D Dir(FMath::Cos(FMath::DegreesToRadians(Angle)), FMath::Sin(FMath::DegreesToRadians(Angle)));
-		return FTransform(FRotator(0.f, Angle, 0.f), FVector(MarketCenter() + Dir * 880.f, 0.f));
+		const FTransform Stall = FTransform(FRotator(0.f, Angle, 0.f), FVector(GMarketOffset + Dir * 880.f, 0.f)) * ErewhonVillages::VillageFrame(Village);
+		return FTransform(Stall.GetRotation(), FVector(Stall.GetLocation().X, Stall.GetLocation().Y, 0.f));
 	}
 
 	void AddGrounds(const FIntPoint& Coord, TArray<FClearing>& Clearings, TArray<FBox2D>& Paths, TArray<bool>& Paved)
 	{
+		// Les maisons et le marché sont à moins de deux secteurs de la place : loin des villages, rien à faire.
+		const FIntPoint Village = ErewhonVillages::NearestVillage(Coord);
+		const FIntPoint FromCenter = Coord - ErewhonVillages::CenterOf(Village);
+		if (FMath::Max(FMath::Abs(FromCenter.X), FMath::Abs(FromCenter.Y)) > 1)
+		{
+			return;
+		}
 		for (int32 i = 0; i < HouseCount; ++i)
 		{
-			const FTransform House = HouseTransform(i);
+			const FTransform House = HouseTransform(Village, i);
 			if (ErewhonSector::FromWorld(House.GetLocation()) != Coord)
 			{
 				continue;
 			}
 			// De la terre autour de la maison, et un sentier du perron à la route.
 			Clearings.Add({ FVector2D(House.GetLocation()), 780.f, false });
-			const FVector2D From = Doorstep(i);
-			const FVector2D To = LaneEnd(i);
+			const FVector2D From = Doorstep(Village, i);
+			const FVector2D To = LaneEnd(Village, i);
 			Paths.Add(FBox2D(FVector2D(FMath::Min(From.X, To.X), FMath::Min(From.Y, To.Y)) - FVector2D(140.f), FVector2D(FMath::Max(From.X, To.X), FMath::Max(From.Y, To.Y)) + FVector2D(140.f)));
 			Paved.Add(false);
 		}
-		if (ErewhonSector::FromWorld(FVector(MarketCenter(), 0.f)) == Coord)
+		if (ErewhonSector::FromWorld(FVector(MarketCenter(Village), 0.f)) == Coord)
 		{
-			// La place du marché, et son chemin jusqu'à la route du nord.
-			Clearings.Add({ MarketCenter(), MarketRadius, false });
-			const FVector2D Junction = MarketJunction();
-			Paths.Add(FBox2D(FVector2D(Junction.X - 200.f, Junction.Y), FVector2D(Junction.X + 200.f, MarketCenter().Y - MarketRadius + 200.f)));
+			// La place du marché, et son chemin jusqu'à la route du nord (dans le repère du village : le long de Y).
+			Clearings.Add({ MarketCenter(Village), MarketRadius, false });
+			Paths.Add(ErewhonSpawn::VillageBox(Village, FBox2D(FVector2D(GMarketOffset.X - 200.f, 0.f), FVector2D(GMarketOffset.X + 200.f, GMarketOffset.Y - MarketRadius + 200.f))));
 			Paved.Add(false);
 		}
-	}
-
-	float FlattenFactor(const FVector2D& World)
-	{
-		float Flatten = FMath::SmoothStep(1500.f, 3500.f, static_cast<float>(FVector2D::Distance(World, MarketCenter())));
-		for (int32 i = 0; i < HouseCount; ++i)
-		{
-			Flatten = FMath::Min(Flatten, FMath::SmoothStep(950.f, 2600.f, static_cast<float>(FVector2D::Distance(World, FVector2D(HouseTransform(i).GetLocation())))));
-		}
-		return Flatten;
 	}
 }
 
@@ -165,6 +178,7 @@ void AVillager::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetim
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AVillager, ResidentIndex);
+	DOREPLIFETIME(AVillager, Village);
 }
 
 void AVillager::BeginPlay()
@@ -213,7 +227,7 @@ void AVillager::BeginPlay()
 float AVillager::GroundZ(const FVector2D& At) const
 {
 	// Chez soi : le plancher ; sur le perron, entre les deux ; dehors, le terrain.
-	const FTransform House = ErewhonVillagers::HouseTransform(ResidentIndex);
+	const FTransform House = ErewhonVillagers::HouseTransform(Village, ResidentIndex);
 	const FVector Local = House.InverseTransformPosition(FVector(At, 0.f));
 	const float Floor = House.GetLocation().Z + ErewhonSpawn::CabinFloorTop;
 	const AErewhonGameState* State = AErewhonGameState::Get(this);
@@ -233,7 +247,7 @@ float AVillager::GroundZ(const FVector2D& At) const
 void AVillager::PlanAtHome()
 {
 	// D'un coin de la maison à un autre.
-	const FTransform House = ErewhonVillagers::HouseTransform(ResidentIndex);
+	const FTransform House = ErewhonVillagers::HouseTransform(Village, ResidentIndex);
 	Route.Reset();
 	Route.Add(FVector2D(House.TransformPosition(FVector(GInside[Rand.RandHelper(UE_ARRAY_COUNT(GInside))], 0.f))));
 	NextPoint = 0;
@@ -243,26 +257,28 @@ void AVillager::PlanAtHome()
 void AVillager::PlanOuting()
 {
 	using namespace ErewhonVillagers;
-	const FTransform House = HouseTransform(ResidentIndex);
-	const FVector2D Plaza(ErewhonSector::Center(FIntPoint::ZeroValue));
+	const FTransform House = HouseTransform(Village, ResidentIndex);
+	const FVector2D Plaza(ErewhonSector::Center(ErewhonVillages::CenterOf(Village)));
+	// La route du nord du village (celle du marché), en monde : le village peut être tourné.
+	const FVector2D North = VillagersPlanDir(Village, FVector2D(1.f, 0.f));
 	Route.Reset();
 	if (Place != EPlace::Out)
 	{
 		// Sortir : la porte, le perron, le sentier, la route jusqu'à la place.
 		Route.Add(FVector2D(House.TransformPosition(FVector(-ErewhonSpawn::CabinHalfLength + 70.f, 0.f, 0.f))));
-		Route.Add(Doorstep(ResidentIndex));
-		Route.Add(LaneEnd(ResidentIndex));
-		Route.Add(Plaza + RoadDir(ResidentIndex) * 1250.f);
+		Route.Add(Doorstep(Village, ResidentIndex));
+		Route.Add(LaneEnd(Village, ResidentIndex));
+		Route.Add(Plaza + RoadDir(Village, ResidentIndex) * 1250.f);
 	}
 	else
 	{
 		// D'un arrêt à l'autre : on revient d'abord vers la place par où l'on est venu.
 		const FVector2D Here(GetActorLocation());
-		if (FVector2D::Distance(Here, MarketCenter()) < MarketRadius + 300.f)
+		if (FVector2D::Distance(Here, MarketCenter(Village)) < MarketRadius + 300.f)
 		{
-			Route.Add(MarketCenter() - FVector2D(0.f, MarketRadius * 0.6f));
-			Route.Add(MarketJunction());
-			Route.Add(Plaza + FVector2D(1250.f, 0.f));
+			Route.Add(MarketEntry(Village));
+			Route.Add(MarketJunction(Village));
+			Route.Add(Plaza + North * 1250.f);
 		}
 		else if (FVector2D::Distance(Here, Plaza) > 1400.f)
 		{
@@ -294,11 +310,11 @@ void AVillager::PlanOuting()
 	}
 	else if (Pick < 0.7f)
 	{
-		AroundTo(Plaza + FVector2D(1250.f, 0.f));
-		Route.Add(MarketJunction());
-		Route.Add(MarketCenter() - FVector2D(0.f, MarketRadius * 0.6f));
+		AroundTo(Plaza + North * 1250.f);
+		Route.Add(MarketJunction(Village));
+		Route.Add(MarketEntry(Village));
 		const float A = Rand.FRandRange(0.f, UE_TWO_PI);
-		Route.Add(MarketCenter() + FVector2D(FMath::Cos(A), FMath::Sin(A)) * Rand.FRandRange(100.f, 600.f));
+		Route.Add(MarketCenter(Village) + FVector2D(FMath::Cos(A), FMath::Sin(A)) * Rand.FRandRange(100.f, 600.f));
 	}
 	else
 	{
@@ -314,16 +330,16 @@ void AVillager::PlanOuting()
 void AVillager::PlanReturn()
 {
 	using namespace ErewhonVillagers;
-	const FTransform House = HouseTransform(ResidentIndex);
-	const FVector2D Plaza(ErewhonSector::Center(FIntPoint::ZeroValue));
+	const FTransform House = HouseTransform(Village, ResidentIndex);
+	const FVector2D Plaza(ErewhonSector::Center(ErewhonVillages::CenterOf(Village)));
 	const FVector2D Here(GetActorLocation());
 	Route.Reset();
 	// Revenir vers la place par le chemin pris (le marché : par son chemin ; une route : par elle).
-	if (FVector2D::Distance(Here, MarketCenter()) < MarketRadius + 300.f)
+	if (FVector2D::Distance(Here, MarketCenter(Village)) < MarketRadius + 300.f)
 	{
-		Route.Add(MarketCenter() - FVector2D(0.f, MarketRadius * 0.6f));
-		Route.Add(MarketJunction());
-		Route.Add(Plaza + FVector2D(1250.f, 0.f));
+		Route.Add(MarketEntry(Village));
+		Route.Add(MarketJunction(Village));
+		Route.Add(Plaza + VillagersPlanDir(Village, FVector2D(1.f, 0.f)) * 1250.f);
 	}
 	else if (FVector2D::Distance(Here, Plaza) > 1400.f)
 	{
@@ -333,7 +349,7 @@ void AVillager::PlanReturn()
 	}
 	// Le tour de la place jusqu'à sa route, puis chez soi.
 	const FVector2D From = Route.Num() > 0 ? Route.Last() : Here;
-	const FVector2D Exit = Plaza + RoadDir(ResidentIndex) * 1250.f;
+	const FVector2D Exit = Plaza + RoadDir(Village, ResidentIndex) * 1250.f;
 	const float A0 = FMath::Atan2(From.Y - Plaza.Y, From.X - Plaza.X);
 	const float A1 = FMath::Atan2(Exit.Y - Plaza.Y, Exit.X - Plaza.X);
 	const float Delta = FMath::FindDeltaAngleRadians(A0, A1);
@@ -344,8 +360,8 @@ void AVillager::PlanReturn()
 		Route.Add(Plaza + FVector2D(FMath::Cos(A), FMath::Sin(A)) * 760.f);
 	}
 	Route.Add(Exit);
-	Route.Add(LaneEnd(ResidentIndex));
-	Route.Add(Doorstep(ResidentIndex));
+	Route.Add(LaneEnd(Village, ResidentIndex));
+	Route.Add(Doorstep(Village, ResidentIndex));
 	Route.Add(FVector2D(House.TransformPosition(FVector(-ErewhonSpawn::CabinHalfLength + 70.f, 0.f, 0.f))));
 	Route.Add(FVector2D(House.TransformPosition(FVector(GInside[Rand.RandHelper(UE_ARRAY_COUNT(GInside))], 0.f))));
 	NextPoint = 0;

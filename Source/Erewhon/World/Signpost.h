@@ -24,6 +24,9 @@ namespace ErewhonSigns
 	 */
 	EREWHON_API void AddSignpost(AActor* Owner, USceneComponent* Parent, const FVector& Location, const TArray<FArm>& Arms, bool bLantern = false);
 
-	/** Bras d'un commerce vu depuis From : son nom et la distance à pied (m, arrondie à 10 m). */
+	/** Bras d'un commerce vu depuis From (celui du village le plus proche) : son nom et la distance à pied (m, arrondie à 10 m). */
 	EREWHON_API FArm ShopArm(EShopKind Kind, const FVector& From, float Yaw);
+
+	/** Bras d'un village (ErewhonVillages) vu depuis From, sur sa route : son nom et la distance (km, au dixième). */
+	EREWHON_API FArm VillageArm(const FIntPoint& Village, const FVector& From, float Yaw);
 }

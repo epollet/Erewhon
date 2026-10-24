@@ -103,6 +103,9 @@ private:
 	float FlapBurst = 0.f;
 	float Pause = 0.f;
 	FVector Prey = FVector::ZeroVector;
+	/** Part à l'abri du mauvais temps (0 → 1), lissée ; négative avant la première image. Direction de sa fuite. */
+	float Shelter = -1.f;
+	FVector2D Away = FVector2D(1.f, 0.f);
 	FRandomStream Rand;
 };
 

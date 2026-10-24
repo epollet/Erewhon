@@ -15,6 +15,7 @@
 #include "World/Sector.h"
 #include "Components/StaticMeshComponent.h"
 #include "World/SectorLayout.h"
+#include "World/VillageNetwork.h"
 
 namespace
 {
@@ -39,11 +40,26 @@ void ASectorManager::BeginPlay()
 		HarvestHandle = State->OnPlantHarvestChanged.AddUObject(this, &ASectorManager::OnPlantHarvestChanged);
 		OwnerHandle = State->OnSectorOwnerChanged.AddUObject(this, &ASectorManager::OnSectorOwnerChanged);
 		FieldHandle = State->OnFieldChanged.AddUObject(this, &ASectorManager::OnFieldChanged);
-		VillageHandle = State->OnVillageChanged.AddWeakLambda(this, [this]()
+		VillageHandle = State->OnVillageChanged.AddWeakLambda(this, [this](const FIntPoint& Village)
 		{
-			// Pavés, tailleur, panneaux, lanternes : tous les secteurs se refont.
-			GetWorld()->GetSubsystem<USectorLayoutSubsystem>()->InvalidateAll();
-			RebuildAll();
+			// Pavés, tailleur, panneaux, lanternes : les secteurs de ce village se refont (sa place et ses
+			// routes, dans le rayon de sa mairie), au prochain rafraîchissement.
+			const int32 Radius = UErewhonSettings::Get().StoreSectorRadius + 1;
+			const FIntPoint Center = ErewhonVillages::CenterOf(Village);
+			USectorLayoutSubsystem* Layouts = GetWorld()->GetSubsystem<USectorLayoutSubsystem>();
+			for (int32 DY = -Radius; DY <= Radius; ++DY)
+			{
+				for (int32 DX = -Radius; DX <= Radius; ++DX)
+				{
+					const FIntPoint Coord = Center + FIntPoint(DX, DY);
+					Layouts->InvalidateAround(Coord);
+					if (TObjectPtr<ASector>* Found = Loaded.Find(Coord))
+					{
+						(*Found)->Destroy();
+						Loaded.Remove(Coord);
+					}
+				}
+			}
 		});
 	}
 	if (UErewhonUserSettings* User = UErewhonUserSettings::Get())

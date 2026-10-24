@@ -48,6 +48,12 @@ namespace ErewhonWeather
 
 	EREWHON_API FText KindName(EKind Kind);
 
+	/**
+	 * Part des bêtes volantes à l'abri (0 → 1) : toutes sous l'orage, de plus en plus sous une forte averse.
+	 * Chaque machine la lisse de son côté (oiseaux et papillons sont locaux) : ils partent et reviennent par degrés.
+	 */
+	EREWHON_API float ShelterTarget(const FState& State);
+
 	/** Tests : -ErewhonWeather=0.9 fige le temps continu (0 → 1), -ErewhonHumidity=0.8 l'humidité. */
 	EREWHON_API void ReadTestOverrides();
 }

@@ -14,6 +14,7 @@
 #include "World/Apothecary.h"
 #include "World/Terrain.h"
 #include "World/Village.h"
+#include "World/SpawnLayout.h"
 #include "Sound/SoundWave.h"
 #include "World/ErewhonSound.h"
 #include "Components/AudioComponent.h"
@@ -238,7 +239,8 @@ namespace ErewhonPlaceables
 		{
 			return {};
 		}
-		const FVector Spot = ErewhonVillage::FountainBarrelSpot();
+		// La fontaine du village où l'on pose le tonneau.
+		const FVector Spot = ErewhonVillage::FountainBarrelSpot(ErewhonSpawn::VillageAt(Location));
 		if (FVector::Dist2D(Spot, Location) > ErewhonVillage::FountainSnapRadius)
 		{
 			return {};

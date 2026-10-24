@@ -43,6 +43,12 @@ namespace
 	/** Les vols d'oiseaux se recentrent quand le joueur s'en éloigne trop (cm). */
 	constexpr float GBirdAnchorDrift = 15000.f;
 
+	/** Mauvais temps : durée du départ (ou du retour) à l'abri (s), distance où filent les oiseaux (cm). */
+	constexpr float GShelterSeconds = 25.f;
+	constexpr float GShelterDistance = 25000.f;
+	/** Au-delà de cette part à l'abri, on ne les voit plus : on les cache. */
+	constexpr float GShelterHidden = 0.98f;
+
 	/** Couleurs douces de papillons : intérieur de l'aile, puis bord. */
 	const TPair<FLinearColor, FLinearColor> GButterflyColors[] = {
 		{ FLinearColor::FromSRGBColor(FColor(250, 246, 230)), FLinearColor::FromSRGBColor(FColor(236, 226, 196)) },   // piéride blanche
@@ -93,6 +99,7 @@ void AWildlife::BeginPlay()
 			const float Side = i == 0 ? 0.f : (i % 2 == 0 ? 1.f : -1.f);
 			Bird.Home = FVector(-Row * 140.f, Side * Row * 110.f, Rand.FRandRange(-50.f, 50.f));
 			Bird.Flock = Flock;
+			Bird.Away = FVector(FMath::Cos(Flock * 2.1f + 0.7f), FMath::Sin(Flock * 2.1f + 0.7f), 0.f);
 			Birds.Add(Bird);
 		}
 	}
@@ -104,6 +111,8 @@ void AWildlife::BeginPlay()
 		Bird.Radius = Rand.FRandRange(900.f, 2800.f);
 		Bird.Altitude = Rand.FRandRange(700.f, 2200.f);
 		Bird.Speed = Rand.FRandRange(0.12f, 0.3f) * (Rand.FRand() < 0.5f ? -1.f : 1.f);
+		// Il part s'abriter droit devant lui, à l'opposé du centre des vols.
+		Bird.Away = Bird.Home.GetSafeNormal2D(UE_SMALL_NUMBER, FVector::ForwardVector);
 #if !UE_BUILD_SHIPPING
 		if (i == 0 && FParse::Param(FCommandLine::Get(), TEXT("ErewhonBirdTest")))
 		{
@@ -252,20 +261,26 @@ void AWildlife::Tick(float DeltaSeconds)
 	const double Clock = State->GetWorldClock();
 	const ACelestialSystem* Celestial = ACelestialSystem::Find(this);
 	const bool bDay = !Celestial || Celestial->GetSunOrbit().Direction(Clock).Z > 0.05f;
-	if (bDay != bVisible)
+	// Sous l'orage ou une forte averse, oiseaux et papillons s'abritent, et reviennent quand le temps se calme.
+	// La météo est la même partout : chaque machine les fait partir et revenir au même moment.
+	const float Sheltering = ErewhonWeather::ShelterTarget(State->SampleWeather());
+	Shelter = Shelter < 0.f ? Sheltering : FMath::FInterpConstantTo(Shelter, Sheltering, DeltaSeconds, 1.f / GShelterSeconds);
+	const bool bShown = bDay && Shelter < GShelterHidden;
+	if (bShown != bVisible)
 	{
-		bVisible = bDay;
+		bVisible = bShown;
 		for (const FCreature& Creature : Butterflies)
 		{
-			Creature.Body->SetVisibility(bDay, true);
+			Creature.Body->SetVisibility(bShown, true);
 		}
 		for (const FCreature& Creature : Birds)
 		{
-			Creature.Body->SetVisibility(bDay, true);
+			Creature.Body->SetVisibility(bShown, true);
 		}
 	}
-	UpdateAmbience(Pawn->GetActorLocation(), Clock, DeltaSeconds, bDay);
-	if (!bDay)
+	// Les oiseaux se taisent dès que le mauvais temps les chasse.
+	UpdateAmbience(Pawn->GetActorLocation(), Clock, DeltaSeconds, bShown && Shelter < 0.5f);
+	if (!bShown)
 	{
 		return;
 	}
@@ -275,7 +290,7 @@ void AWildlife::Tick(float DeltaSeconds)
 	UpdateBirds(Pawn->GetActorLocation(), Time, DeltaSeconds);
 }
 
-void AWildlife::UpdateAmbience(const FVector& Focus, double Clock, float DeltaSeconds, bool bDay)
+void AWildlife::UpdateAmbience(const FVector& Focus, double Clock, float DeltaSeconds, bool bSinging)
 {
 	const float Ambient = ErewhonSound::ChannelVolume(ErewhonSound::EChannel::Ambient);
 
@@ -306,7 +321,7 @@ void AWildlife::UpdateAmbience(const FVector& Focus, double Clock, float DeltaSe
 
 	// De temps en temps, un oiseau chante près de là.
 	NextChirp -= DeltaSeconds;
-	if (bDay && NextChirp <= 0.f && Birds.Num() > 0)
+	if (bSinging && NextChirp <= 0.f && Birds.Num() > 0)
 	{
 		NextChirp = Rand.FRandRange(3.f, 9.f);
 		const FCreature& Singer = Birds[Rand.RandHelper(Birds.Num())];
@@ -337,7 +352,8 @@ void AWildlife::UpdateButterflies(const FVector& Focus, double Time)
 		const FVector2D Offset(FMath::Sin(T * 0.6f) * Butterfly.Radius, FMath::Sin(T * 1.2f) * Butterfly.Radius * 0.6f);
 		const FVector2D Position = FVector2D(Butterfly.Home) + Offset;
 		// Au-dessus des herbes hautes (jusqu'à 1,5 m), là où on les voit danser.
-		const float Height = 165.f + 35.f * FMath::Sin(T * 1.7f) + 12.f * FMath::Sin(T * 5.3f);
+		// Par mauvais temps, ils descendent se cacher dans l'herbe.
+		const float Height = 165.f + 35.f * FMath::Sin(T * 1.7f) + 12.f * FMath::Sin(T * 5.3f) - 230.f * Shelter;
 		const FVector Location(Position, GroundAt(Position) + Height);
 
 		const FVector2D Velocity(FMath::Cos(T * 0.6f) * 0.6f * Butterfly.Radius, FMath::Cos(T * 1.2f) * 1.2f * 0.6f * Butterfly.Radius);
@@ -385,6 +401,20 @@ void AWildlife::UpdateBirds(const FVector& Focus, double Time, float DeltaSecond
 				Bird.Altitude + Ground + 250.f * FMath::Sin(static_cast<float>(Time) * 0.4f + Bird.Phase));
 			Facing = FRotator(0.f, FMath::RadiansToDegrees(Angle + (Bird.Speed > 0.f ? UE_HALF_PI : -UE_HALF_PI)), 0.f);
 			Bank = Bird.Speed > 0.f ? -22.f : 22.f;
+		}
+		if (Shelter > 0.f)
+		{
+			// Mauvais temps : il file au loin, en descendant vers la cime des arbres, et revient par le même chemin.
+			// Il regarde alors là où il va vraiment (son cercle plus sa fuite), sans plus pencher dans le virage.
+			const FVector Previous = Bird.Body->GetComponentLocation();
+			Location += Bird.Away * (GShelterDistance * Shelter * Shelter);
+			Location.Z = FMath::Lerp(Location.Z, Ground + 900.f, Shelter);
+			const FVector Step = Location - Previous;
+			if (Step.SizeSquared2D() > 1.f)
+			{
+				Facing = FRotator(0.f, Step.Rotation().Yaw, 0.f);
+			}
+			Bank *= 1.f - Shelter;
 		}
 		Bird.Body->SetWorldLocationAndRotation(Location, Facing + FRotator(0.f, 0.f, Bank));
 

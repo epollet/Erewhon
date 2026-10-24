@@ -30,6 +30,8 @@
 #include "World/Bhurak.h"
 #include "World/SectorTypes.h"
 #include "World/Storage.h"
+#include "World/SpawnLayout.h"
+#include "World/VillageNetwork.h"
 #include "Widgets/SWindow.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonReport"
@@ -221,15 +223,19 @@ namespace
 			Game.Add(TEXT("Météo"), FString::Printf(TEXT("%s%s (temps %.2f, pluie %.2f, vent ×%.2f)"),
 				*ErewhonWeather::KindName(Weather.Kind).ToString(), GameState->IsWeatherForced() ? TEXT(", forcée par la triche") : TEXT(""),
 				Weather.Cloudiness, Weather.Rain, Weather.Wind));
+			// Le village où se tient le joueur (le plus proche) et ses améliorations.
+			const FIntPoint Village = Pawn ? ErewhonSpawn::VillageAt(Pawn->GetActorLocation()) : ErewhonVillages::StartVillage;
 			TArray<FString> Upgrades;
 			for (int32 Upgrade = 0; Upgrade < static_cast<int32>(EVillageUpgrade::Count); ++Upgrade)
 			{
-				if (GameState->GetVillageUpgrades() & (1 << Upgrade))
+				if (GameState->GetVillageUpgrades(Village) & (1 << Upgrade))
 				{
 					Upgrades.Add(StaticEnum<EVillageUpgrade>()->GetNameStringByValue(Upgrade));
 				}
 			}
-			Game.Add(TEXT("Village"), Upgrades.IsEmpty() ? TEXT("aucune amélioration") : FString::Join(Upgrades, TEXT(", ")));
+			Game.Add(TEXT("Village"), FString::Printf(TEXT("%s (cellule %d:%d, place %s) : %s"), *ErewhonVillages::VillageName(Village).ToString(),
+				Village.X, Village.Y, *ErewhonSector::ToString(ErewhonVillages::CenterOf(Village)),
+				Upgrades.IsEmpty() ? TEXT("aucune amélioration") : *FString::Join(Upgrades, TEXT(", "))));
 		}
 
 		ErewhonReport::FSection& Player = Sections.AddDefaulted_GetRef();

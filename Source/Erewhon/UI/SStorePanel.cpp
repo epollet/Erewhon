@@ -23,6 +23,9 @@
 #include "World/Village.h"
 #include "World/Apothecary.h"
 #include "World/Farm.h"
+#include "World/VillageNetwork.h"
+#include "UI/SSectorMap.h"
+#include "GameFramework/Pawn.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonStorePanel"
 
@@ -32,7 +35,6 @@ namespace
 {
 	constexpr float GStorePanelWidth = 760.f;
 	constexpr float GContentHeight = 430.f;
-	constexpr float GTileSize = 40.f;
 	constexpr int32 GBuyColumns = 4;
 
 	FText CoinsText(int32 Amount)
@@ -81,7 +83,7 @@ void SStorePanel::Construct(const FArguments& InArgs)
 	else if (State && !State->GetInventory()->GetSlots().ContainsByPredicate([this, State, World](const FInventorySlot& Slot)
 	{
 		const FItemDef* Def = Slot.Kind == ESlotKind::Inventory && !Slot.IsEmpty() ? UItemDatabase::Get(Controller.Get())->Find(Slot.ItemId) : nullptr;
-		return Def && World && World->BuysBack(*Def, Kind);
+		return Def && World && World->BuysBack(MairieVillage(), *Def, Kind);
 	}))
 	{
 		Tab = ETab::Buy;
@@ -90,7 +92,7 @@ void SStorePanel::Construct(const FArguments& InArgs)
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	ChildSlot
 	[
-		Window(FText::FromString(ErewhonSpawn::ShopName(Kind)), SAssignNew(Body, SBox),
+		Window(FText::Format(LOCTEXT("ShopTitle", "{0} · {1}"), FText::FromString(ErewhonSpawn::ShopName(Kind)), ErewhonVillages::VillageName(MairieVillage())), SAssignNew(Body, SBox),
 			FSimpleDelegate::CreateLambda([WeakController]() { if (WeakController.IsValid()) { WeakController->CloseMenu(); } }),
 			GStorePanelWidth, bManager
 				? LOCTEXT("ManagerSubtitle", "« Bienvenue à la mairie ! Un secteur, une amélioration, une vocation ? »")
@@ -231,69 +233,28 @@ TSharedRef<SWidget> SStorePanel::BuildClass()
 TSharedRef<SWidget> SStorePanel::BuildSectors()
 {
 	const AErewhonGameState* World = AErewhonGameState::Get(Controller.Get());
-	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
 	if (!World)
 	{
 		return SNew(SBox);
 	}
-	const int32 R = UErewhonSettings::Get().StoreSectorRadius;
 
-	// La carte : nord (+X) en haut, est (+Y) à droite, la cabane au centre.
-	TSharedRef<SUniformGridPanel> Map = SNew(SUniformGridPanel).SlotPadding(2.f);
-	for (int32 X = R; X >= -R; --X)
+	// La carte : nord (+X) en haut, est (+Y) à droite, ouverte sur la place de cette mairie. Créée une fois,
+	// elle passe d'une reconstruction du panneau à l'autre sans perdre son cadrage.
+	if (!SectorMap.IsValid())
 	{
-		for (int32 Y = -R; Y <= R; ++Y)
-		{
-			const FIntPoint Sector(X, Y);
-			const ESectorType Type = ErewhonSector::TypeAt(Sector, World->GetWorldSeed());
-			const FString* Owner = World->FindSectorOwnerKey(Sector);
-			const ESectorState TileState = !ErewhonSector::IsPurchasable(Sector) ? ESectorState::Public
-				: !Owner ? ESectorState::Free
-				: *Owner == State->GetPlayerKey() ? ESectorState::Mine : ESectorState::Private;
-			const bool bSelected = Sector == Selected;
-			// Libre : la couleur du pays (prairie claire, lisière plus verte, forêt sombre).
-			FLinearColor Fill = StateColor(TileState);
-			if (TileState == ESectorState::Free && Type == ESectorType::Edge)
-			{
-				Fill = Mix(Leaf, Ink, 0.25f);
-			}
-			else if (TileState == ESectorState::Free && Type == ESectorType::Forest)
-			{
-				Fill = Mix(Leaf, Ink, 0.5f);
-			}
-
-			FText Glyph;
-			if (Type == ESectorType::Spawn)
-			{
-				Glyph = FText::FromString(TEXT("⌂"));   // maisonnette
-			}
-			else if (TileState == ESectorState::Mine)
-			{
-				Glyph = FText::FromString(TEXT("★"));
-			}
-
-			Map->AddSlot(Y + R, R - X)
-			[
-				SNew(SBox).WidthOverride(GTileSize).HeightOverride(GTileSize)
-				[
-					SNew(SButton)
-					.ButtonStyle(&FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("NoBorder"))
-					.ContentPadding(0.f)
-					.ToolTipText(FText::Format(LOCTEXT("TileTip", "Secteur {0} · {1}"), FText::FromString(ErewhonSector::ToString(Sector)), ErewhonSector::TypeLabel(Type)))
-					.OnClicked_Lambda([this, Sector]() { Selected = Sector; Rebuild(); return FReply::Handled(); })
-					[
-						SNew(SBorder)
-						.BorderImage(Rounded(Fill, 6.f, bSelected ? Gold : Mix(Fill, Ink, 0.25f), bSelected ? 3.f : 1.f))
-						.HAlign(HAlign_Center)
-						.VAlign(VAlign_Center)
-						[
-							SNew(STextBlock).Text(Glyph).Font(Font(14, true)).ColorAndOpacity(FLinearColor::White)
-						]
-					]
-				]
-			];
-		}
+		const FIntPoint Village = MairieVillage();
+		Selected = ErewhonVillages::CenterOf(Village) + FIntPoint(1, 1);
+		SAssignNew(SectorMap, SSectorMap)
+			.Controller(Controller.Get())
+			.Village(Village)
+			.Selected(Selected)
+			.OnSectorPicked(FOnMapSectorPicked::CreateSP(this, &SStorePanel::OnMapSectorPicked));
 	}
+	TSharedRef<SSectorMap> Map = SectorMap.ToSharedRef();
+	const auto MapButton = [](const FText& Label, TFunction<void()> OnClick, const FText& Tip)
+	{
+		return SNew(SBox).ToolTipText(Tip)[Button(Label, MoveTemp(OnClick), EButton::Secondary, true, 34.f, 12)];
+	};
 
 	const auto Legend = [](ESectorState LegendState, const FText& Label)
 	{
@@ -313,8 +274,29 @@ TSharedRef<SWidget> SStorePanel::BuildSectors()
 		[
 			CardBox(
 				SNew(SVerticalBox)
-				+ SVerticalBox::Slot().AutoHeight()[Map]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+				+ SVerticalBox::Slot().AutoHeight()[SNew(SBox).WidthOverride(400.f).HeightOverride(300.f)[Map]]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+					[
+						MapButton(FText::FromString(TEXT("−")), [Map]() { Map->ZoomBy(1.f / 1.25f); }, LOCTEXT("ZoomOutTip", "Voir plus loin (molette)"))
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+					[
+						MapButton(FText::FromString(TEXT("+")), [Map]() { Map->ZoomBy(1.25f); }, LOCTEXT("ZoomInTip", "Voir de plus près (molette)"))
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)
+					[
+						Button(LOCTEXT("Recenter", "Recentrer"), [Map]() { Map->Recenter(); }, EButton::Secondary, true, 0.f, 11)
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+					[
+						SNew(STextBlock).Text(LOCTEXT("MapHelp", "Glissez pour vous déplacer, molette pour zoomer, clic pour choisir."))
+						.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
+					]
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
 				[
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 10, 0)[Legend(ESectorState::Free, LOCTEXT("LegendFree", "Libre"))]
@@ -324,11 +306,30 @@ TSharedRef<SWidget> SStorePanel::BuildSectors()
 				]
 				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
 				[
-					SNew(STextBlock).Text(LOCTEXT("LegendWoods", "Libre plus sombre : lisière, puis forêt")).Font(Font(9)).ColorAndOpacity(MutedInk)
+					SNew(STextBlock).Text(LOCTEXT("LegendWoods", "Libre plus sombre : lisière, puis forêt · liseré : le village du secteur · trait : limite entre deux mairies"))
+					.Font(Font(9)).ColorAndOpacity(MutedInk).AutoWrapText(true)
 				],
 				10.f)
 		]
-		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(14, 0, 0, 0)[SNew(SScrollBox) + SScrollBox::Slot()[BuildSectorDetail()]];
+		+ SHorizontalBox::Slot().FillWidth(1.f).Padding(14, 0, 0, 0)
+		[
+			SNew(SScrollBox) + SScrollBox::Slot()[SAssignNew(SectorDetail, SBox)[BuildSectorDetail()]]
+		];
+}
+
+void SStorePanel::OnMapSectorPicked(const FIntPoint& Sector)
+{
+	Selected = Sector;
+	if (SectorDetail.IsValid())
+	{
+		SectorDetail->SetContent(BuildSectorDetail());
+	}
+}
+
+FIntPoint SStorePanel::MairieVillage() const
+{
+	const APawn* Pawn = Controller.IsValid() ? Controller->GetPawn() : nullptr;
+	return Pawn ? ErewhonVillages::NearestVillage(ErewhonSector::FromWorld(Pawn->GetActorLocation())) : ErewhonVillages::StartVillage;
 }
 
 TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
@@ -341,12 +342,23 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 	const FString* Owner = World->FindSectorOwnerKey(Sector);
 	const bool bMine = Owner && *Owner == State->GetPlayerKey();
 
+	// Le village du secteur, fixe : libre ou acheté, il dépend toujours de la même mairie.
+	const FIntPoint Mairie = MairieVillage();
+	FIntPoint PlazaOf;
+	const bool bPlaza = ErewhonVillages::IsCenter(Sector, &PlazaOf);
+	const FIntPoint SectorVillage = World->GetSectorVillage(Sector);
+	const FText VillageLine = FText::Format(bPlaza ? LOCTEXT("VillagePlaza", "La place de {0}") : LOCTEXT("VillageOf", "Village de {0}"),
+		ErewhonVillages::VillageName(SectorVillage));
+
 	FText Status;
+	FText Reason;   // pourquoi le bouton est grisé (vide : il ne l'est pas, ou il n'y en a pas)
 	TSharedRef<SWidget> Action = SNew(SBox);
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
-	if (Type == ESectorType::Spawn)
+	if (bPlaza || Type == ESectorType::Spawn)
 	{
-		Status = LOCTEXT("StatusMerchant", "La place du village, avec le General Store et mon bureau. C'est public : pas à vendre !");
+		Status = !bPlaza || PlazaOf == Mairie
+			? LOCTEXT("StatusMerchant", "La place du village, avec le General Store et mon bureau. C'est public : pas à vendre !")
+			: FText::Format(LOCTEXT("StatusOtherPlaza", "La place de {0}, un autre village, avec sa mairie. C'est public : pas à vendre !"), ErewhonVillages::VillageName(PlazaOf));
 	}
 	else if (Type == ESectorType::Road)
 	{
@@ -354,9 +366,12 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 	}
 	else if (bMine)
 	{
-		Status = LOCTEXT("StatusMine", "C'est chez vous. Je peux l'aménager, ou vous le reprendre à moitié prix.");
+		Reason = World->WhyNotSellable(Sector, Mairie, State);
+		Status = Reason.IsEmpty()
+			? LOCTEXT("StatusMine", "C'est chez vous. Je peux l'aménager, ou vous le reprendre à moitié prix.")
+			: LOCTEXT("StatusMineKept", "C'est chez vous. Je peux l'aménager, mais pas vous le reprendre :");
 		Action = Button(FText::Format(LOCTEXT("Resell", "Revendre · {0}"), CoinsText(Settings.SectorSellPrice)),
-			[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerSellSector(Sector); } }, EButton::Secondary, true, 200.f);
+			[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerSellSector(Sector); } }, EButton::Secondary, Reason.IsEmpty(), 200.f);
 	}
 	else if (Owner)
 	{
@@ -375,9 +390,11 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 		Status = bNearRoad
 			? FText::Format(LOCTEXT("StatusFreeRoad", "{0} Elle borde la route : je pourrai vous y tracer un chemin d'accès."), Land)
 			: Land;
+		// Relié au village de cette mairie, ou rien : la même règle que celle du serveur.
+		Reason = World->WhyNotBuyable(Sector, Mairie, State);
 		const bool bAfford = State->GetCoins() >= Settings.SectorBuyPrice;
 		Action = Button(FText::Format(LOCTEXT("Buy", "Acheter · {0}"), CoinsText(Settings.SectorBuyPrice)),
-			[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerBuySector(Sector); } }, EButton::Primary, bAfford, 200.f);
+			[WeakController, Sector]() { if (WeakController.IsValid()) { WeakController->ServerBuySector(Sector); } }, EButton::Primary, bAfford && Reason.IsEmpty(), 200.f);
 	}
 
 	const TArray<FIntPoint> Owned = World->GetSectorsOwnedBy(State->GetPlayerKey());
@@ -421,8 +438,8 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 				]
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 0, 0)[UpgradeAction]
 			];
-			// Une fois le village pavé, l'accès de terre peut l'être à son tour.
-			if (bBuilt && World->IsVillagePaved())
+			// Une fois son village pavé, l'accès de terre peut l'être à son tour.
+			if (bBuilt && World->IsVillagePaved(SectorVillage))
 			{
 				const bool bPaved = (World->GetPavedLinks(Sector) & (1 << Side)) != 0;
 				TSharedRef<SWidget> PaveAction = bPaved
@@ -561,13 +578,22 @@ TSharedRef<SWidget> SStorePanel::BuildSectorDetail()
 					SNew(STextBlock).Text(FText::Format(LOCTEXT("DetailTitle", "Secteur {0}"), FText::FromString(ErewhonSector::ToString(Sector))))
 					.Font(Font(18, true)).ColorAndOpacity(Ink)
 				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 10)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 0)
 				[
 					SNew(STextBlock).Text(ErewhonSector::TypeLabel(Type)).Font(Font(11, true)).ColorAndOpacity(Clay)
 				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 14)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2, 0, 10)
+				[
+					SNew(STextBlock).Text(VillageLine).Font(Font(10)).ColorAndOpacity(MutedInk).AutoWrapText(true)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, Reason.IsEmpty() ? 14 : 6)
 				[
 					SNew(STextBlock).Text(Status).Font(Font(11)).ColorAndOpacity(Ink).AutoWrapText(true)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, Reason.IsEmpty() ? 0 : 12)
+				[
+					Reason.IsEmpty() ? StaticCastSharedRef<SWidget>(SNew(SBox))
+						: StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(Reason).Font(Font(11, true)).ColorAndOpacity(Danger).AutoWrapText(true))
 				]
 				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left)[Action],
 				16.f)
@@ -603,7 +629,7 @@ TSharedRef<SWidget> SStorePanel::BuildBuy()
 	int32 Index = 0;
 	for (const FItemDef* Def : Items->GetPurchasable())
 	{
-		if (!World->IsOfferedTo(*Def, Kind, State))
+		if (!World->IsOfferedTo(MairieVillage(), *Def, Kind, State))
 		{
 			continue;   // ni la marchandise d'ici, ni pour sa classe, ou déjà à lui : on ne la montre pas
 		}
@@ -664,7 +690,7 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 	for (const FName Id : Seen)
 	{
 		const FItemDef* Def = Items->Find(Id);
-		const int32 Price = Def && World && World->BuysBack(*Def, Kind) ? Def->ResalePrice(ResaleRatio) : 0;
+		const int32 Price = Def && World && World->BuysBack(MairieVillage(), *Def, Kind) ? Def->ResalePrice(ResaleRatio) : 0;
 		if (Price <= 0)
 		{
 			continue;
@@ -721,7 +747,7 @@ TSharedRef<SWidget> SStorePanel::BuildSell()
 
 TSharedRef<SWidget> SStorePanel::BuildVillage()
 {
-	// Les améliorations du village, offertes par un joueur à tous les autres.
+	// Les améliorations du village de cette mairie, offertes par un joueur à tous les autres.
 	const AErewhonGameState* World = AErewhonGameState::Get(Controller.Get());
 	const AErewhonPlayerState* State = Controller->GetPlayerState<AErewhonPlayerState>();
 	TSharedRef<SVerticalBox> List = SNew(SVerticalBox);
@@ -729,17 +755,22 @@ TSharedRef<SWidget> SStorePanel::BuildVillage()
 	{
 		return List;
 	}
+	const FIntPoint Mairie = MairieVillage();
+	List->AddSlot().AutoHeight().Padding(4, 0, 0, 2)
+	[
+		SNew(STextBlock).Text(ErewhonVillages::VillageName(Mairie)).Font(Font(14, true)).ColorAndOpacity(Ink)
+	];
 	List->AddSlot().AutoHeight().Padding(4, 0, 0, 10)
 	[
 		SNew(STextBlock)
-		.Text(LOCTEXT("VillageIntro", "Le village, c'est la place et tous les secteurs autour. Ce que vous y construisez profite à tout le monde."))
+		.Text(LOCTEXT("VillageIntro", "Le village, c'est la place et tous les secteurs autour. Ce que vous y construisez profite à tout le monde ; chaque village a les siens, achetés à sa mairie."))
 		.Font(Font(10)).ColorAndOpacity(MutedInk).AutoWrapText(true)
 	];
 	TWeakObjectPtr<AErewhonPlayerController> WeakController = Controller;
 	for (const ErewhonVillage::FUpgradeInfo& Info : ErewhonVillage::Upgrades())
 	{
-		const bool bBuilt = World->HasVillageUpgrade(Info.Id);
-		const bool bLocked = Info.Requires != EVillageUpgrade::Count && !World->HasVillageUpgrade(Info.Requires);
+		const bool bBuilt = World->HasVillageUpgrade(Mairie, Info.Id);
+		const bool bLocked = Info.Requires != EVillageUpgrade::Count && !World->HasVillageUpgrade(Mairie, Info.Requires);
 		const uint8 Id = static_cast<uint8>(Info.Id);
 		TSharedRef<SWidget> Action = bBuilt
 			? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("VillageBuilt", "✓ Construit")).Font(Font(12, true)).ColorAndOpacity(Leaf))

@@ -275,6 +275,8 @@ void ACelestialSystem::Tick(float DeltaSeconds)
 	}
 	const double Clock = State->GetWorldClock();
 	Weather = State->SampleWeather();
+	// La pluie voile le paysage par degrés : une averse (ou une météo forcée) ne fait pas sauter la brume.
+	RainFog = RainFog < 0.f ? Weather.Rain : FMath::FInterpTo(RainFog, Weather.Rain, DeltaSeconds, 0.25f);
 	// Sous un ciel lourd, le Soleil n'éclaire plus qu'à travers les nuages.
 	UpdateBody(Sun, SunOrbit, SunLux * FMath::Lerp(1.f, 0.42f, Weather.Darkness), Clock);
 	UpdateBody(Usha, UshaOrbit, UshaLux, Clock);
@@ -459,10 +461,12 @@ void ACelestialSystem::UpdateClouds(double WorldClock)
 	{
 		Clouds->SetLayerBottomAltitude(Weather.CloudBase);
 	}
-	// La brume : la pluie la rend plus dense ; au soleil humide, elle se couche dans les creux.
-	Fog->SetFogDensity(0.007f + 0.02f * Weather.Rain + 0.09f * Weather.Mist);
-	Fog->SetFogHeightFalloff(FMath::Lerp(0.15f, 0.6f, Weather.Mist));
-	Fog->SetStartDistance(FMath::Lerp(5000.f, 300.f, FMath::Max(Weather.Mist, Weather.Rain * 0.6f)));
+	// La brume : la pluie l'épaissit, jusqu'au premier plan et assez haut pour noyer les montagnes au loin
+	// (sans tout blanchir : à pleine averse, on voit encore à deux cents mètres) ; au soleil humide,
+	// elle se couche dans les creux.
+	Fog->SetFogDensity(0.007f + 0.045f * RainFog + 0.09f * Weather.Mist);
+	Fog->SetFogHeightFalloff(FMath::Lerp(FMath::Lerp(0.15f, 0.1f, RainFog), 0.6f, Weather.Mist));
+	Fog->SetStartDistance(FMath::Lerp(5000.f, 300.f, FMath::Max(Weather.Mist, RainFog * 0.85f)));
 	SkyLight->SetIntensity(FMath::Lerp(1.3f, 1.05f, Weather.Darkness));
 	// Un ciel chargé coûte cher à calculer : on échantillonne les nuages un peu moins finement.
 	const UErewhonUserSettings* User = UErewhonUserSettings::Get();

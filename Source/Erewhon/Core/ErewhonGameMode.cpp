@@ -31,6 +31,7 @@
 #include "World/FelledTree.h"
 #include "World/Bhurak.h"
 #include "World/DroppedItem.h"
+#include "World/VillageNetwork.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonGameMode"
 
@@ -74,12 +75,18 @@ void AErewhonGameMode::InitGameState()
 
 	AErewhonGameState* State = GetGameState<AErewhonGameState>();
 	State->InitializeWorld(WorldSave->WorldSeed, WorldSave->WorldAge);
-	int32 Village = WorldSave->VillageUpgrades;
+	for (const FSavedVillage& Saved : WorldSave->Villages)
+	{
+		State->SetVillageUpgrades(Saved.Village, Saved.Upgrades);
+	}
 #if !UE_BUILD_SHIPPING
-	// -ErewhonVillage=<masque> : tests, le village avec ces améliorations (-1 : toutes).
-	FParse::Value(FCommandLine::Get(), TEXT("ErewhonVillage="), Village);
+	// -ErewhonVillage=<masque> : tests, le village de départ avec ces améliorations (-1 : toutes).
+	int32 TestUpgrades = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ErewhonVillage="), TestUpgrades))
+	{
+		State->SetVillageUpgrades(ErewhonVillages::StartVillage, TestUpgrades);
+	}
 #endif
-	State->SetVillageUpgrades(Village);
 	FIntPoint Disowned(TNumericLimits<int32>::Max());
 #if !UE_BUILD_SHIPPING
 	FString Disown, DisownX, DisownY;
@@ -128,10 +135,10 @@ void AErewhonGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Les portes des cabanes sont des acteurs répliqués : leur état est partagé par tous.
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	SpawnDoors();
+	// Les portes des cabanes et les habitants sont des acteurs répliqués : leur état est partagé par tous.
+	// Ceux d'un village viennent quand un joueur en approche (voir StreamVillageActors).
+	StreamVillageActors();
+	GetWorldTimerManager().SetTimer(VillageStreamTimer, this, &AErewhonGameMode::StreamVillageActors, 1.f, true);
 	SpawnSavedObjects();
 	// Les apothicaireries construites, avec leur feu tel qu'on l'a laissé.
 	for (const FSectorOwnerEntry& Entry : GetGameState<AErewhonGameState>()->GetOwnerEntries())
@@ -153,38 +160,124 @@ void AErewhonGameMode::BeginPlay()
 		UErewhonSettings::Get().AutosaveIntervalSeconds, true);
 }
 
-void AErewhonGameMode::SpawnDoors()
+void AErewhonGameMode::StreamVillageActors()
 {
+	// Les villages à moins de quatre secteurs d'un joueur (les habitants s'y promènent jusqu'à un secteur et
+	// demi de la place) ; repartis au-delà de cinq. Les cabanes, locales, sont chargées plus loin (voir
+	// AErewhonGameState::StreamVillages) : la porte arrive toujours dans une cabane déjà là.
+	constexpr int32 LoadRadius = 4;
+	constexpr int32 KeepRadius = 5;
+	TArray<FIntPoint> Focus;
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		const APlayerController* Player = It->Get();
+		if (const APawn* Pawn = Player ? Player->GetPawn() : nullptr)
+		{
+			Focus.Add(ErewhonSector::FromWorld(Pawn->GetActorLocation()));
+		}
+	}
+	TSet<FIntPoint> Wanted;
+	for (const FIntPoint& Sector : Focus)
+	{
+		TArray<FIntPoint> Near;
+		ErewhonVillages::VillagesIn(Sector - FIntPoint(LoadRadius), Sector + FIntPoint(LoadRadius), Near);
+		Wanted.Append(Near);
+	}
+	for (const FIntPoint& Village : Wanted)
+	{
+		if (!ServerVillages.Contains(Village))
+		{
+			SpawnVillageActors(Village);
+		}
+	}
+	TArray<FIntPoint> Far;
+	for (const TPair<FIntPoint, FServerVillage>& Pair : ServerVillages)
+	{
+		const FIntPoint Center = ErewhonVillages::CenterOf(Pair.Key);
+		const bool bKept = Focus.ContainsByPredicate([&Center](const FIntPoint& Sector)
+		{
+			return FMath::Max(FMath::Abs(Sector.X - Center.X), FMath::Abs(Sector.Y - Center.Y)) <= KeepRadius;
+		});
+		if (!bKept)
+		{
+			Far.Add(Pair.Key);
+		}
+	}
+	for (const FIntPoint& Village : Far)
+	{
+		DespawnVillageActors(Village);
+	}
+}
+
+void AErewhonGameMode::SpawnVillageActors(const FIntPoint& Village)
+{
+	FServerVillage& Streamed = ServerVillages.Add(Village);
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	// Les maisons des habitants : leur porte, et chacun chez soi.
+	for (int32 House = 0; House < ErewhonVillagers::HouseCount; ++House)
+	{
+		const FTransform HouseT = ErewhonVillagers::HouseTransform(Village, House);
+		const FTransform Hinge = FTransform(FVector(-ErewhonSpawn::CabinHalfLength + ErewhonSpawn::CabinWallThickness * 0.5f,
+			-ErewhonSpawn::DoorHalfWidth, ErewhonSpawn::CabinFloorTop)) * HouseT;
+		ADoor* Door = GetWorld()->SpawnActor<ADoor>(Hinge.GetLocation(), Hinge.Rotator(), Params);
+		const FTransform At(HouseT.Rotator(), HouseT.TransformPosition(FVector(60.f, 0.f, ErewhonSpawn::CabinFloorTop + 90.f)));
+		AVillager* Villager = GetWorld()->SpawnActorDeferred<AVillager>(AVillager::StaticClass(), At, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		Villager->ResidentIndex = House;
+		Villager->Village = Village;
+		Villager->HouseDoor = Door;
+		Villager->FinishSpawning(At);
+		Streamed.Residents.Add(Door);
+		Streamed.Residents.Add(Villager);
+	}
+	// Les portes des commerces bâtis.
+	SpawnDoors(Village);
+}
+
+void AErewhonGameMode::DespawnVillageActors(const FIntPoint& Village)
+{
+	FServerVillage Streamed;
+	if (!ServerVillages.RemoveAndCopyValue(Village, Streamed))
+	{
+		return;
+	}
+	TArray<TWeakObjectPtr<AActor>> Actors;
+	Streamed.Doors.GenerateValueArray(Actors);
+	Actors.Append(Streamed.Residents);
+	for (const TWeakObjectPtr<AActor>& Actor : Actors)
+	{
+		if (Actor.IsValid())
+		{
+			Actor->Destroy();
+		}
+	}
+}
+
+void AErewhonGameMode::SpawnDoors(const FIntPoint& Village)
+{
+	FServerVillage* Streamed = ServerVillages.Find(Village);
+	if (!Streamed)
+	{
+		return;   // personne près de ce village : ses portes viendront avec le premier qui en approche
+	}
 	const AErewhonGameState* State = GetGameState<AErewhonGameState>();
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	for (const EShopKind Kind : ErewhonSpawn::ShopKinds)
 	{
-		if (DoorsSpawned.Contains(Kind) || !State->IsShopBuilt(Kind))
+		if (Streamed->Doors.Contains(Kind) || !State->IsShopBuilt(Village, Kind))
 		{
 			continue;
 		}
-		DoorsSpawned.Add(Kind);
-		const FTransform Hinge = ErewhonSpawn::DoorHingeTransform(Kind);
-		GetWorld()->SpawnActor<ADoor>(Hinge.GetLocation(), Hinge.Rotator(), Params);
+		const FTransform Hinge = ErewhonSpawn::DoorHingeTransform(Village, Kind);
+		Streamed->Doors.Add(Kind, GetWorld()->SpawnActor<ADoor>(Hinge.GetLocation(), Hinge.Rotator(), Params));
 	}
-	// Les maisons des habitants : leur porte, et chacun chez soi.
-	if (!bVillagersSpawned)
-	{
-		bVillagersSpawned = true;
-		for (int32 House = 0; House < ErewhonVillagers::HouseCount; ++House)
-		{
-			const FTransform HouseT = ErewhonVillagers::HouseTransform(House);
-			const FTransform Hinge = FTransform(FVector(-ErewhonSpawn::CabinHalfLength + ErewhonSpawn::CabinWallThickness * 0.5f,
-				-ErewhonSpawn::DoorHalfWidth, ErewhonSpawn::CabinFloorTop)) * HouseT;
-			ADoor* Door = GetWorld()->SpawnActor<ADoor>(Hinge.GetLocation(), Hinge.Rotator(), Params);
-			const FTransform At(HouseT.Rotator(), HouseT.TransformPosition(FVector(60.f, 0.f, ErewhonSpawn::CabinFloorTop + 90.f)));
-			AVillager* Villager = GetWorld()->SpawnActorDeferred<AVillager>(AVillager::StaticClass(), At, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-			Villager->ResidentIndex = House;
-			Villager->HouseDoor = Door;
-			Villager->FinishSpawning(At);
-		}
-	}
+}
+
+FIntPoint AErewhonGameMode::PlayerVillage(const AController* Controller) const
+{
+	const APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+	return Pawn ? ErewhonSpawn::VillageAt(Pawn->GetActorLocation()) : ErewhonVillages::StartVillage;
 }
 
 void AErewhonGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -202,7 +295,14 @@ void AErewhonGameMode::SaveWorld()
 	}
 
 	WorldSave->WorldAge = State->GetWorldClock();
-	WorldSave->VillageUpgrades = GetGameState<AErewhonGameState>()->GetVillageUpgrades();
+	WorldSave->Villages.Reset();
+	for (const FVillageUpgradesEntry& Entry : State->GetVillageUpgradeEntries())
+	{
+		if (Entry.Upgrades != 0)
+		{
+			WorldSave->Villages.Add({ Entry.Village, Entry.Upgrades });
+		}
+	}
 	CaptureObjects();
 	WorldSave->SectorOwners.Reset();
 	for (const FSectorOwnerEntry& Entry : State->GetOwnerEntries())
@@ -392,7 +492,7 @@ void AErewhonGameMode::RegisterPlayer(AErewhonPlayerController* Controller, cons
 	// -ErewhonTestFountain : un tonneau vide sous le bec de la fontaine de la place.
 	if (FParse::Param(FCommandLine::Get(), TEXT("ErewhonTestFountain")))
 	{
-		const FVector Spot = ErewhonVillage::FountainBarrelSpot();
+		const FVector Spot = ErewhonVillage::FountainBarrelSpot(ErewhonVillages::StartVillage);
 		const FVector At(Spot.X, Spot.Y, ErewhonTerrain::Height(FVector2D(Spot), GetGameState<AErewhonGameState>()->GetWorldSeed()));
 		SpawnStorage(EStorageKind::Barrel, FTransform(At), Key, DisplayName);
 	}
@@ -858,8 +958,9 @@ FText AErewhonGameMode::TryHarvest(AErewhonPlayerController* Controller, const F
 
 bool AErewhonGameMode::IsNearMerchant(const AController* Controller, EShopKind Kind) const
 {
+	// Le commerce du village où se tient le joueur (celui dont la place est la plus proche).
 	const APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
-	return Pawn && FVector::Dist2D(Pawn->GetActorLocation(), ErewhonSpawn::MerchantLocation(Kind))
+	return Pawn && FVector::Dist2D(Pawn->GetActorLocation(), ErewhonSpawn::MerchantLocation(PlayerVillage(Controller), Kind))
 		<= UErewhonSettings::Get().MerchantReach() + 200.f;
 }
 
@@ -872,14 +973,12 @@ FText AErewhonGameMode::TryBuySector(AErewhonPlayerController* Controller, const
 	{
 		return LOCTEXT("ManagerTooFar", "La mairie est trop loin.");
 	}
-	if (!ErewhonSector::IsPurchasable(Sector)
-		|| FMath::Max(FMath::Abs(Sector.X), FMath::Abs(Sector.Y)) > Settings.StoreSectorRadius)
+	// Seule la mairie du village du secteur le vend, relié à son territoire (voir AErewhonGameState::WhyNotBuyable).
+	const FIntPoint Village = ErewhonVillages::NearestVillage(ErewhonSector::FromWorld(Controller->GetPawn()->GetActorLocation()));
+	const FText Why = State->WhyNotBuyable(Sector, Village, PlayerState);
+	if (!Why.IsEmpty())
 	{
-		return LOCTEXT("NotForSale", "Ce secteur n'est pas à vendre.");
-	}
-	if (State->FindSectorOwnerKey(Sector))
-	{
-		return LOCTEXT("AlreadyOwned", "Ce secteur a déjà un propriétaire.");
+		return Why;
 	}
 	if (!PlayerState->SpendCoins(Settings.SectorBuyPrice))
 	{
@@ -1272,12 +1371,13 @@ void AErewhonGameMode::StepCraft(AErewhonPlayerController* Controller)
 
 void AErewhonGameMode::FillAtFountain()
 {
-	const FVector Spot = ErewhonVillage::FountainBarrelSpot();
 	const float Step = ErewhonVillage::FountainLitersPerSecond * 0.25f;
 	for (TActorIterator<AStorageActor> It(GetWorld()); It; ++It)
 	{
+		// Sous le bec de la fontaine de son village (le plus proche).
 		AStorageActor* Barrel = *It;
-		if (Barrel->GetKind() != EStorageKind::Barrel || Barrel->GetCarrier() || FVector::Dist2D(Barrel->GetActorLocation(), Spot) > 80.f
+		if (Barrel->GetKind() != EStorageKind::Barrel || Barrel->GetCarrier()
+			|| FVector::Dist2D(Barrel->GetActorLocation(), ErewhonVillage::FountainBarrelSpot(ErewhonSpawn::VillageAt(Barrel->GetActorLocation()))) > 80.f
 			|| Barrel->GetWater() >= ErewhonPlaceables::WaterBarrelLiters || (Barrel->GetWater() > 0.01f && !Barrel->IsWaterBarrel())
 			|| Barrel->GetSlots().ContainsByPredicate([](const FInventorySlot& Slot) { return !Slot.IsEmpty(); }))
 		{
@@ -1772,10 +1872,12 @@ FText AErewhonGameMode::TrySellSector(AErewhonPlayerController* Controller, cons
 	{
 		return LOCTEXT("ManagerTooFar", "La mairie est trop loin.");
 	}
-	const FString* OwnerKey = State->FindSectorOwnerKey(Sector);
-	if (!OwnerKey || *OwnerKey != PlayerState->GetPlayerKey())
+	// À la mairie de son village, et sans couper du village les secteurs qu'il y relie à la place.
+	const FIntPoint Village = ErewhonVillages::NearestVillage(ErewhonSector::FromWorld(Controller->GetPawn()->GetActorLocation()));
+	const FText Why = State->WhyNotSellable(Sector, Village, PlayerState);
+	if (!Why.IsEmpty())
 	{
-		return LOCTEXT("NotYours", "Ce secteur ne vous appartient pas.");
+		return Why;
 	}
 	State->ClearFieldSector(Sector);
 	State->ClearSectorOwner(Sector);
@@ -1788,9 +1890,9 @@ FText AErewhonGameMode::TrySellSector(AErewhonPlayerController* Controller, cons
 	return FText::GetEmpty();
 }
 
-TOptional<FVector> AErewhonGameMode::FindWorkshopSpot() const
+TOptional<FVector> AErewhonGameMode::FindWorkshopSpot(const FIntPoint& Village) const
 {
-	const FTransform Cabin = ErewhonSpawn::CabinTransform(EShopKind::Workshop);
+	const FTransform Cabin = ErewhonSpawn::CabinTransform(Village, EShopKind::Workshop);
 	const FVector2D HalfSize = ErewhonSpawn::CabinHalfSize(EShopKind::Workshop);
 	// Devant la porte, sur deux rangs, en s'écartant de part et d'autre : la première place libre.
 	for (const float Out : { 480.f, 820.f })
@@ -1818,7 +1920,8 @@ TOptional<FVector> AErewhonGameMode::FindWorkshopSpot() const
 void AErewhonGameMode::DeliverCart(AErewhonPlayerState* PlayerState, FName ItemId, const FVector& Spot)
 {
 	const AErewhonGameState* State = GetGameState<AErewhonGameState>();
-	const float Yaw = ErewhonSpawn::CabinTransform(EShopKind::Workshop).GetRotation().Rotator().Yaw + 90.f;   // en travers, le long de la façade
+	// En travers, le long de la façade de l'atelier du village où on la livre.
+	const float Yaw = ErewhonSpawn::CabinTransform(ErewhonSpawn::VillageAt(Spot), EShopKind::Workshop).GetRotation().Rotator().Yaw + 90.f;
 	const FVector2D Foot(Spot.X, Spot.Y);
 	const FTransform Where(FRotator(0.f, Yaw, 0.f), FVector(Foot, ErewhonTerrain::Height(Foot, State ? State->GetWorldSeed() : 0)));
 	ACart* Cart = GetWorld()->SpawnActorDeferred<ACart>(ACart::StaticClass(), Where);
@@ -1830,12 +1933,14 @@ FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName I
 {
 	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
 	const FItemDef* Def = UItemDatabase::Get(this)->Find(ItemId);
-	if (!PlayerState || !PlayerState->IsRegistered() || !Def || !IsNearMerchant(Controller, GetGameState<AErewhonGameState>()->ShopFor(*Def)))
+	// Les commerces du village où se tient le joueur.
+	const FIntPoint Village = PlayerVillage(Controller);
+	if (!PlayerState || !PlayerState->IsRegistered() || !Def || !IsNearMerchant(Controller, GetGameState<AErewhonGameState>()->ShopFor(Village, *Def)))
 	{
 		return LOCTEXT("TooFar", "Le marchand est trop loin.");
 	}
 	// La même règle que l'étal (voir AErewhonGameState::WhyNotOffered) : commerce, classe, objet déjà à soi.
-	const FText NotOffered = GetGameState<AErewhonGameState>()->WhyNotOffered(*Def, GetGameState<AErewhonGameState>()->ShopFor(*Def), PlayerState);
+	const FText NotOffered = GetGameState<AErewhonGameState>()->WhyNotOffered(Village, *Def, GetGameState<AErewhonGameState>()->ShopFor(Village, *Def), PlayerState);
 	if (!NotOffered.IsEmpty())
 	{
 		return NotOffered;
@@ -1856,7 +1961,7 @@ FText AErewhonGameMode::TryBuyItem(AErewhonPlayerController* Controller, FName I
 	// Charrettes et outils attelés : trop lourds pour les poches, l'atelier les livre devant sa porte.
 	if (ErewhonPlaceables::IsCart(ItemId))
 	{
-		const TOptional<FVector> Spot = FindWorkshopSpot();
+		const TOptional<FVector> Spot = FindWorkshopSpot(Village);
 		if (!Spot.IsSet())
 		{
 			return LOCTEXT("YardFull", "Il n'y a plus de place devant l'atelier : emmenez d'abord ce qui y attend.");
@@ -1904,7 +2009,9 @@ FText AErewhonGameMode::Unstuck(AErewhonPlayerController* Controller)
 		Driven->StopDriving();
 		Character->SetDrivenCart(nullptr);
 	}
-	// Une charrette ou un outil attelé en poche (achetés avant la livraison) : livrés devant l'atelier.
+	// Une charrette ou un outil attelé en poche (achetés avant la livraison) : livrés devant l'atelier,
+	// et l'on se retrouve devant la mairie, du village où l'on est.
+	const FIntPoint Village = PlayerVillage(Controller);
 	if (AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>())
 	{
 		UInventoryComponent* Inventory = PlayerState->GetInventory();
@@ -1913,7 +2020,7 @@ FText AErewhonGameMode::Unstuck(AErewhonPlayerController* Controller)
 		{
 			while (!Slot.IsEmpty() && ErewhonPlaceables::IsCart(Slot.ItemId) && Slot.Count > 0)
 			{
-				const TOptional<FVector> Spot = FindWorkshopSpot();
+				const TOptional<FVector> Spot = FindWorkshopSpot(Village);
 				if (!Spot.IsSet())
 				{
 					break;
@@ -1933,8 +2040,8 @@ FText AErewhonGameMode::Unstuck(AErewhonPlayerController* Controller)
 		}
 	}
 	// Devant la mairie : un peu vers le centre de la place, face au comptoir.
-	const FVector Hall = ErewhonSpawn::MerchantLocation(EShopKind::SectorManager);
-	const FVector2D Toward = (FVector2D(ErewhonSector::Center(FIntPoint::ZeroValue)) - FVector2D(Hall)).GetSafeNormal();
+	const FVector Hall = ErewhonSpawn::MerchantLocation(Village, EShopKind::SectorManager);
+	const FVector2D Toward = (FVector2D(ErewhonSector::Center(ErewhonVillages::CenterOf(Village))) - FVector2D(Hall)).GetSafeNormal();
 	const FVector2D Foot = FVector2D(Hall) + Toward * 350.f;
 	const AErewhonGameState* State = GetGameState<AErewhonGameState>();
 	const float Ground = ErewhonTerrain::Height(Foot, State ? State->GetWorldSeed() : 0);
@@ -1954,12 +2061,13 @@ FText AErewhonGameMode::TrySellItem(AErewhonPlayerController* Controller, FName 
 {
 	AErewhonPlayerState* PlayerState = Controller->GetPlayerState<AErewhonPlayerState>();
 	const FItemDef* Def = UItemDatabase::Get(this)->Find(ItemId);
-	if (!PlayerState || !PlayerState->IsRegistered() || !Def || !IsNearMerchant(Controller, GetGameState<AErewhonGameState>()->ShopFor(*Def)))
+	const FIntPoint Village = PlayerVillage(Controller);
+	if (!PlayerState || !PlayerState->IsRegistered() || !Def || !IsNearMerchant(Controller, GetGameState<AErewhonGameState>()->ShopFor(Village, *Def)))
 	{
 		return LOCTEXT("TooFar", "Le marchand est trop loin.");
 	}
 	const int32 Price = Def->ResalePrice(UErewhonSettings::Get().ResaleRatio);
-	if (!GetGameState<AErewhonGameState>()->BuysBack(*Def, GetGameState<AErewhonGameState>()->ShopFor(*Def)))
+	if (!GetGameState<AErewhonGameState>()->BuysBack(Village, *Def, GetGameState<AErewhonGameState>()->ShopFor(Village, *Def)))
 	{
 		return LOCTEXT("NotBought", "Le marchand n'achète pas cet objet.");
 	}
@@ -2215,13 +2323,15 @@ FText AErewhonGameMode::TryBuyVillageUpgrade(AErewhonPlayerController* Controlle
 	{
 		return FText::GetEmpty();
 	}
+	// L'amélioration du village de cette mairie.
+	const FIntPoint Village = PlayerVillage(Controller);
 	const EVillageUpgrade Upgrade = static_cast<EVillageUpgrade>(UpgradeIndex);
 	const ErewhonVillage::FUpgradeInfo& Info = ErewhonVillage::Info(Upgrade);
-	if (State->HasVillageUpgrade(Upgrade))
+	if (State->HasVillageUpgrade(Village, Upgrade))
 	{
 		return LOCTEXT("AlreadyBuilt", "C'est déjà fait !");
 	}
-	if (Info.Requires != EVillageUpgrade::Count && !State->HasVillageUpgrade(Info.Requires))
+	if (Info.Requires != EVillageUpgrade::Count && !State->HasVillageUpgrade(Village, Info.Requires))
 	{
 		return FText::Format(LOCTEXT("RequiresFirst", "Il faut d'abord : {0}."), ErewhonVillage::Info(Info.Requires).Name);
 	}
@@ -2229,8 +2339,8 @@ FText AErewhonGameMode::TryBuyVillageUpgrade(AErewhonPlayerController* Controlle
 	{
 		return LOCTEXT("NotEnoughCoins", "Pas assez de pièces.");
 	}
-	State->AddVillageUpgrade(Upgrade);
-	SpawnDoors();   // une boutique de plus : sa porte
+	State->AddVillageUpgrade(Village, Upgrade);
+	SpawnDoors(Village);   // une boutique de plus : sa porte
 	SaveWorld();
 	return FText::GetEmpty();
 }
@@ -2248,7 +2358,7 @@ FText AErewhonGameMode::TryBuyPavedLink(AErewhonPlayerController* Controller, co
 	{
 		return LOCTEXT("NotYours", "Ce secteur ne vous appartient pas.");
 	}
-	if (!State->IsVillagePaved())
+	if (!State->IsVillagePaved(ErewhonVillages::NearestVillage(Sector)))
 	{
 		return LOCTEXT("VillageNotPaved", "Le village doit d'abord être pavé.");
 	}

@@ -56,8 +56,8 @@ public:
 	FText TryTakeLogs(AErewhonPlayerController* Controller, class AStorageActor* Pile);
 	/** Poser des objets au sol à un endroit (le propriétaire du terrain les ramasse), pour LifeSeconds. */
 	void DropAt(const FVector& Where, FName ItemId, int32 Count, double LifeSeconds, bool bMerge = true);
-	/** Une place libre devant l'atelier, pour y livrer une charrette ou un outil attelé. */
-	TOptional<FVector> FindWorkshopSpot() const;
+	/** Une place libre devant l'atelier d'un village, pour y livrer une charrette ou un outil attelé. */
+	TOptional<FVector> FindWorkshopSpot(const FIntPoint& Village) const;
 	void DeliverCart(class AErewhonPlayerState* PlayerState, FName ItemId, const FVector& Spot);
 
 	// Les liquides (2 L/s d'un récipient à l'autre)
@@ -134,15 +134,33 @@ public:
 	void SaveWorld();
 
 private:
+	/** Près du marchand de ce commerce, dans le village où se tient le joueur ? */
 	bool IsNearMerchant(const AController* Controller, EShopKind Kind) const;
+	/** Le village où se tient le joueur : celui dont la place est la plus proche (le village de départ sans pawn). */
+	FIntPoint PlayerVillage(const AController* Controller) const;
 	void CapturePlayer(const AErewhonPlayerState* PlayerState);
-	/** Les portes des cabanes, dont celle du tailleur une fois construit. */
-	void SpawnDoors();
+
+	/**
+	 * Les acteurs répliqués d'un village (portes des cabanes et des maisons, habitants) : posés quand un joueur
+	 * en approche, repris quand tous sont loin. Les cabanes elles-mêmes sont locales (AErewhonGameState).
+	 */
+	void StreamVillageActors();
+	void SpawnVillageActors(const FIntPoint& Village);
+	void DespawnVillageActors(const FIntPoint& Village);
+	/** Les portes des commerces bâtis d'un village chargé, dont celle du tailleur une fois construit. */
+	void SpawnDoors(const FIntPoint& Village);
+	struct FServerVillage
+	{
+		TMap<EShopKind, TWeakObjectPtr<AActor>> Doors;
+		/** Les habitants et les portes de leurs maisons. */
+		TArray<TWeakObjectPtr<AActor>> Residents;
+	};
+	TMap<FIntPoint, FServerVillage> ServerVillages;
+	FTimerHandle VillageStreamTimer;
 	void SpawnSavedObjects();
 	void CaptureObjects();
 	/** Un joueur qui part lâche ce qu'il porte et la charrette qu'il conduit. */
 	void ReleaseHeld(APawn* Pawn);
-	TSet<EShopKind> DoorsSpawned;
 
 	class AApothecary* SpawnApothecary(const FIntPoint& Sector, double FireUntil);
 	/**
@@ -168,7 +186,6 @@ private:
 	void SpawnBranches(class AFelledTree* Felled);
 	/** Les coups déjà donnés à chaque arbre, et l'heure du dernier coup de chacun. */
 	TMap<TPair<FIntPoint, int32>, int32> TreeHits;
-	bool bVillagersSpawned = false;
 	TMap<TWeakObjectPtr<AErewhonPlayerController>, double> LastAxeHit;
 	FText FinishScythe(AErewhonPlayerController* Controller);
 	void ReportResultTo(AErewhonPlayerController* Controller, const FText& Error);

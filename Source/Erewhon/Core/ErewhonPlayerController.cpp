@@ -312,6 +312,18 @@ void AErewhonPlayerController::StartAutoShots()
 			bShotHasLocation = true;
 		}
 	}
+	// -ErewhonShotVillage=1,0 : sur la place de ce village (sa cellule), un peu au sud de son centre.
+	FString VillageArg;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ErewhonShotVillage="), VillageArg, false))
+	{
+		FString X, Y;
+		if (VillageArg.Split(TEXT(","), &X, &Y))
+		{
+			ShotVillage = FIntPoint(FCString::Atoi(*X), FCString::Atoi(*Y));
+			bShotAtVillage = true;
+			bShotHasLocation = true;
+		}
+	}
 	float Delay = 35.f;
 	FParse::Value(FCommandLine::Get(), TEXT("ErewhonShotDelay="), Delay);
 
@@ -335,6 +347,12 @@ void AErewhonPlayerController::NextAutoShot()
 		// Étape 1 : se placer et orienter le regard, puis laisser l'image se stabiliser.
 		if (APawn* MyPawn = GetPawn(); MyPawn && bShotHasLocation)
 		{
+			if (bShotAtVillage)
+			{
+				// La graine n'est connue qu'une fois le monde chargé : la place se calcule au moment de la capture.
+				ShotLocation = ErewhonSector::Center(ErewhonVillages::CenterOf(ShotVillage)) + FVector(-1500.f, 0.f, 0.f);
+				ShotLocation.Z = 0.f;
+			}
 			const AErewhonGameState* State = AErewhonGameState::Get(this);
 			const float Ground = State ? ErewhonTerrain::Height(FVector2D(ShotLocation), State->GetWorldSeed()) : 0.f;
 			MyPawn->TeleportTo(ShotLocation + FVector(0, 0, Ground + 120.f), FRotator(0, ShotYaws[Shot], 0));
@@ -346,7 +364,7 @@ void AErewhonPlayerController::NextAutoShot()
 			else if (ShotMenu == TEXT("sectors")) { OpenStore(EShopKind::SectorManager); }
 			else if (ShotMenu == TEXT("tailor")) { OpenStore(EShopKind::Tailor); }
 			else if (ShotMenu == TEXT("cheats")) { OpenCheats(); }
-			else if (ShotMenu == TEXT("village")) { StoreKind = EShopKind::SectorManager; ShowMenu(SNew(SStorePanel).Controller(this).Kind(EShopKind::SectorManager).bVillageTab(true), true); }
+			else if (ShotMenu == TEXT("village")) { StoreKind = EShopKind::SectorManager; StoreVillage = GetPawn() ? ErewhonSpawn::VillageAt(GetPawn()->GetActorLocation()) : FIntPoint::ZeroValue; ShowMenu(SNew(SStorePanel).Controller(this).Kind(EShopKind::SectorManager).bVillageTab(true), true); }
 			else if (ShotMenu == TEXT("inventory")) { ToggleInventory(); }
 			else if (ShotMenu == TEXT("split")) { ToggleInventory(); if (OpenMenu.IsValid() || PendingMenu.IsValid()) { StaticCastSharedPtr<SInventoryPanel>(OpenMenu.IsValid() ? OpenMenu : PendingMenu)->TestSplitChooser(); } }
 			else if (ShotMenu == TEXT("breeder")) { OpenStore(EShopKind::Breeder); }
@@ -615,6 +633,8 @@ void AErewhonPlayerController::OpenCheats()
 void AErewhonPlayerController::OpenStore(EShopKind Kind)
 {
 	StoreKind = Kind;
+	// Le commerce du village où l'on se tient : c'est son étal (ses boutiques bâties) qui s'ouvre.
+	StoreVillage = GetPawn() ? ErewhonSpawn::VillageAt(GetPawn()->GetActorLocation()) : FIntPoint::ZeroValue;
 	ShowMenu(SNew(SStorePanel).Controller(this).Kind(Kind), true);
 }
 
@@ -897,7 +917,7 @@ void AErewhonPlayerController::PlayerTick(float DeltaTime)
 		CloseMenu();
 	}
 	if (bStoreOpen && OpenMenu.IsValid() && MyPawn
-		&& FVector::Dist2D(MyPawn->GetActorLocation(), ErewhonSpawn::MerchantLocation(StoreKind)) > UErewhonSettings::Get().MerchantReach() + 150.f)
+		&& FVector::Dist2D(MyPawn->GetActorLocation(), ErewhonSpawn::MerchantLocation(StoreVillage, StoreKind)) > UErewhonSettings::Get().MerchantReach() + 150.f)
 	{
 		CloseMenu();
 	}

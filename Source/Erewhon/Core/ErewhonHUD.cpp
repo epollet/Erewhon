@@ -18,6 +18,7 @@
 #include "EngineUtils.h"
 #include "Engine/GameViewportClient.h"
 #include "World/SectorTypes.h"
+#include "World/VillageNetwork.h"
 
 #define LOCTEXT_NAMESPACE "ErewhonHUD"
 
@@ -143,8 +144,10 @@ void AErewhonHUD::DrawHUD()
 		{
 			OwnerText = LOCTEXT("FreeOwner", "libre");
 		}
-		const FText Line = FText::Format(LOCTEXT("SectorLine", "Secteur {0} · {1} · {2}"),
-			FText::FromString(ErewhonSector::ToString(Sector)), ErewhonSector::TypeLabel(Type), OwnerText);
+		// Et le village le plus proche : celui dont on fréquente la place et les boutiques.
+		const FText Line = FText::Format(LOCTEXT("SectorLine", "Secteur {0} · {1} · {2} · {3}"),
+			FText::FromString(ErewhonSector::ToString(Sector)), ErewhonSector::TypeLabel(Type),
+			ErewhonVillages::VillageName(ErewhonVillages::NearestVillage(Sector)), OwnerText);
 		DrawShadowedText(Line.ToString(), 20.f, Y, GTextColor, 0.9f);
 	}
 

@@ -382,7 +382,8 @@ void AErewhonCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 
 void AErewhonCharacter::ServerSit_Implementation(int32 Seat)
 {
-	const TArray<FTransform>& Seats = ErewhonVillage::BenchSeats();
+	// Les bancs du village où l'on est (le banc visé est tout près).
+	const TArray<FTransform> Seats = ErewhonVillage::BenchSeats(ErewhonSpawn::VillageAt(GetActorLocation()));
 	if (!Seats.IsValidIndex(Seat) || FVector::Dist2D(GetActorLocation(), Seats[Seat].GetLocation()) > 350.f)
 	{
 		return;
@@ -397,7 +398,14 @@ void AErewhonCharacter::ServerStand_Implementation()
 	{
 		return;
 	}
-	const FTransform Seat = ErewhonVillage::BenchSeats()[SeatIndex];
+	const TArray<FTransform> Seats = ErewhonVillage::BenchSeats(ErewhonSpawn::VillageAt(GetActorLocation()));
+	if (!Seats.IsValidIndex(SeatIndex))
+	{
+		SeatIndex = INDEX_NONE;
+		ApplySeat();
+		return;
+	}
+	const FTransform Seat = Seats[SeatIndex];
 	SeatIndex = INDEX_NONE;
 	ApplySeat();
 	// On se relève devant le banc.
@@ -414,9 +422,11 @@ void AErewhonCharacter::ApplySeat()
 	// Assis : immobile, le bassin sur le siège, les jambes tendues vers l'avant.
 	bStandRequested = false;
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
-	if (SeatIndex != INDEX_NONE && ErewhonVillage::BenchSeats().IsValidIndex(SeatIndex))
+	// Assis, on est au banc : son village est celui où l'on se trouve.
+	const TArray<FTransform> Seats = ErewhonVillage::BenchSeats(ErewhonSpawn::VillageAt(GetActorLocation()));
+	if (SeatIndex != INDEX_NONE && Seats.IsValidIndex(SeatIndex))
 	{
-		const FTransform Seat = ErewhonVillage::BenchSeats()[SeatIndex];
+		const FTransform Seat = Seats[SeatIndex];
 		Movement->DisableMovement();
 		const float SeatedZ = AnimatedBody ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() - 45.f : 14.f;
 		SetActorLocationAndRotation(Seat.GetLocation() + FVector(0.f, 0.f, SeatedZ), Seat.Rotator());

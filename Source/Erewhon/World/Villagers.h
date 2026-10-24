@@ -15,7 +15,8 @@ struct FClearing;
  * Les habitants du village : trois maisons au bord des routes, juste après la place, et leurs propriétaires,
  * qui vont et viennent chez eux puis sortent se promener (la place, le marché, les routes du village).
  * Et le marché : une grande place de terre au nord-est, avec ses étals.
- * Tout est en coordonnées monde, déduit de la place : le serveur et chaque client le calculent à l'identique.
+ * Chaque village a les siens, au même plan (dans son repère, voir ErewhonVillages::VillageFrame). Tout est rendu
+ * en coordonnées monde, déduit de la place : le serveur et chaque client le calculent à l'identique.
  */
 namespace ErewhonVillagers
 {
@@ -30,25 +31,24 @@ namespace ErewhonVillagers
 	EREWHON_API const FResident& Resident(int32 Index);
 
 	/** La maison (la porte côté −X du repère, vers la route), son perron, et où son sentier rejoint la route. */
-	EREWHON_API FTransform HouseTransform(int32 Index);
-	EREWHON_API FVector2D Doorstep(int32 Index);
-	EREWHON_API FVector2D LaneEnd(int32 Index);
-	/** La route que longe la maison : nord (+X), est (+Y), ouest (−Y). */
-	EREWHON_API FVector2D RoadDir(int32 Index);
+	EREWHON_API FTransform HouseTransform(const FIntPoint& Village, int32 Index);
+	EREWHON_API FVector2D Doorstep(const FIntPoint& Village, int32 Index);
+	EREWHON_API FVector2D LaneEnd(const FIntPoint& Village, int32 Index);
+	/** La route que longe la maison (en monde) : nord (+X), est (+Y), ouest (−Y) du repère du village. */
+	EREWHON_API FVector2D RoadDir(const FIntPoint& Village, int32 Index);
 
 	/** Le marché : son centre, son rayon, ses étals (repère : comptoir face à −X, vers le centre). */
-	EREWHON_API FVector2D MarketCenter();
+	EREWHON_API FVector2D MarketCenter(const FIntPoint& Village);
 	constexpr float MarketRadius = 1300.f;
 	constexpr int32 StallCount = 6;
-	EREWHON_API FTransform StallTransform(int32 Index);
+	EREWHON_API FTransform StallTransform(const FIntPoint& Village, int32 Index);
 	/** Où le chemin du marché quitte la route du nord. */
-	EREWHON_API FVector2D MarketJunction();
+	EREWHON_API FVector2D MarketJunction(const FIntPoint& Village);
+	/** Où l'on entre sur le marché par son chemin (son bord, côté route). */
+	EREWHON_API FVector2D MarketEntry(const FIntPoint& Village);
 
 	/** La terre et les sentiers des maisons et du marché, pour le secteur Coord (ajoutés à Clearings et Paths). */
 	EREWHON_API void AddGrounds(const FIntPoint& Coord, TArray<FClearing>& Clearings, TArray<FBox2D>& Paths, TArray<bool>& Paved);
-
-	/** Le sol est aplani autour : 0 tout près, 1 loin (voir ErewhonTerrain). */
-	EREWHON_API float FlattenFactor(const FVector2D& World);
 }
 
 /**
@@ -73,6 +73,10 @@ public:
 	/** À régler avant BeginPlay. */
 	UPROPERTY(Replicated)
 	int32 ResidentIndex = 0;
+
+	/** Son village (sa cellule, voir ErewhonVillages), à régler avant BeginPlay. */
+	UPROPERTY(Replicated)
+	FIntPoint Village = FIntPoint::ZeroValue;
 
 	/** La porte de sa maison (serveur), qu'il ouvre en passant. */
 	TWeakObjectPtr<ADoor> HouseDoor;

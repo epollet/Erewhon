@@ -198,12 +198,13 @@ namespace ErewhonApothecary
 				return Side;
 			}
 		}
-		// Loin des routes : la porte regarde vers le village.
-		if (FMath::Abs(Sector.X) >= FMath::Abs(Sector.Y))
+		// Loin des routes : la porte regarde vers le village le plus proche.
+		const FIntPoint Away = Sector - ErewhonVillages::CenterOf(ErewhonVillages::NearestVillage(Sector));
+		if (FMath::Abs(Away.X) >= FMath::Abs(Away.Y))
 		{
-			return Sector.X > 0 ? 1 : 0;
+			return Away.X > 0 ? 1 : 0;
 		}
-		return Sector.Y > 0 ? 3 : 2;
+		return Away.Y > 0 ? 3 : 2;
 	}
 
 	FTransform HouseTransform(const FIntPoint& Sector, int32 WorldSeed)

@@ -159,8 +159,22 @@ struct TStructOpsTypeTraits<FFieldArray> : public TStructOpsTypeTraitsBase2<FFie
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnFieldChanged, const FIntPoint& /*Sector*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnPlantHarvestChanged, const FIntPoint& /*Sector*/, int32 /*PlantIndex*/, bool /*bHarvested*/);
+/** Les améliorations achetées à la mairie d'un village (un bit par EVillageUpgrade). */
+USTRUCT()
+struct FVillageUpgradesEntry
+{
+	GENERATED_BODY()
+
+	/** Le village : sa cellule (voir ErewhonVillages), pas le secteur de sa place. */
+	UPROPERTY()
+	FIntPoint Village = FIntPoint::ZeroValue;
+
+	UPROPERTY()
+	int32 Upgrades = 0;
+};
+
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnSectorOwnerChanged, const FIntPoint& /*Sector*/);
-DECLARE_MULTICAST_DELEGATE(FOnVillageChanged);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnVillageChanged, const FIntPoint& /*Village*/);
 struct FItemDef;
 class AErewhonPlayerState;
 
@@ -210,25 +224,57 @@ public:
 	FString GetSectorOwnerName(const FIntPoint& Sector) const;
 	TArray<FIntPoint> GetSectorsOwnedBy(const FString& PlayerKey) const;
 
-	// ── Village ──
+	// ── Territoire des villages ──
+	// Chaque secteur appartient pour toujours au même village (ErewhonVillages::VillageOf), qu'il soit libre
+	// ou acheté ; seule sa mairie le vend. Un secteur acheté doit rester relié à la place de son village :
+	// accolé (côté contre côté) à un secteur acheté du même village, ou touchant la place, coins compris
+	// (ses quatre côtés sont des routes). Une seule source de vérité pour la carte du maire et le serveur.
 
-	bool HasVillageUpgrade(EVillageUpgrade Upgrade) const { return (VillageUpgrades & (1 << static_cast<int32>(Upgrade))) != 0; }
-	int32 GetVillageUpgrades() const { return VillageUpgrades; }
-	bool IsVillagePaved() const { return HasVillageUpgrade(EVillageUpgrade::PavedCenter) && HasVillageUpgrade(EVillageUpgrade::PavedVillage); }
-
-	/** Le commerce qui vend et rachète cet objet (les vêtements chez le tailleur seulement, la charrette au General Store tant que l'atelier n'est pas là). */
-	EShopKind ShopFor(const FItemDef& Item) const;
+	/** Le village du secteur, fixe (voir ErewhonVillages::VillageOf). */
+	FIntPoint GetSectorVillage(const FIntPoint& Sector) const;
+	/** Le territoire d'un village : sa place et les secteurs achetés à sa mairie. */
+	bool IsVillageTerritory(const FIntPoint& Sector, const FIntPoint& Village) const;
+	/** Ce secteur touche-t-il le territoire du village : la place, coins compris, ou un secteur du village par un côté ? */
+	bool BordersVillageTerritory(const FIntPoint& Sector, const FIntPoint& Village) const;
 	/**
-	 * Pourquoi ce commerce ne propose pas l'objet à ce joueur (vide : il le lui propose) : pas sa marchandise,
+	 * Pourquoi ce joueur ne peut acheter ce secteur à la mairie de ce village (vide : il le peut) : public,
+	 * déjà à quelqu'un, du ressort d'une autre mairie, pas relié au village. Les pièces n'y comptent pas :
+	 * la carte grise le bouton faute d'argent, le serveur refuse.
+	 */
+	FText WhyNotBuyable(const FIntPoint& Sector, const FIntPoint& Village, const AErewhonPlayerState* Player) const;
+	bool IsBuyable(const FIntPoint& Sector, const FIntPoint& Village, const AErewhonPlayerState* Player) const { return WhyNotBuyable(Sector, Village, Player).IsEmpty(); }
+	/** Pourquoi ce joueur ne peut revendre ce secteur à la mairie de ce village (vide : il le peut) : pas à lui, autre mairie, il couperait le village. */
+	FText WhyNotSellable(const FIntPoint& Sector, const FIntPoint& Village, const AErewhonPlayerState* Player) const;
+	bool IsSellable(const FIntPoint& Sector, const FIntPoint& Village, const AErewhonPlayerState* Player) const { return WhyNotSellable(Sector, Village, Player).IsEmpty(); }
+	/** Sans ce secteur, les autres secteurs du village restent-ils tous reliés à sa place ? */
+	bool KeepsVillageConnected(const FIntPoint& Removed, const FIntPoint& Village) const;
+
+	// ── Village ──
+	// Chaque village a ses améliorations, achetées à sa mairie (un village est désigné par sa cellule, voir
+	// ErewhonVillages). Celui d'un joueur à un comptoir : ErewhonSpawn::VillageAt(sa position).
+
+	int32 GetVillageUpgrades(const FIntPoint& Village) const;
+	bool HasVillageUpgrade(const FIntPoint& Village, EVillageUpgrade Upgrade) const { return (GetVillageUpgrades(Village) & (1 << static_cast<int32>(Upgrade))) != 0; }
+	bool IsVillagePaved(const FIntPoint& Village) const { return HasVillageUpgrade(Village, EVillageUpgrade::PavedCenter) && HasVillageUpgrade(Village, EVillageUpgrade::PavedVillage); }
+	/** Les villages qui ont au moins une amélioration (pour la sauvegarde). */
+	const TArray<FVillageUpgradesEntry>& GetVillageUpgradeEntries() const { return VillageUpgrades; }
+
+	/**
+	 * Le commerce de ce village qui vend et rachète cet objet (les vêtements chez le tailleur seulement, la charrette
+	 * au General Store tant que l'atelier n'est pas là).
+	 */
+	EShopKind ShopFor(const FIntPoint& Village, const FItemDef& Item) const;
+	/**
+	 * Pourquoi ce commerce du village ne propose pas l'objet à ce joueur (vide : il le lui propose) : pas sa marchandise,
 	 * boutique pas bâtie, réservé à une autre classe, objet unique déjà à lui. Seules les pièces n'y comptent pas :
 	 * l'étal ne montre que ce qui est proposé (bouton grisé faute d'argent), le serveur refuse le reste.
 	 */
-	FText WhyNotOffered(const FItemDef& Item, EShopKind Shop, const AErewhonPlayerState* Player) const;
-	bool IsOfferedTo(const FItemDef& Item, EShopKind Shop, const AErewhonPlayerState* Player) const { return WhyNotOffered(Item, Shop, Player).IsEmpty(); }
-	/** Ce commerce rachète-t-il cet objet ? */
-	bool BuysBack(const FItemDef& Item, EShopKind Shop) const;
-	/** La boutique est-elle bâtie ? Le tailleur, l'atelier et l'éleveur s'achètent comme améliorations du village. */
-	bool IsShopBuilt(EShopKind Kind) const;
+	FText WhyNotOffered(const FIntPoint& Village, const FItemDef& Item, EShopKind Shop, const AErewhonPlayerState* Player) const;
+	bool IsOfferedTo(const FIntPoint& Village, const FItemDef& Item, EShopKind Shop, const AErewhonPlayerState* Player) const { return WhyNotOffered(Village, Item, Shop, Player).IsEmpty(); }
+	/** Ce commerce du village rachète-t-il cet objet ? */
+	bool BuysBack(const FIntPoint& Village, const FItemDef& Item, EShopKind Shop) const;
+	/** La boutique est-elle bâtie dans ce village ? Le tailleur, l'atelier et l'éleveur s'achètent comme améliorations du village. */
+	bool IsShopBuilt(const FIntPoint& Village, EShopKind Kind) const;
 
 	uint8 GetPavedLinks(const FIntPoint& Sector) const;
 	uint8 GetBuildings(const FIntPoint& Sector) const;
@@ -257,8 +303,8 @@ public:
 	void AddHarvest(const FIntPoint& Sector, int32 PlantIndex, double HarvestTime);
 	void SetSectorOwner(const FIntPoint& Sector, const FString& OwnerKey, const FString& OwnerName, uint8 RoadLinks = 0, uint8 PavedLinks = 0, uint8 Buildings = 0);
 	void AddBuilding(const FIntPoint& Sector, uint8 Building);
-	void SetVillageUpgrades(int32 Upgrades);
-	void AddVillageUpgrade(EVillageUpgrade Upgrade);
+	void SetVillageUpgrades(const FIntPoint& Village, int32 Upgrades);
+	void AddVillageUpgrade(const FIntPoint& Village, EVillageUpgrade Upgrade);
 	void AddPavedLink(const FIntPoint& Sector, int32 Side);
 
 	/** Côtés du secteur reliés à la route par un chemin (0 s'il n'a pas de propriétaire). */
@@ -279,21 +325,44 @@ public:
 private:
 	void PruneHarvests();
 	void SpawnLocalWorldActors();
-	void SpawnCabin(EShopKind Kind);
-	/** Le village a changé : le tailleur s'installe, l'habillage de la place se refait. */
-	void ApplyVillage();
+
+	/**
+	 * Les acteurs locaux des villages (cabanes et marchands, maisons, fontaine, habillage de la place), sur chaque
+	 * machine : chargés quand un joueur approche (les siens sur un client, tous sur le serveur, qui a besoin des
+	 * collisions), jusqu'à l'anneau lointain des secteurs pour qu'on voie les toits de loin ; déchargés plus loin.
+	 */
+	void StreamVillages();
+	void SpawnVillage(const FIntPoint& Village);
+	void DespawnVillage(const FIntPoint& Village);
+	void SpawnCabin(const FIntPoint& Village, EShopKind Kind);
+	/** Le village a changé : le tailleur s'installe, l'habillage de la place se refait (s'il est chargé ici). */
+	void ApplyVillage(const FIntPoint& Village);
 
 	UFUNCTION()
-	void OnRep_Village();
+	void OnRep_Village(const TArray<FVillageUpgradesEntry>& Previous);
 
+	/** Un village qui n'a rien acheté n'y figure pas. */
 	UPROPERTY(ReplicatedUsing = OnRep_Village)
-	int32 VillageUpgrades = 0;
+	TArray<FVillageUpgradesEntry> VillageUpgrades;
 
-	UPROPERTY(Transient) TObjectPtr<AActor> VillageDecor;
-	/** Les boutiques à amélioration déjà construites sur cette machine. */
-	TSet<EShopKind> SpawnedShops;
+	/** Un village chargé sur cette machine : ses acteurs locaux. */
+	struct FLocalVillage
+	{
+		TMap<EShopKind, TWeakObjectPtr<AActor>> Shops;
+		TArray<TWeakObjectPtr<AActor>> Houses;
+		TWeakObjectPtr<AActor> Fountain;
+		TWeakObjectPtr<AActor> Decor;
+	};
+	TMap<FIntPoint, FLocalVillage> LocalVillages;
+	FTimerHandle VillageStreamTimer;
+	/** La graine sous laquelle les villages chargés ont été placés : si elle change, tout se replace. */
+	int32 StreamedSeed = 0;
 
-	UPROPERTY(Replicated)
+	/** Les clients posent la graine des villages et des routes dès qu'elle arrive. */
+	UFUNCTION()
+	void OnRep_WorldSeed();
+
+	UPROPERTY(ReplicatedUsing = OnRep_WorldSeed)
 	int32 WorldSeed = 0;
 
 	/** 0 : météo naturelle ; sinon ErewhonWeather::EKind + 1. Non sauvegardé : une triche de session. */

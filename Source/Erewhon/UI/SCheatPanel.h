@@ -21,21 +21,19 @@ public:
 
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
-	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 
 private:
 	FText ClockText() const;
 	void SetCoins();
 
-	/** Le temps qu'il fait (EKind + 1), 0 si la météo est naturelle et l'état du jeu absent. */
+	/** Le temps qu'il fait (EKind + 1), 0 sans état du jeu ; bOutForced : imposé par la triche. */
 	uint8 CurrentWeather(bool& bOutForced) const;
-	/** Un bouton par type de temps, celui en cours surligné, et « Naturelle » surligné hors triche. */
-	TSharedRef<SWidget> WeatherButtons() const;
+	/** Libellé de la liste déroulante : le temps qu'il fait, naturel ou forcé (suit l'horloge). */
+	FText WeatherLabel() const;
+	/** Le menu de la liste : les sept types de temps puis « Naturelle », le choix en cours surligné. */
+	TSharedRef<SWidget> WeatherChoices();
 
 	TWeakObjectPtr<AErewhonPlayerController> Controller;
 	TSharedPtr<SEditableTextBox> CoinsBox;
-	TSharedPtr<class SBox> WeatherRow;
-	/** Ce que montrent les boutons : on les refait quand le temps change. */
-	uint8 ShownWeather = 0;
-	bool bShownForced = false;
+	TSharedPtr<class SMenuAnchor> WeatherMenu;
 };

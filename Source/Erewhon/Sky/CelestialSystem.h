@@ -103,6 +103,8 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Sky") float CloudCoverageSwing = 0.5f;
 
 	ErewhonWeather::FState Weather;
+	/** La pluie vue par la brume (0 → 1) : Weather.Rain lissé ; négative avant la première image. */
+	float RainFog = -1.f;
 	/** Les noms des réglages du matériau de nuages (orage, couleur). */
 	FName CloudStormParam;
 	FName CloudAlbedoParam;

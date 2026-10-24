@@ -84,9 +84,12 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "World", meta = (ClampMin = 0, ClampMax = 6))
 	int32 SectorRenderDistance = 2;
 
-	/** Nom de la sauvegarde du monde côté serveur. */
+	/**
+	 * Nom de la sauvegarde du monde côté serveur. Les villages en nombre infini font un monde neuf :
+	 * l'ancien monde à un seul village (« World_default ») reste sur le disque, archivé, sans être repris.
+	 */
 	UPROPERTY(Config, EditAnywhere, Category = "World")
-	FString WorldSaveSlot = TEXT("World_default");
+	FString WorldSaveSlot = TEXT("World_villages");
 
 	/** Intervalle entre deux sauvegardes automatiques (s). */
 	UPROPERTY(Config, EditAnywhere, Category = "World", meta = (ClampMin = 10))

@@ -309,6 +309,20 @@ void ASpawnCabin::Tick(float DeltaSeconds)
 	}
 }
 
+void ASpawnCabin::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// Le village s'éloigne (ou la partie s'arrête) : le marchand et la chatte s'en vont avec la boutique.
+	for (const TWeakObjectPtr<AActor>& Companion : Companions)
+	{
+		if (Companion.IsValid())
+		{
+			Companion->Destroy();
+		}
+	}
+	Companions.Reset();
+	Super::EndPlay(EndPlayReason);
+}
+
 void ASpawnCabin::BeginPlay()
 {
 	Super::BeginPlay();
@@ -342,18 +356,19 @@ void ASpawnCabin::BeginPlay()
 		BuildCabin();
 		return;
 	}
-	SetActorTransform(ErewhonSpawn::CabinTransform(Kind));
+	SetActorTransform(ErewhonSpawn::CabinTransform(Village, Kind));
 	Lamp->SetRelativeLocation(FVector(0, 0, GFloorTop + WallHeight - 60.f));
 	BuildCabin();
 
 	// Le marchand se tient derrière son comptoir, face à la porte (−X de la cabane).
-	const FVector MerchantLocation = ErewhonSpawn::MerchantLocation(Kind) + FVector(0, 0, GFloorTop + 90.f);
+	const FVector MerchantLocation = ErewhonSpawn::MerchantLocation(Village, Kind) + FVector(0, 0, GFloorTop + 90.f);
 	const FTransform Spawn(GetActorRotation() + FRotator(0, 180, 0), MerchantLocation);
 	if (AMerchant* Merchant = GetWorld()->SpawnActorDeferred<AMerchant>(AMerchant::StaticClass(), Spawn, this, nullptr,
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
 	{
 		Merchant->Kind = Kind;
 		Merchant->FinishSpawning(Spawn);
+		Companions.Add(Merchant);
 	}
 }
 
@@ -835,6 +850,7 @@ void ASpawnCabin::BuildStoreInterior()
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		if (AShopCat* Cat = GetWorld()->SpawnActor<AShopCat>(GetActorLocation(), FRotator::ZeroRotator, Params))
 		{
+			Companions.Add(Cat);
 			const FVector Origin = GetActorLocation();
 			const auto Spot = [&Origin](const FVector& Local, float Yaw) { return FTransform(FRotator(0.f, Yaw, 0.f), Origin + Local); };
 			Cat->SetSpots({
@@ -855,7 +871,7 @@ void ASpawnCabin::BuildStoreInterior()
 
 FVector ASpawnCabin::AddCounter()
 {
-	const FVector CounterCenter = GetActorTransform().InverseTransformPosition(ErewhonSpawn::MerchantLocation(Kind)) - FVector(120, 0, 0);
+	const FVector CounterCenter = GetActorTransform().InverseTransformPosition(ErewhonSpawn::MerchantLocation(Village, Kind)) - FVector(120, 0, 0);
 	if (UStaticMesh* Counter = LoadGenerated<UStaticMesh>(TEXT("Meshes"), TEXT("SM_counter")))
 	{
 		// Modèle Meshy, grand côté en travers de la pièce, façade vers la porte.
@@ -1049,7 +1065,7 @@ void ASpawnCabin::BuildManagerInterior()
 	const float HL = HalfLength;
 	const float HW = HalfWidth;
 	const float T = GWallThickness;
-	const FVector Merchant = GetActorTransform().InverseTransformPosition(MerchantLocation(Kind));
+	const FVector Merchant = GetActorTransform().InverseTransformPosition(MerchantLocation(Village, Kind));
 
 	// Le bureau aux cartes, entre l'entrée et le gérant.
 	const FVector DeskCenter(Merchant.X - 105.f, 0.f, GFloorTop);

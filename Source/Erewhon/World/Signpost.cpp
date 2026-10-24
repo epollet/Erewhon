@@ -16,6 +16,7 @@
 #include "World/ErewhonVisuals.h"
 #include "World/SpawnLayout.h"
 #include "World/Village.h"
+#include "World/VillageNetwork.h"
 
 using namespace ErewhonVisuals;
 
@@ -246,9 +247,19 @@ namespace ErewhonSigns
 	FArm ShopArm(EShopKind Kind, const FVector& From, float Yaw)
 	{
 		// Les chemins vont à angle droit : la distance à pied est celle « de Manhattan ».
-		const FVector To = ErewhonSpawn::DoorstepLocation(Kind);
+		const FVector To = ErewhonSpawn::DoorstepLocation(ErewhonSpawn::VillageAt(From), Kind);   // le commerce du village où est planté le panneau
 		const float Meters = (FMath::Abs(To.X - From.X) + FMath::Abs(To.Y - From.Y)) / 100.f;
 		const int32 Rounded = FMath::Max(10, FMath::RoundToInt32(Meters / 10.f) * 10);
 		return { FString::Printf(TEXT("%s  %d m"), *ErewhonSpawn::ShopName(Kind), Rounded), Yaw };
+	}
+
+	FArm VillageArm(const FIntPoint& Village, const FVector& From, float Yaw)
+	{
+		// La route ne revient jamais sur ses pas : jusqu'à la place, c'est aussi la distance « de Manhattan ».
+		const FVector To = ErewhonSector::Center(ErewhonVillages::CenterOf(Village));
+		const float Km = (FMath::Abs(To.X - From.X) + FMath::Abs(To.Y - From.Y)) / 100000.f;
+		FString Distance = FString::Printf(TEXT("%.1f km"), FMath::Max(0.1f, Km));
+		Distance.ReplaceInline(TEXT("."), TEXT(","));
+		return { FString::Printf(TEXT("%s  %s"), *ErewhonVillages::VillageName(Village).ToString(), *Distance), Yaw };
 	}
 }

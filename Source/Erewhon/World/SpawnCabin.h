@@ -74,11 +74,16 @@ public:
 	ASpawnCabin();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
 
 	/** À régler avant BeginPlay (SpawnActorDeferred). */
 	UPROPERTY(EditAnywhere)
 	EShopKind Kind = EShopKind::GeneralStore;
+
+	/** Commerce de la place : son village (sa cellule, voir ErewhonVillages), à régler avant BeginPlay. */
+	UPROPERTY(EditAnywhere)
+	FIntPoint Village = FIntPoint::ZeroValue;
 
 	/** Apothicairerie : avec sa remise, à droite (+Y), où l'on passe par une porte à la place de la fenêtre. */
 	UPROPERTY(EditAnywhere)
@@ -124,6 +129,9 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UPointLightComponent>> ShadowLamps;
 	bool bLampShadows = false;
+
+	/** Le marchand et la chatte de la boutique : des acteurs à part, qui partent avec elle. */
+	TArray<TWeakObjectPtr<AActor>> Companions;
 
 	/** Rotation du comptoir généré pour que sa façade regarde la porte. */
 	UPROPERTY(EditAnywhere)

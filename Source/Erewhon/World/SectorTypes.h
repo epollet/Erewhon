@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "World/VillageNetwork.h"
 #include "SectorTypes.generated.h"
 
 /** Types de secteur. */
@@ -8,9 +9,9 @@ UENUM(BlueprintType)
 enum class ESectorType : uint8
 {
 	Undefined,
-	Spawn,    // secteur 0:0 — place du village et ses commerces, n'appartient à aucun joueur
+	Spawn,    // place d'un village (0:0 : celui de départ) et ses commerces, n'appartient à aucun joueur
 	Prairie,
-	Road,     // prolonge les chemins du marchand vers les quatre horizons ; jamais à vendre
+	Road,     // route d'un village à ses quatre voisins (voir ErewhonVillages) ; jamais à vendre
 	Edge,     // lisière de forêt : quelques arbres, plus d'arbustes ; borde la forêt (prairie d'un côté)
 	Forest,   // forêt : beaucoup d'arbres, des champignons ; entourée de lisière
 };
@@ -59,11 +60,11 @@ namespace ErewhonSector
 
 	EREWHON_API FText TypeLabel(ESectorType Type);
 
-	/** Le spawn appartient au marchand et les routes à tous : ni l'un ni les autres ne se vendent (prairie, lisière et forêt, si). */
+	/** Les places des villages et les routes sont à tous : ni les unes ni les autres ne se vendent (prairie, lisière et forêt, si). */
 	EREWHON_API bool IsPurchasable(const FIntPoint& Sector);
 
-	/** Secteur traversé par une route : sur l'un des deux axes du marchand, hors spawn. */
-	inline bool IsRoad(const FIntPoint& Sector) { return (Sector.X == 0) != (Sector.Y == 0); }
+	/** Secteur traversé par une route entre deux villages, places exclues. */
+	inline bool IsRoad(const FIntPoint& Sector) { return ErewhonVillages::IsRoad(Sector); }
 
 	/** Les quatre côtés d'un secteur, dans l'ordre des bits des améliorations : nord, sud, est, ouest. */
 	inline const FIntPoint Sides[4] = { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) };

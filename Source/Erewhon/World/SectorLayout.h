@@ -54,6 +54,25 @@ struct FClearing
 	bool bPaved = false;
 };
 
+/**
+ * Un chemin courbe (la route qui serpente, un chemin d'accès qui la rejoint) : son axe, une ligne
+ * brisée assez fine pour paraître lisse (en monde), et sa demi-largeur.
+ */
+struct EREWHON_API FPathCurve
+{
+	TArray<FVector2D> Points;
+	float HalfWidth = 0.f;
+	bool bPaved = false;
+	/** L'emprise du chemin (axe élargi de HalfWidth) : pour écarter d'emblée les points loin de lui. */
+	FBox2D Bounds = FBox2D(ForceInit);
+
+	FPathCurve() = default;
+	FPathCurve(TArray<FVector2D> InPoints, float InHalfWidth, bool bInPaved = false);
+
+	/** Distance signée (cm) au chemin : négative à l'intérieur. */
+	float SignedDistance(const FVector2D& World) const;
+};
+
 /** Un carrefour où planter un panneau indicateur (chemin d'accès qui rejoint la route). */
 struct FSignpostSpot
 {
@@ -84,6 +103,9 @@ struct EREWHON_API FSectorLayout
 
 	/** Pour chaque chemin : pavé (améliorations du village ou chemin d'accès pavé). */
 	TArray<bool> PathPaved;
+
+	/** Chemins courbes : la route hors des villages, les chemins d'accès qui la rejoignent. */
+	TArray<FPathCurve> Curves;
 
 	/**
 	 * Plantes recouvertes par un chemin d'accès tracé après coup (achat d'un secteur), ou par

@@ -427,12 +427,15 @@ void ASector::BuildSignposts()
 {
 	// Aux carrefours de la route : la direction et la distance de chaque commerce (amélioration
 	// « panneaux »), et une lanterne au coin d'en face (amélioration « lanternes »).
+	// Ceux du village le plus proche, s'il est assez près pour que la route soit la sienne.
 	const AErewhonGameState* State = AErewhonGameState::Get(this);
-	const bool bSigns = State && State->HasVillageUpgrade(EVillageUpgrade::Signposts);
-	const bool bLanterns = State && State->HasVillageUpgrade(EVillageUpgrade::Lanterns);
+	FIntPoint HomeVillage;
+	const bool bInVillage = ErewhonVillage::IsInVillage(Layout->Coord, &HomeVillage);
+	const bool bSigns = State && State->HasVillageUpgrade(HomeVillage, EVillageUpgrade::Signposts);
+	const bool bLanterns = State && State->HasVillageUpgrade(HomeVillage, EVillageUpgrade::Lanterns);
 	for (const FSignpostSpot& Spot : Layout->Signposts)
 	{
-		if (!ErewhonVillage::IsInVillage(Layout->Coord))
+		if (!bInVillage)
 		{
 			continue;
 		}
@@ -450,12 +453,72 @@ void ASector::BuildSignposts()
 		TArray<ErewhonSigns::FArm> Arms;
 		for (const EShopKind Kind : ErewhonSpawn::ShopKinds)
 		{
-			if (State->IsShopBuilt(Kind))
+			if (State->IsShopBuilt(HomeVillage, Kind))
 			{
 				Arms.Add(ErewhonSigns::ShopArm(Kind, Spot.Location, Yaw));
 			}
 		}
 		ErewhonSigns::AddSignpost(this, Root, Spot.Location - GetActorLocation(), Arms, bLanterns);
+	}
+
+	// Sur les routes, les villages où elles mènent : à chaque sortie de place (premier secteur de la
+	// route) et à chaque coude. Toujours là, amélioration ou non : c'est ainsi qu'on voyage.
+	if (Layout->Type != ESectorType::Road || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	const uint8 Exits = ErewhonVillages::RoadSides(Layout->Coord);
+	const FVector2D Middle(ErewhonSector::Center(Layout->Coord));
+	const float HalfSector = UErewhonSettings::Get().SectorSize() * 0.5f;
+	const float Beside = ErewhonSpawn::PathWidth * 0.5f + 60.f;
+	const auto YawOf = [](int32 Side) { return FMath::RadiansToDegrees(FMath::Atan2(static_cast<float>(ErewhonSector::Sides[Side].Y), static_cast<float>(ErewhonSector::Sides[Side].X))); };
+	const auto PlantRoadSign = [&](const FVector2D& Foot2D, std::initializer_list<int32> Toward)
+	{
+		const FVector Foot(Foot2D, ErewhonTerrain::Height(Foot2D, Layout->WorldSeed));
+		TArray<ErewhonSigns::FArm> Arms;
+		for (const int32 Side : Toward)
+		{
+			FIntPoint Village;
+			if (ErewhonVillages::RoadDestination(Layout->Coord, Side, Village))
+			{
+				Arms.Add(ErewhonSigns::VillageArm(Village, Foot, YawOf(Side)));
+			}
+		}
+		ErewhonSigns::AddSignpost(this, Root, Foot - GetActorLocation(), Arms, false);
+	};
+	for (int32 Side = 0; Side < 4; ++Side)
+	{
+		if ((Exits & (1 << Side)) && ErewhonVillages::IsCenter(Layout->Coord + ErewhonSector::Sides[Side]))
+		{
+			// À la sortie de la place, sur la droite en la quittant : le village d'en face, puis celui-ci.
+			const int32 Leave = Side ^ 1;
+			const FVector2D Ahead(ErewhonSector::Sides[Leave]);
+			const FVector2D Right(-Ahead.Y, Ahead.X);
+			PlantRoadSign(Middle - Ahead * (HalfSector - 400.f) + Right * Beside, { Leave, Side });
+			return;
+		}
+	}
+	// Un coude : un bras le long de X, l'autre le long de Y. La route y décrit un arc : le panneau à
+	// l'intérieur, au milieu de l'arc, du côté du coin entre les deux bras.
+	const int32 AlongX = (Exits & 1) ? 0 : (Exits & 2) ? 1 : -1;
+	const int32 AlongY = (Exits & 4) ? 2 : (Exits & 8) ? 3 : -1;
+	if (AlongX >= 0 && AlongY >= 0)
+	{
+		const FVector2D Corner = FVector2D(ErewhonSector::Sides[AlongX]) + FVector2D(ErewhonSector::Sides[AlongY]);
+		TArray<FVector2D> RoadLine;
+		if (!ErewhonSpawn::RoadCenterline(Layout->Coord, RoadLine))
+		{
+			PlantRoadSign(Middle + Corner * Beside, { AlongX, AlongY });
+			return;
+		}
+		FVector2D Tangent;
+		const FVector2D Bend = ErewhonSpawn::ClosestOnLine(RoadLine, RoadLine[RoadLine.Num() / 2], &Tangent);
+		FVector2D Inside(-Tangent.Y, Tangent.X);
+		if (FVector2D::DotProduct(Inside, Corner) < 0.f)
+		{
+			Inside = -Inside;
+		}
+		PlantRoadSign(Bend + Inside * Beside, { AlongX, AlongY });
 	}
 }
 
@@ -515,18 +578,23 @@ void ASector::BuildGround(bool bVisual)
 	}
 
 	// Le sol mêle herbe et terre selon le masque du secteur : chemins, place et bords fondus d'un seul tenant.
+	// Les secteurs sans chemin gardent le même matériau (masque noir par défaut : que de l'herbe) :
+	// son herbe, rompue contre la répétition, se raccorde ainsi sans couture à celle des voisins.
 	UMaterialInterface* Blend = LoadGenerated<UMaterialInterface>(TEXT("Materials"), TEXT("M_GroundBlend"));
 	UTexture* GrassTexture = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_ground_grass"));
 	UTexture* DirtTexture = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_ground_dirt"));
-	if ((!Layout->Paths.IsEmpty() || !Layout->Clearings.IsEmpty()) && Blend && GrassTexture && DirtTexture)
+	if (Blend && GrassTexture && DirtTexture)
 	{
-		DirtMask = BuildDirtMask();
 		UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(Blend, Ground);
 		Material->SetTextureParameterValue(TEXT("Albedo"), GrassTexture);
 		Material->SetScalarParameterValue(TEXT("TileSize"), GroundTileSize);
 		Material->SetTextureParameterValue(TEXT("AlbedoDirt"), DirtTexture);
 		Material->SetScalarParameterValue(TEXT("DirtTileSize"), DirtTileSize);
-		Material->SetTextureParameterValue(TEXT("DirtMask"), DirtMask);
+		if (!Layout->Paths.IsEmpty() || !Layout->Curves.IsEmpty() || !Layout->Clearings.IsEmpty())
+		{
+			DirtMask = BuildDirtMask();
+			Material->SetTextureParameterValue(TEXT("DirtMask"), DirtMask);
+		}
 		if (UTexture* Cobbles = LoadGenerated<UTexture>(TEXT("Textures"), TEXT("T_cobbles")))
 		{
 			Material->SetTextureParameterValue(TEXT("AlbedoPaved"), Cobbles);

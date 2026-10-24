@@ -25,18 +25,21 @@ namespace ErewhonVillage
 	EREWHON_API const TArray<FUpgradeInfo>& Upgrades();
 	EREWHON_API const FUpgradeInfo& Info(EVillageUpgrade Upgrade);
 
-	/** Le secteur fait-il partie du village (dans le rayon de la carte du gérant) ? */
-	EREWHON_API bool IsInVillage(const FIntPoint& Sector);
+	/**
+	 * Le secteur fait-il partie d'un village (dans le rayon de la carte du gérant autour de sa place) ?
+	 * OutVillage reçoit le village le plus proche, qu'il en fasse partie ou non.
+	 */
+	EREWHON_API bool IsInVillage(const FIntPoint& Sector, FIntPoint* OutVillage = nullptr);
 
-	/** Places assises des bancs de la place (monde) : dessus du siège, regard vers la place. */
-	EREWHON_API const TArray<FTransform>& BenchSeats();
+	/** Places assises des bancs de la place d'un village (monde) : dessus du siège, regard vers la place. */
+	EREWHON_API TArray<FTransform> BenchSeats(const FIntPoint& Village);
 
 	/**
 	 * La fontaine de la place, au sud-est de son centre, son bec tourné vers l'allée du sud : son repère,
 	 * l'endroit où poser un tonneau pour le remplir (monde), et le débit (litres par seconde, à 1 C le litre).
 	 */
-	EREWHON_API FTransform FountainTransform();
-	EREWHON_API FVector FountainBarrelSpot();
+	EREWHON_API FTransform FountainTransform(const FIntPoint& Village);
+	EREWHON_API FVector FountainBarrelSpot(const FIntPoint& Village);
 	/** Un tonneau posé là (ou tout près) va sous le bec : c'est permis à tous, bien que la place soit publique. */
 	constexpr float FountainSnapRadius = 140.f;
 	constexpr float FountainLitersPerSecond = 5.f;
@@ -60,14 +63,17 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	/** Le village habillé, à régler avant BeginPlay (SpawnActorDeferred). */
+	FIntPoint Village = FIntPoint::ZeroValue;
+
 private:
 	void BuildSignposts(bool bTailor, bool bLanterns);
 	void BuildLanterns(bool bTailor, bool bSignposts);
 	void BuildDecoration();
 	void BuildMarket();
 
-	/** Rotation du modèle d'étal pour que son comptoir regarde le centre du marché. */
-	float StallMeshYaw = 90.f;
+	/** Rotation du modèle d'étal pour que son comptoir regarde le centre du marché (le modèle généré a son comptoir sur +X). */
+	float StallMeshYaw = 0.f;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Root;
@@ -83,6 +89,9 @@ public:
 	AFountain();
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
+
+	/** Le village de la fontaine, à régler avant BeginPlay (SpawnActorDeferred). */
+	FIntPoint Village = FIntPoint::ZeroValue;
 
 private:
 	UPROPERTY(VisibleAnywhere)
@@ -106,7 +115,7 @@ public:
 	virtual FText GetInteractionLabel() const override;
 	virtual void Interact(AErewhonPlayerController* Controller) override;
 
-	/** Index dans ErewhonVillage::BenchSeats(), à régler avant BeginPlay. */
+	/** Index dans ErewhonVillage::BenchSeats() de son village (celui où il est posé), à régler avant BeginPlay. */
 	int32 SeatIndex = INDEX_NONE;
 
 	/** Rotation du modèle généré pour que son assise regarde vers +X. */
